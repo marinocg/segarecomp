@@ -549,6 +549,7 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
   s->features.cram_bytes = 128U;
   s->features.vsram_bytes = 80U;
   s->features.visible_lines = 224U;
+  s->features.render = sega_mod_is_granted(&s->host, SEGA_MOD_CAP_OVERLAY_RGBA) ? config->render_api : NULL;
   s->host.platform_features = &s->features;
   s->host.platform_features_size = (uint32_t)sizeof(SegaGenesisFeatures);
   s->host.log = service_log;

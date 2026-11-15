@@ -80,13 +80,55 @@ struct OverlayLayerDecl {
   int index = 0;                     // 1..kOverlayLayersMax
   int anchor = 0, reference = 0, dx = 0, dy = 0, w = 0, h = 0, z = 0;
 };
+// SEG-140-T008 (ADR 0306): the per-frame virtual-sprite submission of one render callback (platform-neutral names; the Genesis adapter maps it onto GenesisVirtualSpriteSet, the one transport every authoring
+// route shares). Provenance 1 = game-state verified, 2 = mod authored; layer 0 behind_planes, 1 between, 2 above_all. Semantic validity (sizes, tile and palette ranges, positions, clips, the budget
+// and the verified-state gate) is the HOST's whole-set validation with its stable reasons: the script only supplies commands and its OWN pool, and never reads guest memory or VDP state.
+inline constexpr std::size_t kSpriteCommandsMax = 64, kSpriteCallsMax = 256;
+inline constexpr std::size_t kSpritePoolVramBytes = 65536, kSpritePoolCramBytes = 128;
+struct SpriteCommand {
+  int provenance = 2, layer = 0, w_cells = 1, h_cells = 1, palette = 0, h_flip = 0, v_flip = 0, tile = 0, x = 0, y = 0;
+  bool has_clip = false;
+  int clip_x = 0, clip_y = 0, clip_w = 0, clip_h = 0;
+};
+struct SpriteSubmission {
+  bool used = false;                      // some sega.sprite call ran in the callback
+  int budget_mode = 0;                    // 0 = limit (the original per-line budgets), 1 = extended
+  int space = 0;                          // SEG-140-T009: 0 = picture (draws inside the native picture only), 1 = presentation (may also draw into the presented widescreen columns; same origin)
+  std::uint32_t total = 0;                // sega.sprite.add calls, saturating at 255; `commands` keeps the first kSpriteCommandsMax (a larger total is the host's whole-set rejection, never a truncation)
+  std::uint32_t calls = 0;                // all sega.sprite calls (bounded by kSpriteCallsMax)
+  std::vector<SpriteCommand> commands;
+  std::vector<std::uint8_t> vram, cram;   // the authored pool in the VDP's own VRAM / CRAM layouts, allocated when first written (empty = all zero)
+};
 struct Output {
+  SpriteSubmission sprites;
   std::string scene;
   std::vector<OverlayLayerDecl> layers;                  // sega.scene: the scene the frame belongs to (a validated token, "" = none; SEG-139-T004)
   std::vector<std::string> log;
   std::vector<OverlayOp> overlay;
   std::vector<Note> notes;
 };
+
+// SEG-138-T011 (ADR 0305): the ONE implementation of the overlay request rules (validation, clamping, notes, budgets), shared by the Luau `sega.overlay.*` bindings and the native ABI 2 render API so a
+// native provider and a script that make the same calls stage identical output. `target` is the layer the following rect/text calls draw into (0 = the fixed HUD overlay).
+struct OverlayCall {
+  enum class Status { ok, range, budget } status = Status::ok;
+  std::string message;   // empty when ok
+};
+[[nodiscard]] OverlayCall overlay_declare_layer(Output &out, const OverlayLayerDecl &layer);   // index 1..4, anchor 0..8, reference 0..1, |dx|,|dy| <= 2048, 1 <= w,h <= 128, z 0..3, not declared twice
+[[nodiscard]] OverlayCall overlay_select_target(Output &out, int &target, std::int64_t index);   // 0 or a layer declared earlier in the callback
+[[nodiscard]] OverlayCall overlay_rect(Output &out, int target, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h, std::uint32_t rgba);
+[[nodiscard]] OverlayCall overlay_text(Output &out, int target, std::int64_t x, std::int64_t y, std::string_view text, std::uint32_t rgba);
+[[nodiscard]] OverlayCall overlay_scene(Output &out, std::string_view id);
+// The virtual-sprite calls of the same render callback (same result type): shared by the Luau `sega.sprite.*` bindings and any host-side recorder.
+[[nodiscard]] OverlayCall sprite_space(Output &out, std::string_view mode);                                    // "picture" (default) | "presentation"
+[[nodiscard]] OverlayCall sprite_budget(Output &out, std::string_view mode);                                  // "limit" | "extended"
+[[nodiscard]] OverlayCall sprite_tile(Output &out, std::int64_t index, std::string_view hex);                // 64 hex digits per 8x8 4bpp pattern, consecutive patterns from `index` (0..2047)
+[[nodiscard]] OverlayCall sprite_palette(Output &out, std::int64_t line, std::string_view hex);              // 4 hex digits per CRAM word (0BGR), at most 16 colours, palette line 0..3
+[[nodiscard]] OverlayCall sprite_add(Output &out, std::string_view provenance, std::string_view layer, std::int64_t x, std::int64_t y, std::int64_t w_cells, std::int64_t h_cells, std::int64_t tile,
+                                     std::int64_t palette, std::int64_t flags);                              // provenance "authored" | "verified"; layer "behind_planes" | "between" | "above_all"; flags bit 0 h-flip, bit 1 v-flip
+[[nodiscard]] OverlayCall sprite_clip(Output &out, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h);   // clip rectangle (picture pixels) of the most recently added sprite   // a token [a-z0-9_-], at most 32 characters
+// Printable ASCII only: control bytes and non-ASCII become '?'; `truncated` is set when `text` was longer than `limit`.
+[[nodiscard]] std::string printable_ascii(std::string_view text, std::size_t limit, bool &truncated);
 
 // The capabilities a VM grants (catalogue names). A binding whose capability is not here exists as a stub that faults with cause `capability`.
 struct HostConfig {
@@ -105,6 +147,8 @@ struct HostConfig {
 [[nodiscard]] std::vector<std::string> scheduled_capabilities();
 [[nodiscard]] std::optional<mod::Rejection> scheduled_support(const mod::Package &package);
 [[nodiscard]] HostConfig scheduled_host_config(const mod::Manifest &manifest);
+// SEG-138-T011 (ADR 0305): the same scheduled path for a NATIVE ABI 2 package (trust class native, `abi.native` 2, Genesis, native-c11 sources, no Luau, no hooks); same rejection classes.
+[[nodiscard]] std::optional<mod::Rejection> native_scheduled_support(const mod::Package &package);
 
 // ---- overlay rasterization (the fixed HUD overlay path) ----
 struct OverlayImage {

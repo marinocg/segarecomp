@@ -3,6 +3,7 @@
  * channel-scaling policy this file implements. */
 
 #include "vdp_render.h"
+#include "virtual_sprite.h" /* SEG-140-T008: constants only (host flags, statuses, reasons); the compositor itself is the adapter's */
 
 #include <stddef.h>
 #include <string.h>
@@ -1364,6 +1365,9 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   uint16_t compat_overlay_w = 0U, compat_overlay_h = 0U, compat_overlay_fx = 0U, compat_overlay_fy = 0U;
   uint32_t compat_layer_count = 0U, compat_layer_bad = 0U;
   GenesisCompatLayer compat_layers[GENESIS_COMPAT_LAYERS_MAX] = {{0}};
+  GenesisVirtualSpriteOutcome vsprite_outcome;   /* SEG-140-T008: filled only when a set was submitted */
+  int vsprite_submitted = 0;
+  memset(&vsprite_outcome, 0, sizeof vsprite_outcome);
   GenesisVdpCandidatePixel sprite_row[GENESIS_EXT_MAX_WIDTH]; /* Level 3: the row's sprite layer over columns -side .. width + side - 1 */
   if (out == NULL) return -1;
   if (vram == NULL || raster == NULL || native == NULL || target == NULL || target->pixels == NULL) {
@@ -1534,7 +1538,12 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         overlay.layer_capacity = GENESIS_COMPAT_LAYER_BYTES;
         memset(overlay.layer_rgba, 0, GENESIS_COMPAT_LAYER_BYTES);
       }
+      if (target->vsprite_set != NULL && (target->compat_components & GENESIS_COMPAT_SPRITES) != 0U && (target->compat_caps & GENESIS_CAP_OVERLAY_RGBA) != 0U) {
+        memset(target->vsprite_set, 0, sizeof *target->vsprite_set);   /* a set is one frame: nothing of frame N-1 is visible to frame N */
+        overlay.vsprites = target->vsprite_set;
+      }
       drew = target->compat->hud != NULL && target->compat->hud(target->compat_state, &overlay) != 0;
+      vsprite_submitted = drew && overlay.vsprites != NULL && overlay.vsprites->count > 0U;
       if (!drew || overlay.width == 0U || overlay.height == 0U || overlay.width > GENESIS_COMPAT_OVERLAY_MAX_W || overlay.height > GENESIS_COMPAT_OVERLAY_MAX_H) {
         overlay.width = 0U;
         overlay.height = 0U;
@@ -1557,6 +1566,17 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     compat_overlay_fx = overlay.fallback_x;
     compat_overlay_fy = overlay.fallback_y;
   }
+  /* SEG-140-T008: the virtual-sprite set the provider submitted for this frame goes through the adapter's compositor (the F14 compositor: validation as a whole, the VDP's own decoder and priority
+   * rules, the original budget accounting), now, while the frame's raster state and VRAM are valid. Zero commands: none of this runs. */
+  if (vsprite_submitted) {
+    const unsigned host_flags = (target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U && target->compat_ram_valid ? GENESIS_VSPRITE_HOST_STATE_VERIFIED : 0U;
+    if (target->vsprite_compose == NULL || target->vsprite_compose(target->vsprite_ctx, target->vsprite_set, host_flags, vram, raster, native, target->pixels, side, &vsprite_outcome) != 0) {
+      memset(&vsprite_outcome, 0, sizeof vsprite_outcome);
+      vsprite_outcome.status = (uint8_t)GENESIS_VSPRITE_STATUS_REJECTED;
+      vsprite_outcome.reason = (uint8_t)GENESIS_VSPRITE_REJ_ARGUMENTS;
+    }
+    vsprite_outcome.state_verified = host_flags != 0U ? 1U : 0U;
+  }
   memset(out, 0, sizeof(*out));
   out->status = flags == 0U ? GENESIS_EXT_AVAILABLE : GENESIS_EXT_PARTIAL;
   out->flags = flags;
@@ -1575,6 +1595,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   out->layer_count = (uint8_t)compat_layer_count;
   out->layer_bad = (uint8_t)compat_layer_bad;
   memcpy(out->layers, compat_layers, sizeof out->layers);
+  if (vsprite_submitted) out->vsprite = vsprite_outcome;
   out->native_w = (uint16_t)width;
   out->native_h = (uint16_t)height;
   out->side = (uint16_t)side;

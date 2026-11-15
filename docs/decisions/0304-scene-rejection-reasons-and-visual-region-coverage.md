@@ -4,6 +4,8 @@
 - Presentation only: nothing here reaches guest state, the native picture, VRAM or a save state.
 - Not in scope: attaching virtual sprites to the live viewer, a Luau/native authoring path for them, and drawing them in the widescreen side columns (all still missing, see Limitations), auto-repairing a scene, any title-specific logic.
 
+> **Update (F28):** the live viewer now sets the actor signal from the real compositor (a composed set that drew no pixel is only "validated") and the coverage report gained the bounded `virtual_sprites` block: see [ADR 0306](0306-virtual-sprite-authoring-transport-and-coverage.md) and [ADR 0307](0307-virtual-sprites-in-the-widescreen-side-columns.md). The Limitations below describe the state at F15.
+
 ## Decision 1: one reason vocabulary, per frame, never a coverage counter
 
 `SvRejectReason` (`sv_layout.h`, stable names in `sv_reject_reason_name`) says why a frame's contribution was not fully presented. A frame counts once for each reason that applies (not per component) in `reason_frames`, and the last frame's reason is `last_reason`; a clean frame sets it back to `none`. A reason never raises a coverage counter.

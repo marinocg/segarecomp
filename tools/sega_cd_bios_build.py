@@ -405,7 +405,7 @@ class Driver:
             sdl = find_sdl3()
             if sdl is None:
                 raise BuildFailure("sdl3_unavailable", "SDL3 headers/library not found (install SDL3 or set SDL3_PREFIX)")
-            sources = [SCD_VIEWER / "scd_viewer.c", SCD_VIEWER / "scd_viewer_state.c", GENESIS_VIEWER / "viewer.c", GENESIS_VIEWER / "viewer_sdl3.c"] + snapshot_units + [SV_DIR / "src" / n for n in SV_SOURCES]
+            sources = [SCD_VIEWER / "scd_viewer.c", SCD_VIEWER / "scd_viewer_state.c", GENESIS_VIEWER / "viewer.c", GENESIS_VIEWER / "viewer_sdl3.c", GENESIS_RUNTIME / "virtual_sprite.c"] + snapshot_units + [SV_DIR / "src" / n for n in SV_SOURCES]
             host = "sdl3"
         inc_flags = [f for d in includes for f in ("-I", str(d))] + sdl[0]
         with tempfile.TemporaryDirectory(dir=self.objects_dir) as tmp:

@@ -56,10 +56,10 @@ class ClassificationTest(unittest.TestCase):
         lim = d["limitations"]
         for key in ("virtual_sprite_compositor", "live_viewer_presents_virtual_sprites", "mod_can_author_virtual_sprites", "side_column_sprite_drawing"):
             self.assertIn(key, lim)
-        # F14 delivered a tested compositor only; the report must not say more until a consumer exists
-        self.assertEqual(lim["live_viewer_presents_virtual_sprites"], False)
-        self.assertEqual(lim["mod_can_author_virtual_sprites"], False)
-        self.assertEqual(lim["side_column_sprite_drawing"], False)
+        # F28 (SEG-140-T008, ADR 0306): the live viewer presents virtual sprites in the native picture and a mod can author them (proved by tests/mod_vsprite_viewer_test.py); the side columns draw them in the presentation space (ADR 0307)
+        self.assertEqual(lim["live_viewer_presents_virtual_sprites"], True)
+        self.assertEqual(lim["mod_can_author_virtual_sprites"], True)
+        self.assertEqual(lim["side_column_sprite_drawing"], True)
         self.assertTrue(lim["actor_coverage_claims_available"] == [] and isinstance(lim["actor_coverage_claims_available"], list))
 
     def test_every_class_has_a_row_for_every_aspect(self):

@@ -32,6 +32,14 @@
 #include "genesis_sound.h"         /* SEG-032-T008: the sound-carrying link set of `segarecomp build` */
 #endif
 
+#ifdef SEGARECOMP_MOD_VIEWER
+#include "genesis_snapshot.h"
+/* SEG-138-T010 (ADR 0305): a scheduled mod in the played program. mod_capture.cpp (compiled with -DSEGARECOMP_MOD_VIEWER) owns the ONE scheduler adapter shared with the headless capture. */
+int segarecomp_capture_mod_begin(GenesisRuntime *runtime);
+void segarecomp_capture_mod_end(GenesisRuntime *runtime);
+const GenesisSnapshotModState *segarecomp_scheduled_mod_snapshot(void);
+#endif
+
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                uint32_t dispatch_allowance);
 
@@ -289,6 +297,10 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   g_raster_capture.producer = perf_raster_producer; /* SEG-055: scanline-aware frames (SEG-125: the wrapper times the composition, then calls genesis_vdp_produce_frame_raster) */
   g_raster_capture.extension = genesis_sdl3_viewer_extension(sdl, &observer.sequence); /* SEG-118: Level 2 extended backgrounds (presentation only) */
   runtime->live_raster = &g_raster_capture;
+#ifdef SEGARECOMP_MOD_VIEWER
+  /* The scheduler attaches before the first guest instruction; a mod it refuses stops the program (a program never runs with part of its mod missing), exactly like the headless program. */
+  if (segarecomp_capture_mod_begin(runtime) != 0) exit(5);
+#endif
 #ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
   /* SEG-124 (ADR 0267): the build compiled the provider source of ONE verified package and linked it here; the capabilities it declared are a compile-time constant. A provider that
    * declines to run, has another ABI version or cannot be attached leaves the viewer generic: it never guesses. */
@@ -338,6 +350,9 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
 #ifdef SEGARECOMP_GENESIS_SOUND
     state_config.machine.z80 = genesis_sound_attach(runtime);
     state_config.machine.audio = genesis_sound_audio_mutable();
+#endif
+#ifdef SEGARECOMP_MOD_VIEWER
+    state_config.machine.mod = segarecomp_scheduled_mod_snapshot();   /* the mod's own state joins every save state and rewind entry (MODSTATE, ADR 0299) */
 #endif
     state_config.rewind_budget_bytes = GENESIS_REWIND_BUDGET_BYTES;
     state_config.rewind_interval_ms = GENESIS_REWIND_INTERVAL_MS;
@@ -390,9 +405,21 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
       else fprintf(stderr, "VIEWER_FINAL_FRAME {\"error\":true}\n");
       if (shot != NULL) SDL_DestroySurface(shot);
     }
+    {   /* SEG-138-T010: the guest's work RAM at the end of the session (64 KiB), so a test can compare the played program's guest state with the headless reference */
+      const char *ram = getenv("SEGARECOMP_VIEWER_FINAL_RAM");
+      if (ram != NULL && *ram != '\0') {
+        FILE *out = fopen(ram, "wb");
+        const int ok = out != NULL && fwrite(runtime->work_ram, 1U, sizeof runtime->work_ram, out) == sizeof runtime->work_ram;
+        if (out != NULL) fclose(out);
+        fprintf(stderr, "VIEWER_FINAL_RAM {\"bytes\":%u,\"ok\":%s}\n", (unsigned)sizeof runtime->work_ram, ok ? "true" : "false");
+      }
+    }
   }
 #endif
   runtime->live_frame_observer = NULL;
+#ifdef SEGARECOMP_MOD_VIEWER
+  segarecomp_capture_mod_end(runtime);
+#endif
   genesis_runtime_write_notes(runtime, g_raster_capture.render_rejections, g_raster_capture.vram_journal_overflows, stderr);
   runtime->live_raster = NULL;
 #ifdef SEGARECOMP_GENESIS_SOUND

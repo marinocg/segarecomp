@@ -56,3 +56,7 @@ No dynamic-library loader, JIT, interpreter, scripting VM, second VDP renderer, 
 
 The sample provider is compiled as strict C11 against the SDK header on every CI platform. The complete package-to-generated-native-executable build (`genesis_patch_provider_build_test`) currently runs on Linux only;
 the other platforms validate provider compilation, the launcher/package tests and release packaging. End-to-end portability of the package build is therefore not claimed for Windows and macOS.
+
+## Virtual sprites from an ABI 1 provider (SEG-140-T008/T009, ADR 0306 and 0307)
+
+A provider that declares `GENESIS_COMPAT_SPRITES` in `GenesisNativeCompat::components` (and holds `overlay.rgba`) receives a zeroed `GenesisCompatOverlay::vsprites` set in `hud()`: it fills `count`, the commands and, for `MOD_AUTHORED`, its own pattern/palette pool, sets `space` to `GENESIS_VSPRITE_SPACE_PRESENTATION` to draw in the widescreen side columns, and returns 1. The host validates the whole set and composes it with the VDP's own decoder and priority rules; a rejected set draws nothing. `GAME_STATE_VERIFIED` commands read the frame's own VRAM/CRAM and are accepted only for a provider that also holds `frame.work_ram` and only on a frame whose snapshot is exactly current. The types are in `segarecomp_genesis_vsprite.h`.

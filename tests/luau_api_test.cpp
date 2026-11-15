@@ -263,7 +263,16 @@ void test_overlay_validation() {
 void collect(Mod &m, std::vector<std::string> &names) {
   luau::Output out;
   check(render(m, 0, out).ok, "the enumeration script runs");
-  names = out.log;
+  names.clear();
+  for (const std::string &line : out.log) {   // several names share one log line (a callback may log at most 16 lines)
+    std::size_t from = 0;
+    while (from < line.size()) {
+      const std::size_t space = line.find(' ', from);
+      names.push_back(line.substr(from, space == std::string::npos ? std::string::npos : space - from));
+      if (space == std::string::npos) break;
+      from = space + 1;
+    }
+  }
 }
 
 // SEG-140-T004 (ADR 0303): positioned overlay layers declared from Luau.
@@ -323,6 +332,72 @@ void test_overlay_layers() {
   }
 }
 
+// SEG-140-T008 (ADR 0306): the typed virtual-sprite submission (sega.sprite.*) of one render callback.
+void test_sprite_api() {
+  const std::string solid(64, '1');
+  {   // a submission is staged exactly as written; the pool is the script's own bytes in the VDP's layouts
+    Mod m = start("function render()\n  sega.sprite.budget('extended')\n  sega.sprite.tile(3, '" + solid + "')\n  sega.sprite.palette(1, '0E0E00EE')\n"
+                  "  sega.sprite.add('authored', 'between', -4, 9, 2, 3, 3, 1, 3)\n  sega.sprite.clip(0, 1, 6, 7)\n  sega.sprite.add('verified', 'above_all', 1, 2, 1, 1, 7, 0, 0)\nend");
+    luau::Output out;
+    check(render(m, 0, out).ok, "a sprite submission runs");
+    const luau::SpriteSubmission &s = out.sprites;
+    check(s.used && s.budget_mode == 1 && s.total == 2 && s.commands.size() == 2, "the submission carries its budget mode and both commands");
+    check(s.commands[0].provenance == 2 && s.commands[0].layer == 1 && s.commands[0].x == -4 && s.commands[0].y == 9 && s.commands[0].w_cells == 2 && s.commands[0].h_cells == 3 && s.commands[0].tile == 3 &&
+              s.commands[0].palette == 1 && s.commands[0].h_flip == 1 && s.commands[0].v_flip == 1 && s.commands[0].has_clip && s.commands[0].clip_w == 6 && s.commands[0].clip_h == 7,
+          "the first command is exactly what the script wrote (flags decode to both flips, the clip belongs to it)");
+    check(s.commands[1].provenance == 1 && s.commands[1].layer == 2 && !s.commands[1].has_clip, "the second is a verified command without a clip");
+    check(s.vram.size() == luau::kSpritePoolVramBytes && s.vram[3 * 32] == 0x11 && s.vram[3 * 32 + 31] == 0x11 && s.vram[2 * 32] == 0, "the authored pool holds the written pattern and nothing else");
+    check(s.cram.size() == luau::kSpritePoolCramBytes && s.cram[32] == 0x0E && s.cram[33] == 0x0E && s.cram[34] == 0x00 && s.cram[35] == 0xEE, "palette line 1 holds the written CRAM words");
+  }
+  {   // SEG-140-T009: the coordinate space is staged with the submission (default picture)
+    Mod m = start("function render()\n  sega.sprite.space('presentation')\n  sega.sprite.add('authored', 'above_all', -10, 0, 1, 1, 1, 0, 0)\nend");
+    luau::Output out;
+    check(render(m, 0, out).ok && out.sprites.space == 1 && out.sprites.commands[0].x == -10, "sega.sprite.space('presentation') is part of the submission");
+    Mod d = start("function render() sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) end");
+    luau::Output other;
+    check(render(d, 0, other).ok && other.sprites.space == 0, "the default space is the picture");
+  }
+  {   // no submission, no allocation: the pool stays empty unless it is written
+    Mod m = start("function render() sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) end");
+    luau::Output out;
+    check(render(m, 0, out).ok && out.sprites.total == 1 && out.sprites.vram.empty() && out.sprites.cram.empty(), "a command without a pool allocates none");
+  }
+  {   // the count is the number of commands ADDED: a larger set is the host's whole-set rejection, never a silent truncation
+    Mod m = start("function render() for i = 1, 300 do sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) end end");
+    luau::Output out;
+    const luau::CallResult r = render(m, 0, out);
+    check(!r.ok && r.fault == luau::Fault::budget, "more sega.sprite calls than the per-callback limit fault with cause budget");
+  }
+  {
+    Mod m = start("function render() for i = 1, 70 do sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) end end");
+    luau::Output out;
+    check(render(m, 0, out).ok && out.sprites.total == 70 && out.sprites.commands.size() == luau::kSpriteCommandsMax, "70 commands are all counted while the transport keeps 64 (the host rejects the set as too many)");
+  }
+  {   // every malformed argument is a script error (range), never repaired; the callback's staged output is discarded
+    const std::string bad[] = {"sega.sprite.add('mine', 'above_all', 0, 0, 1, 1, 1, 0, 0)", "sega.sprite.add('authored', 'top', 0, 0, 1, 1, 1, 0, 0)", "sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 4)",
+                         "sega.sprite.add('authored', 'above_all', 40000, 0, 1, 1, 1, 0, 0)", "sega.sprite.add('authored', 'above_all', 0.5, 0, 1, 1, 1, 0, 0)", "sega.sprite.tile(2048, '" + solid + "')",
+                         "sega.sprite.tile(0, 'zz')", "sega.sprite.tile(0, '" + solid + "1')", "sega.sprite.tile(2047, '" + solid + solid + "')", "sega.sprite.palette(4, '0000')", "sega.sprite.palette(0, '000')",
+                         "sega.sprite.budget('unlimited')", "sega.sprite.space('side')", "sega.sprite.clip(0, 0, 1, 1)"};
+    for (const std::string &call : bad) {
+      Mod m = start(std::string("function render() sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) ") + call + " end");
+      luau::Output out;
+      const luau::CallResult r = render(m, 0, out);
+      const bool clip_without_error = call.find("sega.sprite.clip") == 0;   // a clip after a valid add is legal
+      check(clip_without_error ? r.ok : (!r.ok && r.fault == luau::Fault::range && out.sprites.total == 0), "a malformed call is refused: " + call);
+    }
+  }
+  {   // output only: the capability is overlay.rgba; a package without it cannot reach the API, and the API reads nothing
+    Mod m = start("function render() sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) end", {"host.log"});
+    luau::Output out;
+    const luau::CallResult r = render(m, 0, out);
+    check(!r.ok && r.fault == luau::Fault::capability, "sega.sprite without overlay.rgba is a capability fault");
+    bool reads = false;
+    for (const luau::ApiEntry &e : luau::api_entries())
+      if (e.name.rfind("sega.sprite.", 0) == 0) reads = reads || !e.returns.empty() || e.capability != "overlay.rgba";
+    check(!reads, "no sega.sprite function returns a value or needs another capability: it grants no access to guest or VDP data");
+  }
+}
+
 void test_api_list() {
   const std::string enumerate =
       "local names = {}\n"
@@ -332,7 +407,16 @@ void test_api_list() {
       "    if type(v) == 'table' then walk(path, v) else names[#names + 1] = path .. ':' .. type(v) end\n"
       "  end\n"
       "end\n"
-      "function render() walk('sega', sega) table.sort(names) for _, n in ipairs(names) do sega.log(n) end end\n";
+      "function render()\n"
+      "  walk('sega', sega)\n"
+      "  table.sort(names)\n"
+      "  local line = ''\n"
+      "  for _, n in ipairs(names) do\n"
+      "    if #line + #n + 1 > 200 then sega.log(line) line = '' end\n"
+      "    line = line == '' and n or line .. ' ' .. n\n"
+      "  end\n"
+      "  sega.log(line)\n"
+      "end\n";
   Mod m = start(enumerate);
   std::vector<std::string> runtime;
   collect(m, runtime);
@@ -669,6 +753,7 @@ void test_session() {
 
 int main() {
   test_overlay_layers();
+  test_sprite_api();
   test_capability_gating();
   test_binding_abuse();
   test_overlay_validation();

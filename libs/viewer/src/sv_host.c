@@ -1449,12 +1449,22 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
   }
   /* SEG-140-T005 (review): a rejected planner verdict refuses the whole extension presentation, so nothing the provider supplied (columns, HUD, virtual-sprite contribution) is shown or counted */
   const int geom_ok = h->geom_status == SV_GEOM_OK;
+  /* SEG-140-T008 (review): a picture-region virtual-sprite contribution rides on the extension surface's admission verdict too (ADR 0304 decision 3b). The verdict is the one above (geometry, size, pitch, identity);
+   * the only relaxation is Original, where nothing is asked for, the viewer always hands over its surface and a native-only presentation is the normal case: there the surface must still be structurally valid. */
+  int picture_admitted = 0;
+  if (ext != NULL && geom_ok && ext->status != SV_WS_UNAVAILABLE && ext->sequence == sequence) {
+    SvExtendedSurface structural = *ext;
+    structural.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;   /* the mode is judged separately below */
+    picture_admitted = sv_extended_surface_check(&structural, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK &&
+                       ((int)ext->mode <= (int)h->settings.video.widescreen || h->settings.video.widescreen == SV_WIDESCREEN_ORIGINAL);
+  }
   const int accepted = ext != NULL && geom_ok && (int)ext->mode <= (int)h->settings.video.widescreen && sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK;
   if (ext != NULL && ext->status != SV_WS_UNAVAILABLE && !offered) {
     /* SEG-140-T005: a surface for another frame is stale: it is never shown, never counted, and the reason is visible (no stale content may masquerade as current) */
     sv_cov_reject(&h->cov, SV_REJ_BIT(SV_REJ_UNVERIFIED_STATE));
     note_reason_transition(h);
   }
+  const uint8_t *pic = rgb;   /* the picture shown: the native one unless a credited virtual-sprite picture replaces it */
   if (offered) {
     /* SEG-139-T004: only what the host ACCEPTED counts as delivered (a surface the checks refuse, or one older than the requested level, delivers nothing). SEG-140-T005 adds the offered/accepted/presented
      * split and the reasons. ACTORS are credited only through an explicit virtual-sprite signal (sv_actor_signal): a set the compositor COMPOSED, with a verified snapshot when it reads the game's art. A
@@ -1463,20 +1473,39 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     const SvDisplayRatio req = requested_ratio(h);
     const SvExtCheck chk = (int)ext->mode <= (int)h->settings.video.widescreen ? sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) : SV_EXT_MODE;
     unsigned off = 0, acc = 0, why = 0, a_off = 0, a_acc = 0, a_why = 0;
+    const uint32_t vs_total = ext->actor_pixels_verified + ext->actor_pixels_authored;
+    int vs_picture = 0, vs_left = 0, vs_right = 0;
     if (ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) { off |= SV_COV_BIT(SV_COV_SCENERY); if (accepted) acc |= SV_COV_BIT(SV_COV_SCENERY); }
     if (ext->overlay_rgba != NULL) {
       off |= SV_COV_BIT(SV_COV_HUD);
       if (geom_ok && ext->overlay_w > 0 && ext->overlay_w <= SV_OVERLAY_MAX && ext->overlay_h > 0 && ext->overlay_h <= SV_OVERLAY_MAX) acc |= SV_COV_BIT(SV_COV_HUD);
     }
     sv_actor_signal(ext, &a_off, &a_acc, &a_why);
-    if (a_acc != 0u && !accepted) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }   /* a composed set rides on the surface: if the host refused that frame nothing was presented, so nothing is delivered */
+    if (a_acc != 0u && vs_total > 0u) {
+      /* SEG-140-T008: a set the real compositor drew. Its picture pixels are presented through the picture the host shows (they do not depend on the extension surface), its extension-column pixels only
+       * when the surface itself was accepted. Nothing is credited when no region that holds pixels was actually presented. */
+      const uint32_t left_px = ext->actor_left_verified + ext->actor_left_authored, right_px = ext->actor_right_verified + ext->actor_right_authored;
+      const uint32_t side_px = left_px + right_px;
+      const uint32_t pic_px = vs_total > side_px ? vs_total - side_px : 0u;
+      /* an extension column is credited only when it is really displayed: the surface accepted, and a side treatment that shows the supplied columns (Comfort and Borders replace them with a fill, so a sprite
+       * drawn there is discarded and counts for nothing) */
+      const int shown = accepted && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
+      vs_picture = pic_px > 0u && picture_admitted && ext->actor_picture != NULL;
+      vs_left = left_px > 0u && shown;
+      vs_right = right_px > 0u && shown;
+      if (!vs_picture && !vs_left && !vs_right) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }
+    } else if (a_acc != 0u && !accepted) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }   /* a composed set rides on the surface: if the host refused that frame nothing was presented, so nothing is delivered */
+    if (a_acc != 0u && vs_total == 0u) vs_picture = 1;   /* a surface that carries no pixel counts (the SEG-140-T005 fixtures): its credit is the picture's, with no pixels to add */
     off |= a_off; acc |= a_acc; why |= a_why;
     if (!accepted && ext->status != SV_WS_UNAVAILABLE && ext->side > 0 && ext->mode != SV_WIDESCREEN_ORIGINAL && h->settings.video.widescreen != SV_WIDESCREEN_ORIGINAL) {   /* only a requested extension can be refused: in Original nothing is asked for, the viewer always hands over its pixel buffer, and a HUD-only surface is the normal case */
       if ((int)ext->mode > (int)h->settings.video.widescreen) why |= SV_REJ_BIT(SV_REJ_UNSUPPORTED_MODE);
       else if (chk == SV_EXT_GEOMETRY || chk == SV_EXT_PITCH || chk == SV_EXT_SIZE) why |= SV_REJ_BIT(SV_REJ_INVALID_SURFACE);
     }
     if (h->geom_status != SV_GEOM_OK) why |= SV_REJ_BIT(SV_REJ_OVER_DECLARED);
-    if (!sv_cov_frame_ex(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, off, acc, why, ext->actor_reject)) {
+    const int in_range = sv_cov_frame_ex(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, off, acc, why, ext->actor_reject);
+    sv_cov_vsprite(&h->cov, ext, a_acc != 0u && in_range && vs_picture, a_acc != 0u && in_range && vs_left, a_acc != 0u && in_range && vs_right);
+    if (a_acc != 0u && in_range && vs_picture && ext->actor_picture != NULL) pic = ext->actor_picture;   /* only a CREDITED composed picture is shown; every refusal below presents the native picture */
+    if (!in_range) {
       /* outside the declared range: nothing the provider supplied may be shown (the surface mixes its own columns, which Raw would pass through untouched), so only the native
        * picture is presented, with a visible diagnostic once per entry. */
       char lo[24], hi[24], text[96];
@@ -1497,13 +1526,13 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
   if (ext != NULL) {
     if (accepted) {
       if (h->ext_accepted != UINT32_MAX) h->ext_accepted++;
-      return present_frame(h, rgb, w, hgt, pitch, ext, ext);
+      return present_frame(h, pic, w, hgt, pitch, ext, ext);
     }
     /* An UNAVAILABLE surface that was not even requested is the normal Original case; anything else offered and refused is a rejection. */
     if (ext->status != SV_WS_UNAVAILABLE && (ext->overlay_rgba == NULL || (int)ext->mode <= (int)h->settings.video.widescreen) && h->ext_rejected != UINT32_MAX) h->ext_rejected++;   /* a surface that only carries the HUD in Original is expected, not a refusal */
   }
   /* the extension is not shown (Original, a stale surface, a refusal): the overlay of a surface that is otherwise about THIS frame is still the HUD that replaces the game's own */
-  return present_frame(h, rgb, w, hgt, pitch, NULL, offered && geom_ok ? ext : NULL);
+  return present_frame(h, pic, w, hgt, pitch, NULL, offered && geom_ok ? ext : NULL);
 }
 
 void sv_host_overlay_diag(const SvHost *h, uint32_t *rejected, int *last_index, int *last_reason) {

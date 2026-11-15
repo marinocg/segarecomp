@@ -23,6 +23,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "segarecomp_genesis_vsprite.h" /* SEG-140-T008 (ADR 0306): the virtual-sprite set a provider may submit with its overlay (shared with the ABI 2 header) */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,9 +47,11 @@ extern "C" {
 #define GENESIS_COMPAT_OVERLAY_MAX_H 256U
 #define GENESIS_COMPAT_OVERLAY_BYTES (GENESIS_COMPAT_OVERLAY_MAX_W * GENESIS_COMPAT_OVERLAY_MAX_H * 4U)
 
-/* Component bits of one frame (derived from the granted capabilities): scenery.words -> SCENERY, overlay.rgba -> HUD. */
+/* Component bits of one frame (derived from the granted capabilities): scenery.words -> SCENERY, overlay.rgba -> HUD. SPRITES (SEG-140-T008) is declared by the provider in `GenesisNativeCompat::components`
+ * when it submits virtual sprites; it needs the overlay.rgba capability (virtual sprites are output only: they grant no read access) and is never inferred from the capabilities alone. */
 #define GENESIS_COMPAT_HUD 1U
 #define GENESIS_COMPAT_SCENERY 2U
+#define GENESIS_COMPAT_SPRITES 4U
 
 /* VDP plane selector for scroll queries and scenery words. */
 #define GENESIS_COMPAT_PLANE_A 0U
@@ -131,6 +135,10 @@ typedef struct GenesisCompatOverlay {
   size_t layer_capacity;
   uint32_t layer_count;                 /* written by the provider: 0..GENESIS_COMPAT_LAYERS_MAX */
   GenesisCompatLayer layers[GENESIS_COMPAT_LAYERS_MAX];
+  /* SEG-140-T008 (ADR 0306): appended, zero for a provider that does not use it. `vsprites` is a host-owned, zero-initialised GenesisVirtualSpriteSet for THIS frame (NULL = this host build or provider
+   * does not carry virtual sprites). The provider fills `count`, the commands and, for MOD_AUTHORED, the authored pool, and returns 1 from `hud`. The host validates the whole set against the frame
+   * (a rejected set draws nothing), composes it with the VDP's own decoder and priority rules and never keeps it: the set of frame N is gone before frame N+1. */
+  GenesisVirtualSpriteSet *vsprites;
 } GenesisCompatOverlay;
 
 typedef struct GenesisNativeCompat {

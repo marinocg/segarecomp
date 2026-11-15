@@ -713,6 +713,7 @@ class Builder {
       viewer_sources.push_back(rt / "platforms/sega-cd/viewer/scd_viewer_state.c");
       viewer_sources.push_back(rt / "platforms/genesis/runtime/genesis_snapshot.c");
       viewer_sources.push_back(rt / "platforms/genesis/viewer/viewer_sdl3.c");
+      viewer_sources.push_back(rt / "platforms/genesis/runtime/virtual_sprite.c");   // SEG-140-T008: the shared Genesis viewer adapter composes virtual sprites
       for (const char *n : kViewerFoundation) viewer_sources.push_back(rt / "libs/viewer/src" / n);
     }
     std::vector<fs::path> viewer_objects, rt_objects;

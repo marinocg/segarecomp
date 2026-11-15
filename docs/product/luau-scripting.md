@@ -26,9 +26,9 @@ Rules: integers only (a fraction, NaN, infinity or negative size is a `range` fa
 
 Declare every capability you use in `mod.toml` (`[capabilities] required = [...]`). `segarecomp mod check` rejects an undeclared use (`E_LUAU_CAPABILITY`), an unknown name (`E_LUAU_API`) and an argument error it can see statically (`E_LUAU_TYPE`) as `<file>:<line>: <message>`. The check follows direct `sega.a.b` access; the run-time gates also apply to aliases.
 
-## The scheduled (headless) path
+## The scheduled path (headless and played)
 
-Without `--sdl3-include`, `segarecomp build --luau-package` links the ONE mod scheduler instead of the HUD seam. That program runs every phase of the package (`reset`, `frame_begin`, `input`, `post_input`, `frame_end`, `render`), grants `host.log`, `overlay.rgba`, `memory.read/write.m68k.work_ram`, `input.read`, `input.intercept` and `state.mod`, bounds memory by the `[[memory]]` ranges the manifest declares for the exact image, and prints `MOD_LOADED` / `MOD_SUMMARY` lines (fault state, committed-write witness, HUD overlay hash). Hooks, native providers and `frame.work_ram` are refused (`E_LIVE_CAPABILITY`, `E_LIVE_ABI`). It is what `mod diff-run` and `mod test` observe.
+Without `--sdl3-include`, `segarecomp build --luau-package` links the ONE mod scheduler instead of the HUD seam; **a viewer build links the same scheduler (ADR 0305, F28) for any package that needs more than `host.log` and `overlay.rgba`** (phases, bounded work RAM, input, `state.mod`): the played program runs your gameplay mod, presents its HUD while the mod is healthy, and puts the mod's state in the viewer's save states and rewind. A package that needs only the HUD keeps the original ABI 1 HUD seam. That program runs every phase of the package (`reset`, `frame_begin`, `input`, `post_input`, `frame_end`, `render`), grants `host.log`, `overlay.rgba`, `memory.read/write.m68k.work_ram`, `input.read`, `input.intercept` and `state.mod`, bounds memory by the `[[memory]]` ranges the manifest declares for the exact image, and prints `MOD_LOADED` / `MOD_SUMMARY` lines (fault state, committed-write witness, HUD overlay hash). Hooks, native providers and `frame.work_ram` are refused (`E_LIVE_CAPABILITY`, `E_LIVE_ABI`). It is what `mod diff-run` and `mod test` observe.
 
 ## Faults
 
@@ -80,3 +80,18 @@ segarecomp mod session lib/mods/<package_identity>.segapatch --rom fixture.rom -
 | `approval-semantics` | `mod_luau_api_test` (data / Luau-only / native and mixed install classes) |
 
 Portability: the diagnostic session pipeline is integer-only and `mod_luau_api_test` asserts its pinned hash on every platform in the CI matrix (Linux, Windows, macOS). The generated-native program tests (`mod_luau_executable_test`, `launcher_mod_variant_test`) run on Linux only; building such a program on Windows and macOS is **not validated** by CI, and locally the work was run on Linux aarch64 only.
+
+## Virtual sprites (`sega.sprite.*`, ADR 0306 and 0307)
+
+With the `overlay.rgba` capability a `render` callback can submit this frame's **virtual sprites**: presentation-only sprite-shaped blocks drawn over the finished picture by the viewer. They are output only: the API reads nothing from the guest or the VDP, and the set lives for one frame.
+
+| Call | Meaning |
+| --- | --- |
+| `sega.sprite.space("picture" \| "presentation")` | `picture` (default): draw inside the native picture only. `presentation`: may also draw into the widescreen side columns the viewer really presents (same origin: x < 0 is left of the picture, x >= 320 right of it). |
+| `sega.sprite.budget("limit" \| "extended")` | the original per-line sprite budget (default) or an explicit extended budget; over-budget lines are reported either way. |
+| `sega.sprite.tile(index, patterns)` | your own pattern pool: 64 hex digits per 8x8 pattern (4 bits per pixel), consecutive from `index` (0-2047). |
+| `sega.sprite.palette(line, colours)` | your own palette line 0-3: 4 hex digits per colour (the VDP 0BGR word), at most 16. |
+| `sega.sprite.add(provenance, layer, x, y, w, h, tile, palette, flags)` | one sprite: `"authored"` (your pool) or `"verified"` (the game's art in the frame's VRAM; the host rejects the whole set unless it has a verified, exactly current snapshot, which a Luau mod never has); layer `"behind_planes"`, `"between"` or `"above_all"` against the native priority; 1-4 cells wide and high; flags bit 0 h-flip, bit 1 v-flip. |
+| `sega.sprite.clip(x, y, w, h)` | clips the sprite just added. |
+
+At most 64 sprites per frame. An invalid command, more than 64, an unverified `"verified"` command, or a `behind_planes`/`between` sprite that reaches a side column is rejected **as a whole** with a stable reason (`last_vsprite_reason` in the coverage report) and nothing is drawn. The viewer counts `actors` coverage only for sprites that really reached the presented frame; see [widescreen and patches](widescreen-and-patches.md).

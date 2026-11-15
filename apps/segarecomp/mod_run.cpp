@@ -194,9 +194,11 @@ struct Workspace {
 fs::path self_exe() { return segarecomp_cli::self_executable(); }
 
 // Builds one program. `package` empty = Vanilla (or the effective image of a data-only package, written as `image`).
-std::optional<Refusal> build_program(const RunOptions &o, const fs::path &image, const fs::path &out, const fs::path &package, const std::string &identity) {
+std::optional<Refusal> build_program(const RunOptions &o, const fs::path &image, const fs::path &out, const fs::path &package, const std::string &identity, bool native = false) {
   std::vector<std::string> argv{self_exe().string(), "build", "--rom", image.string(), "--output", out.string(), "--cc", o.cc, "--runtime-dir", (o.sdk / "genesis").string(), "--optimize", "0", "--runtime-optimize", "1"};
-  if (!package.empty()) { argv.push_back("--luau-package"); argv.push_back(package.string()); argv.push_back("--luau-identity"); argv.push_back(identity); }
+  if (!package.empty()) {   // a native ABI 2 package is passed with the identity it is run under (SEG-138-T011); a Luau-only package as before
+    argv.push_back(native ? "--native-package" : "--luau-package"); argv.push_back(package.string()); argv.push_back(native ? "--native-identity" : "--luau-identity"); argv.push_back(identity);
+  }
   std::error_code ec;
   fs::create_directories(out.parent_path(), ec);
   const fs::path log = out.parent_path() / (out.filename().string() + "-build.log");
@@ -396,7 +398,8 @@ struct Prepared {
   std::vector<std::uint8_t> original, effective;
   fs::path original_path, modded_input, package_path;
   std::string identity;
-  bool luau = false;
+  bool luau = false;     // a scheduled mod (Luau-only or native ABI 2): the program links the scheduler and reports MOD_SUMMARY
+  bool native = false;   // SEG-138-T011: the scheduled mod is a native ABI 2 provider
 };
 
 // Validates the common arguments and prepares the two build inputs (the original image; the package or the effective image).
@@ -408,8 +411,8 @@ std::optional<Refusal> prepare(const RunOptions &o, const Target &t, const fs::p
   p.original_path = o.rom;
   p.identity = t.package.identity;
   const std::string trust = mod::trust_class(t.package.manifest);
-  p.luau = trust == "luau";
-  if (trust == "native") return Refusal{"E_LIVE_ABI", "a native ABI 2 provider is not linked into a built program yet; diff-run and test accept data-only and Luau-only packages"};
+  p.luau = trust == "luau" || trust == "native";
+  p.native = trust == "native";
   std::error_code ec;
   fs::create_directories(work, ec);
   if (p.luau) {
@@ -494,7 +497,7 @@ int run_diff(const RunOptions &o) {
   modded_spec.expect_mod = p.luau;
   Observed vanilla, modded;
   if (const auto r = build_program(o, p.original_path, ws.dir / "vanilla", {}, {})) return refuse(*r);
-  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
+  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
   if (const auto r = run_program(ws.dir / "vanilla", spec, ws.dir / "vanilla-frames", vanilla)) return refuse({r->code, "vanilla: " + r->message});
   if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-frames", modded)) return refuse({r->code, "modded: " + r->message});
   const Divergence d = compare(vanilla, modded, o.aggregate, o.first);
@@ -638,7 +641,7 @@ int run_test(const RunOptions &o) {
   for (const Scenario &sc : scenarios)   // a checkpoint needs a scheduled mod (the MODSTATE round trip): refuse explicitly rather than let a scenario appear to pass
     if (sc.checkpoint != 0 && !p.luau && (o.scenario.empty() || o.scenario == sc.name))
       return refuse({"E_TEST_CHECKPOINT_UNSUPPORTED", "scenario \"" + sc.name + "\" requests a checkpoint, which needs a Luau mod linked into the program (this package is data-only)"});
-  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
+  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
 
   bool all = true;
   std::string results = "[";

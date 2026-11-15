@@ -1,6 +1,7 @@
 # ADR 0300: scheduled Luau mods in built programs, declared memory ranges, `mod diff-run` / `mod test`, and the synthetic gameplay example
 
 - Status: accepted (combined delivery F11: SEG-136-T007, SEG-138-T008, SEG-138-T009). Implements the "linking" half that [ADR 0297](0297-genesis-mod-phase-scheduler-and-work-ram-services.md) and [ADR 0299](0299-mod-state-in-save-states-replay-suite-and-platform-conformance.md) deferred to SEG-138-T009, and the Vanilla-versus-Modded workflow of SEG-136-T007.
+- **Update (F28, [ADR 0305](0305-live-scheduled-mods-and-native-abi2-providers-in-built-programs.md)):** the played SDL3 program and a native ABI 2 provider are now linked through the same scheduler; the "not in scope" and "Consequences" statements about them below are superseded. Function hooks and several mods remain out.
 - Not in scope: linking function hooks or a native ABI 2 provider into a built program (a `hook.function` or native package is still refused at build); the played (SDL3 viewer) program, which keeps the HUD-only ABI 1 seam of [ADR 0296](0296-luau-only-mod-executable-integration.md); several mods in one program (SEG-141); Master System and Sega CD.
 
 ## Decision 1: memory ranges are declared in the manifest, per revision

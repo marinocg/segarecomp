@@ -11,6 +11,7 @@
 #include "sv_perf.h"
 #include "sv_layout.h"
 #include "vdp_render.h"
+#include "virtual_sprite.h"
 
 struct GenesisSdl3Viewer {
   SvHost *host;            /* the shared viewer host (libs/viewer): window, input, settings, pause overlay, presenter */
@@ -43,6 +44,63 @@ static uint8_t g_compat_ram[GENESIS_COMPAT_RAM_BYTES];          /* SEG-124: work
 static uint8_t g_compat_overlay[GENESIS_COMPAT_OVERLAY_BYTES];  /* SEG-124: the provider's HUD overlay for the frame being presented */
 static uint8_t g_compat_layers[GENESIS_COMPAT_LAYER_BYTES];     /* SEG-140-T004: the provider's positioned overlay images for the frame being presented */
 static SvOverlayLayer g_layer_desc[GENESIS_COMPAT_LAYERS_MAX];
+/* SEG-140-T008 (ADR 0306): the virtual-sprite storage of the frame being produced: the provider's set, the auxiliary render the compositor needs and the composed picture. Static, one per process, reused every
+ * frame; nothing is allocated per frame, and the auxiliary render only runs for a frame whose provider submitted commands. */
+static GenesisVirtualSpriteSet g_vsprite_set;
+static GenesisVdpFrameAux g_vsprite_aux;
+static GenesisFrameArtifact g_vsprite_scratch;
+static uint8_t g_vsprite_rgb[GENESIS_FRAME_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT * 3U];   /* the composed native picture */
+static uint8_t g_vsprite_wide[GENESIS_EXT_SURFACE_BYTES];                               /* the composed extension surface (picture and presented columns), SEG-140-T009 */
+static uint8_t g_vsprite_wide_valid;                                                     /* the wide buffer holds THIS frame's composition (extension pixels were drawn) */
+
+/* SEG-140-T008 (ADR 0306): the adapter's compositor, called by the producer for a frame whose provider submitted at least one command, while the frame's raster state and VRAM are valid. It runs the VDP's
+ * own auxiliary render (identical artifact, plus per-pixel layer classes and per-row sprite demand) and the F14 compositor, and keeps the composed picture in a static buffer the presenter reads. */
+static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
+                                  const GenesisFrameArtifact *native, const uint8_t *surface, unsigned side, GenesisVirtualSpriteOutcome *out) {
+  GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
+  GenesisVirtualSpriteReport report;
+  GenesisVirtualSpriteSurface target;
+  const unsigned width = GENESIS_FRAME_ARTIFACT_WIDTH(native), height = GENESIS_FRAME_ARTIFACT_HEIGHT(native);
+  const SvSettings *settings = sv_host_settings(v->host);
+  unsigned visible = 0U;
+  g_vsprite_wide_valid = 0U;
+  if (width == 0U || width > GENESIS_FRAME_MAX_WIDTH || height == 0U || height > GENESIS_FRAME_MAX_HEIGHT) return -1;
+  if (surface != NULL && side > 0U && settings->video.widescreen != SV_WIDESCREEN_ORIGINAL) {   /* ADR 0307: only the columns the host will present for the CURRENT aspect are ever drawn */
+    const int vis = sv_geom_resolve_visible(&settings->video, (int)width, (int)height, (int)side);
+    visible = vis > 0 ? (unsigned)vis : 0U;
+  }
+  target.rgb = surface;
+  target.side = side;
+  target.visible = visible;
+  if (genesis_vdp_produce_frame_raster_aux(vram, raster, &g_vsprite_scratch, &g_vsprite_aux) != 0) return -1;
+  if (side > 0U && surface != NULL) {   /* the composition keeps the extension's layout; the native picture is its centre */
+    if (genesis_virtual_sprites_compose_wide(set, host_flags, vram, native, &g_vsprite_aux, &target, g_vsprite_wide, sizeof g_vsprite_wide, &report) != 0) return -1;
+    for (unsigned row = 0U; row < height; ++row) memcpy(&g_vsprite_rgb[(size_t)row * width * 3U], &g_vsprite_wide[((size_t)row * (width + 2U * side) + side) * 3U], (size_t)width * 3U);
+    g_vsprite_wide_valid = (uint8_t)(report.pixels_left_verified + report.pixels_left_authored + report.pixels_right_verified + report.pixels_right_authored > 0U);
+  } else if (genesis_virtual_sprites_compose(set, host_flags, vram, native, &g_vsprite_aux, g_vsprite_rgb, sizeof g_vsprite_rgb, &report) != 0) {
+    return -1;
+  }
+  out->space = set->space;
+  out->pixels_left_verified = report.pixels_left_verified;
+  out->pixels_left_authored = report.pixels_left_authored;
+  out->pixels_right_verified = report.pixels_right_verified;
+  out->pixels_right_authored = report.pixels_right_authored;
+  out->status = report.status;
+  out->reason = report.reason;
+  out->index = report.reject_index;
+  out->commands = report.commands;
+  out->pixels_verified = report.pixels_drawn_verified;
+  out->pixels_authored = report.pixels_drawn_authored;
+  out->rows_over_sprite_limit = report.rows_over_sprite_limit;
+  out->rows_over_cell_budget = report.rows_over_cell_budget;
+  out->rows_dropped = report.sprite_rows_dropped;
+  out->rows_truncated = report.sprite_rows_truncated;
+  if (report.status == (uint8_t)GENESIS_VSPRITE_STATUS_COMPOSED) {
+    const unsigned n = set->count < GENESIS_VSPRITE_MAX ? (unsigned)set->count : GENESIS_VSPRITE_MAX;
+    for (unsigned i = 0U; i < n; ++i) out->provenance = (uint8_t)(out->provenance | (set->sprites[i].provenance == (uint8_t)GENESIS_VSPRITE_GAME_STATE_VERIFIED ? 1U : 2U));
+  }
+  return 0;
+}
 
 /* The saved mode as the typed producer request (0 none, 1 Level 2, 2 Level 3); sampled once per host slice. */
 static uint8_t request_of_compat(SvWidescreenMode mode, unsigned compat_hud) {
@@ -98,7 +156,7 @@ static int sdl_closed(void *ctx) {
   if (v->ext_attached) { /* the requested mode is sampled here, between guest slices: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
     v->ext.request = request_of_compat(video->widescreen, v->compat_enabled & GENESIS_COMPAT_HUD);
-    if (v->ext.compat != NULL) v->ext.compat_components = video->widescreen == SV_WIDESCREEN_ORIGINAL ? (v->compat_enabled & GENESIS_COMPAT_HUD) : v->compat_enabled;   /* Original: the HUD only */
+    if (v->ext.compat != NULL) v->ext.compat_components = video->widescreen == SV_WIDESCREEN_ORIGINAL ? (v->compat_enabled & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES)) : v->compat_enabled;   /* Original: the HUD (and the virtual sprites drawn in the picture) only */
     v->plan_video = *video;
   }
   return v->sample.quit;
@@ -203,6 +261,25 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
             surface.overlay_fy = (int)r->overlay_fy;
             v->compat_stats.hud_frames += 1U;
           }
+          if (r->vsprite.status != 0U) {   /* SEG-140-T008: the compositor's own result for THIS frame, mapped verbatim; a set composed with no drawn pixel is only "validated" (it delivers nothing) */
+            const uint32_t drawn = r->vsprite.pixels_verified + r->vsprite.pixels_authored;
+            if (r->vsprite.status == (uint8_t)GENESIS_VSPRITE_STATUS_COMPOSED) {
+              surface.actor_stage = drawn > 0U ? (uint8_t)SV_ACT_COMPOSED : (uint8_t)SV_ACT_VALIDATED;
+              surface.actor_provenance = (r->vsprite.provenance & 1U) != 0U ? 1U : 2U;
+              surface.actor_state_verified = r->vsprite.state_verified;
+              surface.actor_pixels_verified = r->vsprite.pixels_verified;
+              surface.actor_pixels_authored = r->vsprite.pixels_authored;
+              surface.actor_left_verified = r->vsprite.pixels_left_verified;
+              surface.actor_left_authored = r->vsprite.pixels_left_authored;
+              surface.actor_right_verified = r->vsprite.pixels_right_verified;
+              surface.actor_right_authored = r->vsprite.pixels_right_authored;
+              if (drawn > 0U) surface.actor_picture = g_vsprite_rgb;
+              if (g_vsprite_wide_valid != 0U) surface.rgb24 = g_vsprite_wide;   /* the extension columns THIS frame will show carry the sprites (composed over the surface that is displayed) */
+            } else {
+              surface.actor_stage = (uint8_t)SV_ACT_REJECTED;
+              surface.actor_reject = r->vsprite.reason;
+            }
+          }
           if (r->layer_count > 0U) {   /* SEG-140-T004: the host validates each layer against the live geometry; this only maps the transport */
             for (unsigned i = 0U; i < r->layer_count && i < GENESIS_COMPAT_LAYERS_MAX; ++i) {
               const GenesisCompatLayer *l = &r->layers[i];
@@ -252,6 +329,9 @@ GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *v, const
   v->ext.plan = sdl_extension_plan;
   v->ext.plan_ctx = v;
   v->ext.pixels = g_extension_surface;
+  v->ext.vsprite_set = &g_vsprite_set;
+  v->ext.vsprite_compose = viewer_vsprite_compose;
+  v->ext.vsprite_ctx = v;
   v->ext.capacity = sizeof g_extension_surface;
   v->frame_sequence = frame_sequence;
   v->ext_attached = 1;
@@ -266,7 +346,8 @@ struct SvHost *genesis_sdl3_viewer_sv_host(GenesisSdl3Viewer *v) { return v != N
 
 int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameExtension *ext, const GenesisNativeCompat *compat, void *state, unsigned caps) {
   const unsigned known = GENESIS_CAP_FRAME_WORK_RAM | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_OVERLAY_RGBA;
-  const unsigned components = ((caps & GENESIS_CAP_SCENERY_WORDS) != 0U ? GENESIS_COMPAT_SCENERY : 0U) | ((caps & GENESIS_CAP_OVERLAY_RGBA) != 0U ? GENESIS_COMPAT_HUD : 0U);
+  const unsigned components = ((caps & GENESIS_CAP_SCENERY_WORDS) != 0U ? GENESIS_COMPAT_SCENERY : 0U) | ((caps & GENESIS_CAP_OVERLAY_RGBA) != 0U ? GENESIS_COMPAT_HUD : 0U) |
+                              ((caps & GENESIS_CAP_OVERLAY_RGBA) != 0U && compat != NULL && (compat->components & GENESIS_COMPAT_SPRITES) != 0U ? GENESIS_COMPAT_SPRITES : 0U);   /* virtual sprites: declared by the provider AND output-only under overlay.rgba */
   if (v == NULL || ext == NULL || compat == NULL || ext != &v->ext || compat->abi_version != GENESIS_NATIVE_COMPAT_ABI || compat->prepare == NULL || ((components & GENESIS_COMPAT_SCENERY) != 0U && compat->scenery_word == NULL) || (caps & ~known) != 0U ||
       components == 0U || (components & compat->components) == 0U)
     return -1;

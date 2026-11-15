@@ -36,6 +36,20 @@ declare sega: {
   },
   -- overlay.rgba (render): Names the scene this frame belongs to (a token [a-z0-9_-], at most 32 characters; the last call wins). The host uses it only to count what was delivered per scene against the package's declared geometry; it is a claim, never inferred, and grants nothing.
   scene: (id: string) -> (),
+  sprite: {
+    -- overlay.rgba (render): Adds one virtual sprite for this frame: provenance "authored" (your own pool) or "verified" (the game's art in the frame's VRAM/CRAM; the host rejects the whole set unless it established a verified, exactly current snapshot); layer "behind_planes", "between" or "above_all" against the native priority classes; x, y are the top-left picture pixel; 1-4 cells wide and high; flags bit 0 horizontal flip, bit 1 vertical flip. At most 64 per frame; a larger set, or any invalid command, is rejected as a whole with a stable reason and nothing is drawn.
+    add: (provenance: string, layer: string, x: number, y: number, width_cells: number, height_cells: number, tile: number, palette: number, flags: number) -> (),
+    -- overlay.rgba (render): Selects the original per-line sprite budget for this frame's virtual sprites ("limit", the default) or an explicit "extended" budget with no per-line limit; over-budget lines are still reported. Presentation only: the game's own sprites and the VDP status are never touched.
+    budget: (mode: string) -> (),
+    -- overlay.rgba (render): Clips the most recently added sprite to a rectangle of picture pixels.
+    clip: (x: number, y: number, width: number, height: number) -> (),
+    -- overlay.rgba (render): Writes your OWN palette line 0-3 for mod-authored sprites: 4 hexadecimal digits per colour (the VDP 0BGR word), at most 16 colours.
+    palette: (line: number, colours: string) -> (),
+    -- overlay.rgba (render): Selects the coordinate space of this frame's virtual sprites. Both have the same origin, the top-left pixel of the native picture. "picture" (the default) draws inside the native picture only; "presentation" may also draw into the widescreen columns the viewer actually presents for the current aspect and side style, at x < 0 (left) and x >= 320 (right). A pixel in a column that is not presented is never drawn or counted; a behind_planes or between sprite that reaches a column rejects the whole set (no native priority exists there).
+    space: (mode: string) -> (),
+    -- overlay.rgba (render): Writes your OWN pattern pool for mod-authored sprites: 64 hexadecimal digits per 8x8 pattern (4 bits per pixel, the VDP layout), consecutive patterns from `index` (0-2047). The pool is yours and one frame long; it never touches VRAM.
+    tile: (index: number, patterns: string) -> (),
+  },
 }
 
 -- Lifecycle callbacks: define any of these as a global function; the host calls them.

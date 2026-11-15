@@ -13,6 +13,9 @@ struct PhaseProvider::Impl {
   std::uint32_t mask = 0;
   std::uint64_t caps[2] = {0, 0};
   std::vector<OverlayOp> overlay;
+  std::vector<OverlayLayerDecl> layers;   // SEG-140-T004 layers and the scene claim of the last successful `render` (the viewer presents them through the existing compatibility seam)
+  std::string scene;
+  SpriteSubmission sprites;   // SEG-140-T008: the virtual-sprite submission of the last successful `render`
   FaultSink sink = nullptr;
 };
 
@@ -61,7 +64,7 @@ void phase_entry(void *state, const SegaModHost *host) {
   in.number = host->frame;
   in.services = &services;
   Output out;
-  if (host->phase == SEGA_MOD_PHASE_RENDER) impl->overlay.clear();
+  if (host->phase == SEGA_MOD_PHASE_RENDER) { impl->overlay.clear(); impl->layers.clear(); impl->scene.clear(); impl->sprites = SpriteSubmission{}; }
   const CallResult r = impl->vm->run_callback(map->callback, in, map->index, out);
   if (!r.ok) {
     if (impl->sink != nullptr) impl->sink(fault_name(r.fault));
@@ -69,7 +72,12 @@ void phase_entry(void *state, const SegaModHost *host) {
   }
   for (const std::string &line : out.log)
     if (host->log != nullptr) host->log(line.data(), static_cast<std::uint32_t>(line.size()));
-  if (host->phase == SEGA_MOD_PHASE_RENDER) impl->overlay = std::move(out.overlay);
+  if (host->phase == SEGA_MOD_PHASE_RENDER) {
+    impl->overlay = std::move(out.overlay);
+    impl->layers = std::move(out.layers);
+    impl->scene = std::move(out.scene);
+    impl->sprites = std::move(out.sprites);
+  }
 }
 
 // SEG-138-T006 (ADR 0299): the mod-state entries of the provider table. The state is the VM's one canonical serialized value (`save()` / `load(value)`); both entries return 0 on success.
@@ -131,6 +139,9 @@ void PhaseProvider::capabilities(std::uint64_t out[2]) const {
   out[1] = impl_->caps[1];
 }
 const std::vector<OverlayOp> &PhaseProvider::overlay() const { return impl_->overlay; }
+const std::vector<OverlayLayerDecl> &PhaseProvider::layers() const { return impl_->layers; }
+const std::string &PhaseProvider::scene() const { return impl_->scene; }
+const SpriteSubmission &PhaseProvider::sprites() const { return impl_->sprites; }
 bool PhaseProvider::nondeterministic() const { return impl_->vm != nullptr && impl_->vm->nondeterministic(); }
 Fault PhaseProvider::fault() const { return impl_->vm != nullptr ? impl_->vm->fault() : Fault::none; }
 
