@@ -63,6 +63,13 @@ extern const char segarecomp_mod_effective_sha256[];
 extern const unsigned long segarecomp_mod_state_schema;
 extern const unsigned long segarecomp_mod_range_count;
 extern const unsigned long segarecomp_mod_ranges[][4];   // space, offset, length, modes
+#if defined(SEGARECOMP_MOD_NATIVE) && defined(SEGARECOMP_MOD_HOOKS)
+// SEG-138-T012 (ADR 0308): the function hooks of the built program: the artifact's bindings (generated site id, the hook id the provider is called with), the hook phases it registers, and the generated site table.
+extern const unsigned long segarecomp_mod_hook_count, segarecomp_mod_hook_phases;
+struct segarecomp_mod_hook_binding { const char *id; unsigned long hook_id; };
+extern const segarecomp_mod_hook_binding segarecomp_mod_hooks[];
+const GenesisHookSiteInfo *genesis_generated_hook_sites(size_t *count);
+#endif
 }
 
 namespace {
@@ -84,6 +91,7 @@ struct Mod {
   std::unique_ptr<GenesisModScheduler> scheduler;
   GenesisSnapshotModState snapshot{};
   GenesisModRange ranges[GENESIS_MOD_RANGES_MAX]{};
+  GenesisModHookBinding bindings[GENESIS_MOD_HOOKS_MAX]{};   // SEG-138-T012: must outlive the scheduler
   std::string fault_text;
   bool attached = false;
   bool refused = false;
@@ -96,6 +104,7 @@ struct Mod {
   std::uint8_t last_overlay_digest[32]{};
   bool have_overlay = false;
   std::uint64_t overlay_ops = 0;
+  std::uint32_t checkpoint_depth = 0;   // SEG-138-T012: hook call frames in flight when the round trip was taken
 };
 
 Mod g;
@@ -229,6 +238,24 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
   c.required[0] = segarecomp_mod_caps_required[0]; c.required[1] = segarecomp_mod_caps_required[1];
   c.optional[0] = segarecomp_mod_caps_optional[0]; c.optional[1] = segarecomp_mod_caps_optional[1];
   c.render_api = &g_render_api;
+#ifdef SEGARECOMP_MOD_HOOKS
+  {   // SEG-138-T012: every binding must name a site of the generated table (the build checked the same; a program must never run with a binding that can never fire), and the hook phases are registered with it
+    std::size_t site_count = 0;
+    const GenesisHookSiteInfo *sites = genesis_generated_hook_sites(&site_count);
+    if (segarecomp_mod_hook_count > GENESIS_MOD_HOOKS_MAX) { g.refused = true; g.refusal = "E_HOOK_BINDING"; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_HOOK_BINDING\"}\n"); return 1; }
+    for (unsigned long i = 0; i < segarecomp_mod_hook_count; ++i) {
+      bool found = false;
+      for (std::size_t site = 0; site < site_count; ++site) found = found || std::strcmp(sites[site].id, segarecomp_mod_hooks[i].id) == 0;
+      if (!found) { g.refused = true; g.refusal = "E_HOOK_BINDING"; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_HOOK_BINDING\"}\n"); return 1; }
+      g.bindings[i] = GenesisModHookBinding{segarecomp_mod_hooks[i].id, static_cast<std::uint32_t>(segarecomp_mod_hooks[i].hook_id)};
+    }
+    c.hooks = g.bindings;
+    c.hook_count = static_cast<std::uint32_t>(segarecomp_mod_hook_count);
+    c.sites = sites;
+    c.site_count = static_cast<std::uint32_t>(site_count);
+    c.phase_mask |= static_cast<std::uint32_t>(segarecomp_mod_hook_phases);
+  }
+#endif
 #else
   const std::span<const std::uint8_t> stored(segarecomp_luau_artifact, static_cast<std::size_t>(segarecomp_luau_artifact_size));
   const luau::CompileResult loaded = luau::load_stored(segarecomp_luau_identity, stored, segarecomp_luau_bytecode_digest);
@@ -292,7 +319,9 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
     g.loaded_digest = hex(bytes.data() + bytes.size() - 32U, 32U);
   }
 #endif
-#ifdef SEGARECOMP_MOD_NATIVE
+#if defined(SEGARECOMP_MOD_NATIVE) && defined(SEGARECOMP_MOD_HOOKS)
+  std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"kind\":\"native\",\"package_identity\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu,\"hooks\":%lu}\n", MOD_ID, MOD_IDENTITY, MOD_CAPABILITIES, segarecomp_mod_range_count, segarecomp_mod_hook_count);
+#elif defined(SEGARECOMP_MOD_NATIVE)
   std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"kind\":\"native\",\"package_identity\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", MOD_ID, MOD_IDENTITY, MOD_CAPABILITIES, segarecomp_mod_range_count);
 #else
   std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"package_identity\":\"%s\",\"bytecode_digest\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", MOD_ID, MOD_IDENTITY,
@@ -365,6 +394,7 @@ const GenesisNativeCompat *segarecomp_patch_provider(void **state_out) {
 void segarecomp_capture_mod_checkpoint(GenesisRuntime *runtime) {
   if (!g.attached || !g.checkpoint_wanted || g.checkpoint_done || runtime->virtual_frame_count < g.checkpoint_frame) return;
   g.checkpoint_done = true;
+  if (runtime->function_hooks != nullptr) g.checkpoint_depth = runtime->function_hooks->depth;
   GenesisSnapshotMachine machine{};
   machine.runtime = runtime;
   machine.mod = &g.snapshot;
@@ -399,9 +429,18 @@ void segarecomp_capture_mod_end(GenesisRuntime *runtime) {
   const RenderView view = render_view();
   const luau::OverlayImage image = luau::rasterize_overlay(*view.ops);
   const std::string overlay_hex = view.ops->empty() ? std::string() : (sha256_hex(std::span<const std::uint8_t>(image.rgba.data(), image.rgba.size())));
+  std::string hooks_json;
+#if defined(SEGARECOMP_MOD_NATIVE) && defined(SEGARECOMP_MOD_HOOKS)   // SEG-138-T012: the hook counters (callbacks delivered by phase, and the loud non-altering skips: abandoned, unproven caller, frame stack full); only a hooked program reports them
+  {
+    char text[240];
+    std::snprintf(text, sizeof text, ",\"hooks\":{\"entry\":%llu,\"exit\":%llu,\"abandoned\":%llu,\"unproven\":%llu,\"overflowed\":%llu,\"checkpoint_depth\":%u}", static_cast<unsigned long long>(s.hook_calls[0]), static_cast<unsigned long long>(s.hook_calls[1]),
+                  static_cast<unsigned long long>(s.hook_skips[1]), static_cast<unsigned long long>(s.hook_skips[2]), static_cast<unsigned long long>(s.hook_skips[3]), static_cast<unsigned>(g.checkpoint_depth));
+    hooks_json = text;
+  }
+#endif
   std::fprintf(stderr,
                "MOD_SUMMARY {\"mod\":\"%s\",\"faulted\":%s,\"fault\":\"%s\",\"callbacks\":%llu,\"committed_writes\":%llu,\"write_digest\":\"%s\",\"overlay_ops\":%llu,\"overlay_sha256\":\"%s\","
-               "\"nondeterministic\":%s,\"roundtrip\":{\"requested\":%s,\"frame\":%llu,\"status\":\"%s\",\"state_sha256\":\"%s\"},\"loaded_state_sha256\":\"%s\"}\n",
+               "\"nondeterministic\":%s,\"roundtrip\":{\"requested\":%s,\"frame\":%llu,\"status\":\"%s\",\"state_sha256\":\"%s\"},\"loaded_state_sha256\":\"%s\"%s}\n",
                MOD_ID, s.fault.faulted != 0U ? "true" : "false", s.fault.faulted != 0U ? json_escaped(s.fault.text).c_str() : "", static_cast<unsigned long long>(s.callbacks_run),
                static_cast<unsigned long long>(s.write_total), hex(digest, 32).c_str(), static_cast<unsigned long long>(view.ops->size()), overlay_hex.c_str(),
 #ifdef SEGARECOMP_MOD_NATIVE
@@ -410,7 +449,7 @@ void segarecomp_capture_mod_end(GenesisRuntime *runtime) {
                g.provider->nondeterministic() ? "true" : "false",
 #endif
                g.checkpoint_wanted ? "true" : "false", static_cast<unsigned long long>(g.checkpoint_frame),
-               g.checkpoint_wanted ? (g.checkpoint_done ? g.checkpoint_status.c_str() : "not_reached") : "none", g.checkpoint_digest.c_str(), g.loaded_digest.c_str());
+               g.checkpoint_wanted ? (g.checkpoint_done ? g.checkpoint_status.c_str() : "not_reached") : "none", g.checkpoint_digest.c_str(), g.loaded_digest.c_str(), hooks_json.c_str());
   genesis_mod_scheduler_detach(&s);
 }
 

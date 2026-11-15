@@ -6688,7 +6688,12 @@ std::string emit_m68k_function_hook_wrapper(const M68kFunctionHookPlan &plan, co
       << "static GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n"
       << "  GenesisControlTransfer hooked = {0};\n"
       << "  if (genesis_function_hook_step(runtime, genesis_hook_sites, sizeof genesis_hook_sites / sizeof genesis_hook_sites[0], genesis_hook_continuations, &hooked) != 0) return hooked;\n"
-      << "  return genesis_dispatch_unhooked(runtime);\n}\n\n";
+      << "  return genesis_dispatch_unhooked(runtime);\n}\n\n"
+      // SEG-138-T012: the one exported view of the const site table; the scheduled-mod seam of the built program reads it to cross-check its bindings and to save/restore call frames by site index.
+      << "const GenesisHookSiteInfo *genesis_generated_hook_sites(size_t *count);\n"
+      << "const GenesisHookSiteInfo *genesis_generated_hook_sites(size_t *count) {\n"
+      << "  *count = sizeof genesis_hook_sites / sizeof genesis_hook_sites[0];\n"
+      << "  return genesis_hook_sites;\n}\n\n";
   return out.str();
 }
 

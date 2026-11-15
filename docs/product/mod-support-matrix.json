@@ -332,13 +332,18 @@
   {
    "platform": "genesis",
    "capability": "function-hooks",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "spike-gated",
    "evidence": [
-    "docs/architecture/mod-execution-phases.md"
+    "docs/architecture/mod-execution-phases.md",
+    "docs/decisions/0308-function-hooks-in-built-genesis-programs.md"
    ],
-   "existing_tests": [],
-   "planned_owner": "SEG-138-T004",
+   "existing_tests": [
+    "tests/mod_hooks_build_test.py",
+    "tests/mod_hooks_test.py",
+    "tests/genesis_mod_hook_scheduler_test.py"
+   ],
+   "planned_owner": "SEG-138-T012",
    "gate": "SEG-138-T003"
   },
   {

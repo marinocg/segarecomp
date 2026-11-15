@@ -2348,6 +2348,11 @@ add_test(NAME mod_sources_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOU
 add_test(NAME mod_audio_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_audio_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_workflow_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_workflow_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
 add_test(NAME mod_hooks_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_hooks_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
+# SEG-138-T012 (ADR 0308): statically resolved function hooks in BUILT headless (and, with the SDL3 viewer, played) Genesis programs: no-op equivalence, replace/decline, in-flight save/restore, every E_HOOK_* class from the CLI build.
+add_test(NAME mod_hooks_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_hooks_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+set_property(TEST mod_hooks_build_test APPEND PROPERTY LABELS full)   # several generated-native builds: CI full tier and --focus, not the local fast preset
+set_property(TEST mod_hooks_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST mod_hooks_build_test PROPERTY TIMEOUT 1500)
 add_test(NAME mod_edits_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_edits_test.py $<TARGET_FILE:segarecomp>)
 # SEG-136-T003..T006 (ADR 0292/0293, delivery F05): bounded guest assembly/injection, collisions, header repair, deterministic BPS; the injected routine is then run through the generated-native path.
 add_test(NAME mod_guest_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_guest_test.py $<TARGET_FILE:segarecomp>)

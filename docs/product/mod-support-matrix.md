@@ -49,7 +49,7 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Memory access | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/genesis_native_compat_viewer_sdl_test.c`, `tests/mod_viewer_gameplay_test.py`, `tests/mod_native_viewer_test.py` |
 | Memory access | Master System | unsupported | supported-with-limitations | planned: SEG-147-T004 |
 | Memory access | Sega CD | unsupported | experimental | planned: SEG-148-T005 |
-| Function hooks | Genesis / Mega Drive | unsupported | spike-gated (SEG-138-T003) | planned: SEG-138-T004 |
+| Function hooks | Genesis / Mega Drive | supported-with-limitations | spike-gated (SEG-138-T003) | `tests/mod_hooks_build_test.py`, `tests/mod_hooks_test.py`, `tests/genesis_mod_hook_scheduler_test.py` |
 | Function hooks | Master System | unsupported | spike-gated (SEG-147-T003) | planned: SEG-147-T008 |
 | Function hooks | Sega CD | unsupported | spike-gated (SEG-148-T004) | planned: SEG-148-T008 |
 | Asset authoring | Genesis / Mega Drive | experimental | supported-and-tested | `tests/mod_sources_test.py`, `tests/mod_audio_test.py` |
