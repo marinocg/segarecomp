@@ -21,7 +21,7 @@ static uint64_t cap_bit(unsigned id) { return UINT64_C(1) << (id % 64U); }
 void genesis_mod_scheduler_supported(uint64_t out[2]) {
   out[0] = cap_bit(SEGA_MOD_CAP_HOST_LOG) | cap_bit(SEGA_MOD_CAP_FRAME_WORK_RAM) | cap_bit(SEGA_MOD_CAP_MEMORY_READ) | cap_bit(SEGA_MOD_CAP_MEMORY_WRITE) | cap_bit(SEGA_MOD_CAP_INPUT_READ) |
            cap_bit(SEGA_MOD_CAP_INPUT_INTERCEPT) | cap_bit(SEGA_MOD_CAP_HOOK_FUNCTION) | cap_bit(SEGA_MOD_CAP_STATE_MOD) |
-           cap_bit(SEGA_MOD_CAP_OVERLAY_RGBA); /* presentation output of `render`: collected by the provider adapter and presented by the host, not a scheduler service */
+           cap_bit(SEGA_MOD_CAP_SCENERY_WORDS) | cap_bit(SEGA_MOD_CAP_OVERLAY_RGBA); /* scenery.words (SEG-140-T011) is output of the same kind: */ /* presentation output of `render`: collected by the provider adapter and presented by the host, not a scheduler service */
   out[1] = 0;
 }
 
@@ -549,7 +549,7 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
   s->features.cram_bytes = 128U;
   s->features.vsram_bytes = 80U;
   s->features.visible_lines = 224U;
-  s->features.render = sega_mod_is_granted(&s->host, SEGA_MOD_CAP_OVERLAY_RGBA) ? config->render_api : NULL;
+  s->features.render = sega_mod_is_granted(&s->host, SEGA_MOD_CAP_OVERLAY_RGBA) || sega_mod_is_granted(&s->host, SEGA_MOD_CAP_SCENERY_WORDS) ? config->render_api : NULL;   /* SEG-140-T011: scenery.words is render output too */
   s->host.platform_features = &s->features;
   s->host.platform_features_size = (uint32_t)sizeof(SegaGenesisFeatures);
   s->host.log = service_log;

@@ -68,7 +68,7 @@ std::optional<mod::Rejection> scheduled_support(const mod::Package &package) {
   const std::vector<std::string> live = scheduled_capabilities();
   for (const std::string &c : m.capabilities)
     if (std::find(live.begin(), live.end(), c) == live.end())
-      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod)"};
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, scenery.words, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod)"};
   return std::nullopt;
 }
 
@@ -98,6 +98,7 @@ std::optional<mod::Rejection> native_scheduled_support(const mod::Package &packa
 std::vector<std::string> native_scheduled_capabilities() {
   std::vector<std::string> caps = scheduled_capabilities();
   caps.push_back("hook.function");
+  caps.push_back("scenery.words");   // SEG-140-T011: authored offscreen scenery through the typed render feature
   return caps;
 }
 

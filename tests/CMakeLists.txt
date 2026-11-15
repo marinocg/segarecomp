@@ -1515,6 +1515,12 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_f28_integration_test APPEND PROPERTY LABELS full)   # multi-minute generated-native viewer test: CI full tier and --focus, not the local fast preset
   set_property(TEST mod_f28_integration_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_f28_integration_test PROPERTY TIMEOUT 1500)
+  # SEG-140-T011 (ADR 0309, delivery F29): authored offscreen scenery from a native ABI 2 provider (typed scenery_window) at 16:9, 21:9 and 32:9, against an independently constructed golden; containment and stale-window negatives.
+  add_test(NAME mod_scenery_abi2_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_scenery_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_scenery_abi2_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_scenery_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_scenery_abi2_test PROPERTY TIMEOUT 1500)
   add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
   set_property(TEST genesis_viewer_extension_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST genesis_viewer_extension_sdl_test PROPERTY TIMEOUT 240)
