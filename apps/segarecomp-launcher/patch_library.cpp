@@ -44,8 +44,8 @@ PatchPreview verify_mod(const LibraryEntry &entry, const segarecomp::mod::Packag
     return out;
   }
   out.fits_game = true;
-  if (out.mod_trust == "data") { out.error = refusal_for("a data-only mod has nothing to run in a played program; the launcher plays Luau and native mods"); return out; }
-  const std::optional<segarecomp::mod::Rejection> unsupported = out.mod_trust == "native" ? segarecomp::luau::native_scheduled_support(mp) : (segarecomp::luau::live_support(mp) ? segarecomp::luau::scheduled_support(mp) : std::nullopt);
+  if (m.platform != "genesis") { out.error = refusal_for("mods are played for Genesis games only"); return out; }
+  const std::optional<segarecomp::mod::Rejection> unsupported = out.mod_trust == "data" ? std::nullopt : out.mod_trust == "native" ? segarecomp::luau::native_scheduled_support(mp) : (segarecomp::luau::live_support(mp) ? segarecomp::luau::scheduled_support(mp) : std::nullopt);
   if (unsupported) { out.error = refusal_for(unsupported->message); return out; }
   std::vector<std::uint8_t> rom;
   std::string error;

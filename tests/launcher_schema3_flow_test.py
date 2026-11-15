@@ -52,7 +52,32 @@ def main():
             assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
             return out
 
-        packages = [package("native", rom), package("wrong", other)]
+        data_project = tmp / "data"
+        (data_project / "edits").mkdir(parents=True)
+        # a data-only mod: ONE typed ROM edit (the fixture's palette colour 1, green -> blue); no provider, no scripts
+        (data_project / "edits/main.edits").write_text("fixture u16 0x00000244 0x00e0 0x0e00\n")
+        (data_project / "mod.toml").write_text(f'''[mod]
+id = "fixture-data-edit"
+author = "segarecomp tests"
+version = "0.1.0"
+name = "Fixture data edit"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "{hashlib.sha256(rom.read_bytes()).hexdigest()}"
+
+[[source]]
+kind = "rom-edit-set"
+path = "edits/main.edits"
+''')
+        data_pkg = tmp / "data.segapatch"
+        r = subprocess.run([str(cli), "mod", "pack", str(data_project), "--out", str(data_pkg)], text=True, capture_output=True, timeout=300)
+        assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
+        packages = [package("native", rom), package("wrong", other), data_pkg]
         env = dict(os.environ, LD_LIBRARY_PATH=str(sdl / "lib") + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""), SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
         r = subprocess.run([test_exe, str(install), str(rom), str(other), *map(str, packages)], text=True, capture_output=True, env=env, timeout=1500)
         sys.stdout.write(r.stdout)

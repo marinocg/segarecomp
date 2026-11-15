@@ -80,6 +80,11 @@ def main():
         check(r.returncode == 0 and json.loads(r.stdout).get("ok") and json.loads(r.stdout)["trust_class"] == "native", f"mod check passes: {r.stdout[:300]}")
         pkg, ident = pack(d)
         wrong, _ = pack(project("wrong", image_sha=sha(other.read_bytes())))
+        data_dir = tmp / "data-src"   # a data-only mod of the same image for the launcher flow: ONE typed edit (palette colour 1, green -> blue)
+        (data_dir / "edits").mkdir(parents=True)
+        (data_dir / "edits/main.edits").write_text("fixture u16 0x%08x 0x00e0 0x0e00\n" % (image.find(b"\x32\xbc\x00\xe0") + 2))
+        (data_dir / "mod.toml").write_text('[mod]\nid = "fixture-data-edit"\nauthor = "segarecomp tests"\nversion = "0.1.0"\nname = "Fixture data edit"\nlicense = "CC0-1.0"\n\n[target]\nplatform = "genesis"\n\n[[target.revision]]\nlabel = "fixture"\nsha256 = "%s"\n\n[[source]]\nkind = "rom-edit-set"\npath = "edits/main.edits"\n' % image_sha)
+        data_pkg, _ = pack(data_dir)
 
         # ---- 2. the launcher flow (install, exact-ROM check, approval, select, build, reverify, uninstall) on the real build driver; its programs play ----
         install = tmp / "install"
@@ -96,7 +101,7 @@ def main():
         zig.chmod(0o755)
         report = tmp / "flow.report"
         env = h.env(SEGARECOMP_S3_REPORT=str(report))
-        r = subprocess.run([flow, str(install), str(rom), str(other), str(pkg), str(wrong)], text=True, capture_output=True, env=env, timeout=1500)
+        r = subprocess.run([flow, str(install), str(rom), str(other), str(pkg), str(wrong), str(data_pkg)], text=True, capture_output=True, env=env, timeout=1500)
         check(r.returncode == 0 and "launcher_schema3_flow_test: ok" in r.stdout, f"the launcher flow passes (install, approval, select, build, tamper/identity refusals, uninstall): {r.stdout[-300:]}{r.stderr[-800:]}")
         if h.failures:
             return 1

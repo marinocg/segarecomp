@@ -280,7 +280,7 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
       if (ip.schema3) {
         ip.mod_trust = p.str("mod_trust");
         ip.effective_sha256 = p.str("effective_sha256");
-        if ((ip.mod_trust != "luau" && ip.mod_trust != "native") || !is_hex_digest(ip.effective_sha256, 64)) continue;   // a damaged mod record is dropped, never degraded into a patch
+        if ((ip.mod_trust != "luau" && ip.mod_trust != "native" && ip.mod_trust != "data") || !is_hex_digest(ip.effective_sha256, 64)) continue;   // a damaged mod record is dropped, never degraded into a patch
       }
       if (!ip.native_source_sha256.empty() || p.get("native_abi") != nullptr) {   // a damaged native record is dropped with the patch: a native package never degrades into a BPS-only one
         ip.native_abi = static_cast<unsigned>(std::clamp(p.num("native_abi"), 0LL, 1000LL));
@@ -676,8 +676,9 @@ RomView view_for_variant(const LibraryEntry &entry, const std::string &identity)
     view.luau_package = patch_package_path(p->identity);
     view.luau_effective_sha256 = p->effective_sha256;
     view.luau_native = p->mod_trust == "native";
+    view.luau_data = p->mod_trust == "data";
     view.luau_approved = !view.luau_native || p->native_approved;
-    view.luau_pin = view.luau_native ? std::string("native-abi") + std::to_string(p->native_abi) : std::string(segarecomp::luau::compiler_pin());
+    view.luau_pin = view.luau_native ? std::string("native-abi") + std::to_string(p->native_abi) : view.luau_data ? std::string("data") : std::string(segarecomp::luau::compiler_pin());
     view.luau_label = p->name + (p->version.empty() ? std::string() : " " + p->version);
   } else if (const InstalledPatch *p = entry.find_patch(identity); p != nullptr && entry.platform_id == "genesis") {
     view.patch_identity = p->identity;

@@ -193,6 +193,31 @@ def main():
         envs = p.lines(p.env_log)
         expect(len(envs) == 2 and f"library={sha(src)}" in envs[0] and "library=-" in envs[1], f"the mod runs under its own per-game profile and Vanilla under the shared one: {envs}")
 
+        # 6b. a DATA-ONLY mod: installs without a code approval; its verified effective image is built as a distinct variant (`--data-package`), never as a provider/script route
+        data_project = tmp / "data"
+        (data_project / "edits").mkdir(parents=True)
+        (data_project / "edits/main.edits").write_text("fixture u16 0x00001000 0x%02x%02x 0x1234\n" % (src[0x1000], src[0x1001]))
+        (data_project / "mod.toml").write_text('[mod]\nid = "synthetic-data-edit"\nauthor = "segarecomp tests"\nversion = "0.1.0"\nname = "Synthetic data edit"\nlicense = "CC0-1.0"\n\n[target]\nplatform = "genesis"\n\n[[target.revision]]\nlabel = "fixture"\nsha256 = "%s"\n\n[[source]]\nkind = "rom-edit-set"\npath = "edits/main.edits"\n' % sha(src))
+        data_pkg = tmp / "data.segapatch"
+        r = subprocess.run([real_cli, "mod", "pack", str(data_project), "--out", str(data_pkg)], text=True, capture_output=True, timeout=300)
+        assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
+        data_ident = manifest_identity(data_pkg)
+        trace = p.run(OPEN + [f"patch_pick {data_pkg}", "frames 12", "expect modal=1", "patch_confirm", "frames 20", "expect modal=0", "expect patches=2",
+                              "variant patched=1", "frames 10", "expect status=Not built", "expect can_play=0", "build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "quit"])
+        check("data-only mod", trace)
+        dargs = p.lines(p.args_log)[-1].split()
+        expect("--data-package" in dargs and dargs[dargs.index("--data-identity") + 1] == data_ident and "--native-package" not in dargs and "--luau-package" not in dargs, f"the build was asked for the data route with the exact identity: {dargs}")
+        ddir = next(x for x in p.builds() if x not in (vdir, mdir))
+        dmeta = json.loads((ddir / "metadata.json").read_text())
+        expect(dmeta.get("mod_kind") == "data" and dmeta.get("luau_identity") == data_ident and ddir != mdir, f"the data variant has its own entry and record: {dmeta}")
+        # (the fake build driver does not apply edits; that the real driver compiles the verified EFFECTIVE image is proven by launcher_schema3_flow_test)
+        expect((vdir / ("game" + EXE_SUFFIX)).read_bytes() == vexe and (vdir / "metadata.json").read_text() == vmeta, "Vanilla stays untouched by the data variant")
+        trace = p.run(OPEN + ["variant patched=1", "frames 10", "play", "frames 20", "wait_play_end", "frames 6", "expect variant=patched", "quit"])
+        check("data-only play", trace)
+        expect(str(ddir) in p.lines(p.game_log)[-1], "the data-only variant starts from its own folder")
+        trace = p.run(OPEN + ["frames 6", "patch_remove 1", "frames 10", "patch_confirm", "frames 20", "expect patches=1", "quit"])
+        check("remove data-only", trace)
+
         # 7. an unapproved record never runs and never builds (the approval is the user's, per identity); restoring it plays again
         catalog = p.lib / "library.json"
         original_catalog = catalog.read_text()

@@ -50,11 +50,11 @@ BuildOutcome build(const RomView &rom, const Layout &layout, std::string *messag
 }  // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 6) {
-    std::cerr << "usage: launcher_schema3_flow_test <install-root> <rom> <other-rom> <native.segapatch> <wrong-rom.segapatch>\n";
+  if (argc < 7) {
+    std::cerr << "usage: launcher_schema3_flow_test <install-root> <rom> <other-rom> <native.segapatch> <wrong-rom.segapatch> <data.segapatch>\n";
     return 2;
   }
-  const fs::path root = argv[1], rom_path = argv[2], other_path = argv[3], native = argv[4], wrong = argv[5];
+  const fs::path root = argv[1], rom_path = argv[2], other_path = argv[3], native = argv[4], wrong = argv[5], data = argv[6];
   const fs::path cache = root.parent_path() / "cache", library = root.parent_path() / "library";
   fs::create_directories(cache);
   fs::create_directories(library);
@@ -141,6 +141,36 @@ int main(int argc, char **argv) {
   if (const char *report = std::getenv("SEGARECOMP_S3_REPORT"); report != nullptr && *report != '\0') {   // the integrated acceptance test plays the programs this flow built
     std::ofstream out(report, std::ios::trunc);
     out << "vanilla=" << entry_executable(vanilla_entry).string() << "\nmod=" << entry_executable(mod_entry).string() << "\nidentity=" << installed.identity << "\n";
+  }
+
+  // ---- a DATA-ONLY schema 3 mod: its verified effective image is compiled as a distinct variant (no provider, no approval) ----
+  {
+    PatchInstall d = install_patch(*entry, data, rom_path, library, 1004, false);
+    expect(d.ok && d.added && entry->patches.size() == 2, "a data-only package installs without any code approval: " + d.error);
+    const LibraryEntry *c = entry;
+    const InstalledPatch *rec = c->find_patch(d.identity);
+    expect(rec != nullptr && rec->schema3 && rec->mod_trust == "data" && !rec->has_native() && rec->effective_sha256 != vanilla.sha256, "the record is a data mod whose effective image differs from the original");
+    entry->selected_variant = d.identity;
+    const RomView dv = view_from_entry(*entry);
+    const fs::path data_entry = entry_dir(dv, layout);
+    expect(dv.luau_mod() && dv.luau_data && !dv.luau_native && !dv.patched() && dv.effective_sha256() == rec->effective_sha256 && verify_installed_mod(dv).empty(), "selecting it yields a data variant bound to the package and its effective image");
+    expect(data_entry != vanilla_entry && data_entry != mod_entry && genesis_save_dir(dv) != vanilla_saves && genesis_save_dir(dv) != genesis_save_dir(mod), "its cache entry and saves are its own");
+    expect(build(dv, layout, &message) == BuildOutcome::succeeded && entry_ready_for(data_entry, dv, layout), "the data variant builds: " + message);
+    const std::string dmeta = slurp(data_entry / "metadata.json");
+    expect(dmeta.find("\"mod_kind\":\"data\"") != std::string::npos && dmeta.find(d.identity) != std::string::npos && digest_of(entry_executable(data_entry)) != vanilla_game, "the record names the package; the program is not Vanilla's");
+    expect(!entry_ready_for(data_entry, vanilla, layout) && !entry_ready_for(data_entry, mod, layout) && !entry_ready_for(vanilla_entry, dv, layout), "a data program is never another variant's, nor the reverse");
+    RomView wrong_kind = dv;
+    wrong_kind.luau_native = true;
+    expect(!verify_installed_mod(wrong_kind).empty(), "the wrong kind fails the reverification");
+    const fs::path stored_data = library / "patches" / (d.identity + ".segapatch");
+    const std::string good = slurp(stored_data);
+    std::string bad = good;
+    bad[bad.size() / 2] = static_cast<char>(bad[bad.size() / 2] ^ 0x55);
+    { std::ofstream out(stored_data, std::ios::binary | std::ios::trunc); out << bad; }
+    expect(!verify_installed_mod(dv).empty() && build(dv, layout, &message) != BuildOutcome::succeeded, "a tampered data package never builds");
+    { std::ofstream out(stored_data, std::ios::binary | std::ios::trunc); out << good; }
+    expect(remove_patch(*entry, d.identity, library) && digest_of(entry_executable(vanilla_entry)) == vanilla_game, "removing it leaves Vanilla untouched");
+    entry->selected_variant = installed.identity;
   }
 
   // ---- tampered installed bytes are refused at build time ----

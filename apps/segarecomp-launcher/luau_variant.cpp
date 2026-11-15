@@ -38,7 +38,7 @@ std::string verify_installed_mod(const RomView &rom) {
   if (!p.ok) return "The installed mod package is not valid any more: " + p.rejection.message + ".";
   if (p.identity != rom.luau_identity) return "The installed mod package is not the one selected (its identity changed).";
   const std::string trust = segarecomp::mod::trust_class(p.manifest);
-  if (rom.luau_native != (trust == "native")) return "The installed mod package is not of the kind that was selected.";
+  if (rom.luau_data != (trust == "data") || rom.luau_native != (trust == "native")) return "The installed mod package is not of the kind that was selected.";
   if (rom.luau_native && !rom.luau_approved) return "This mod contains executable code and has not been approved. Install the package again and approve it.";
   std::ifstream in(rom.path, std::ios::binary);
   const std::vector<std::uint8_t> original((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

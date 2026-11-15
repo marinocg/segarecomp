@@ -99,6 +99,7 @@ struct RomView {
   std::string luau_label;                      // "<name> <version>" (UI and logs only)
   // SEG-143-T008: the same single-mod slot also holds a NATIVE ABI 2 package (`luau_native`; `luau_pin` then names the ABI). Native code runs only with the user's approval of this exact identity.
   bool luau_native = false, luau_approved = true;
+  bool luau_data = false;   // a schema 3 DATA-ONLY package: its verified effective image is compiled as a distinct variant (`--data-package`); nothing executes from the package
   [[nodiscard]] bool luau_mod() const { return !luau_identity.empty(); }
   // The identity of the selected variant of the original game: a schema 1/2 patch or a schema 3 mod ("" = Vanilla). Recorded on the build so no build can pass for another variant.
   [[nodiscard]] const std::string &variant_id() const { return patched() ? patch_identity : luau_identity; }

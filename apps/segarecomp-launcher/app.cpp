@@ -782,6 +782,7 @@ bool App::start_build(const std::string &id, bool restart_after) {
     view.luau_package = variant.luau_package;
     view.luau_effective_sha256 = variant.luau_effective_sha256;
     view.luau_native = variant.luau_native;
+    view.luau_data = variant.luau_data;
     view.luau_approved = variant.luau_approved;
     view.luau_pin = variant.luau_pin;
     view.luau_label = variant.luau_label;

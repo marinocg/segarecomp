@@ -120,3 +120,7 @@ Genesis is the supported adapter. Master System and Sega CD register `host.log` 
 ## Linking a native ABI 2 package into a program (SEG-138-T011, ADR 0305)
 
 `segarecomp build --rom <original image> --output <dir> --native-package <pkg.segapatch> --native-identity <approved package identity> ...` compiles the package's `native-c11` units with the host-owned flags, links them with the one mod scheduler into the headless program, or into the played program with `--sdl3-include/--sdl3-lib`, and refuses a package that is not the approved identity (`NATIVE_IDENTITY_CHANGED`), another image (`NATIVE_IMAGE_MISMATCH`) or one outside the scheduled support set (`E_LIVE_*`). `mod test` and `mod diff-run` accept a native project. Native code is host code; approval of the exact identity is the boundary.
+
+## Data-only packages in a built program (SEG-143-T008)
+
+`segarecomp build --data-package <package.segapatch> --data-identity <64-hex>` verifies a schema 3 **data-only** package (trust class `data`, Genesis), checks that its identity is the selected one, derives the effective image from the exact original (bps image, typed edits, guest code) and compiles THAT as a distinct generated-native variant. No provider, script or scheduler is linked; it is mutually exclusive with `--luau-package`, `--native-package` and `--patch-package`. Luau packages use `--luau-package` and native ABI 2 packages `--native-package`, each with the identity the user approved.

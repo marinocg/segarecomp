@@ -138,6 +138,8 @@ struct Options {
   // SEG-137-T007 (ADR 0296): a verified single-mod schema 3 LUAU-ONLY package linked into the played program. `--rom` stays the ORIGINAL image: the build derives the package's effective image itself
   // (typed edits / injected guest code / BPS), compiles THAT, compiles the scripts with the pinned trusted compiler in the bounded child and links the verified result into the program as a constant.
   fs::path luau_package;
+  fs::path data_package;   // SEG-143-T008: a schema 3 DATA-ONLY package: the build compiles its verified effective image as a distinct variant (no provider, no scripts)
+  std::string data_identity;
   std::string luau_identity;
   // SEG-138-T011 (ADR 0305): a verified single-mod schema 3 NATIVE ABI 2 package (trust class native) linked into the program: its `native-c11` units are compiled by the host with the SDK-only strict C11 flags
   // and driven by the same scheduler. `--native-identity` is the exact identity the user approved; a package whose identity differs is refused (`NATIVE_IDENTITY_CHANGED`). Native code is host code: approval is the boundary.
@@ -262,6 +264,8 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
     else if (key == "--test-frame-seam" && value == "1") options.frame_seam = true;
     else if (key == "--test-hook-binding") options.test_hook_binding = value;
+    else if (key == "--data-package") { if (!options.data_package.empty()) return std::nullopt; options.data_package = fs::path(value); }
+    else if (key == "--data-identity") { if (!options.data_identity.empty()) return std::nullopt; options.data_identity = value; }
     else if (key == "--luau-package") { if (!options.luau_package.empty()) return std::nullopt; options.luau_package = fs::path(value); }
     else if (key == "--luau-identity") { if (!options.luau_identity.empty()) return std::nullopt; options.luau_identity = value; }
     else if (key == "--native-package") { if (!options.native_package.empty()) return std::nullopt; options.native_package = fs::path(value); }
@@ -281,6 +285,11 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (!options.patch_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
     if (!hex64(options.patch_identity) || options.platform == "master-system" || !options.sdl3_include.has_value()) return std::nullopt;   // a presentation provider needs the Genesis viewer build
+  }
+  if (options.data_package.empty() != options.data_identity.empty()) return std::nullopt;   // a package reference and its identity travel together
+  if (!options.data_package.empty()) {
+    const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
+    if (!hex64(options.data_identity) || !options.luau_package.empty() || !options.native_package.empty() || !options.patch_package.empty() || options.platform == "master-system") return std::nullopt;   // one mod, Genesis
   }
   if (options.luau_package.empty() != options.luau_identity.empty()) return std::nullopt;   // a package reference and its identity travel together
   if (!options.luau_package.empty()) {
@@ -1727,7 +1736,7 @@ int run_build(Options options) {
   Log log;
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
   // The effective image is derivative game data: removed when the build ends (and a stale one of a killed attempt is removed at the start). Only the file this build writes is removed, then the folder if empty.
-  struct InputCleanup { fs::path file; ~InputCleanup() { if (file.empty()) return; std::error_code e; fs::remove(file, e); fs::remove(file.parent_path(), e); } } input_cleanup{options.luau_package.empty() && options.native_package.empty() ? fs::path() : options.output / "input" / "effective.rom"};
+  struct InputCleanup { fs::path file; ~InputCleanup() { if (file.empty()) return; std::error_code e; fs::remove(file, e); fs::remove(file.parent_path(), e); } } input_cleanup{options.luau_package.empty() && options.native_package.empty() && options.data_package.empty() ? fs::path() : options.output / "input" / "effective.rom"};
   if (!input_cleanup.file.empty()) { std::error_code stale; fs::remove(input_cleanup.file, stale); }
   if (options.admission_plan) {
     std::ifstream in(*options.admission_plan, std::ios::binary);
@@ -1844,6 +1853,25 @@ int run_build(Options options) {
       if (input_ec || !image_out) return fail(options, log, original_sha, "analyze", 1, "The effective image could not be written.", "NATIVE_ARTIFACT_WRITE");
       options.rom = input / "effective.rom";
       log.line("native mod: package=" + options.native_identity + " original_sha256=" + original_sha + " effective_sha256=" + effective.effective_sha256 + " capabilities=" + options.luau_capabilities);
+    }
+    if (!options.data_package.empty()) {   // SEG-143-T008: a schema 3 data-only package: verify it, derive the effective image and compile THAT as the variant (no provider, no scripts, no scheduler)
+      const auto original = segarecomp::read_binary(options.rom);
+      const std::string original_sha = segarecomp::sha256_hex(original);
+      const auto package = segarecomp::mod::read_package_file(options.data_package);
+      if (!package.ok) return fail(options, log, original_sha, "analyze", 1, "The mod package is not valid: " + package.rejection.message, "DATA_PACKAGE_INVALID");
+      if (package.identity != options.data_identity) return fail(options, log, original_sha, "analyze", 1, "The mod package changed after it was selected.", "DATA_IDENTITY_CHANGED");
+      if (segarecomp::mod::trust_class(package.manifest) != "data" || package.manifest.platform != "genesis") return fail(options, log, original_sha, "analyze", 1, "Only a Genesis data-only package builds through this route.", "DATA_TRUST");
+      const auto effective = segarecomp::mod::effective_image(package, original);
+      if (!effective.ok) return fail(options, log, original_sha, "analyze", 1, "The image is not the one the package declares: " + effective.rejection.message, "DATA_IMAGE_MISMATCH");
+      const fs::path input = options.output / "input";
+      std::error_code input_ec;
+      fs::create_directories(input, input_ec);
+      std::ofstream image_out(input / "effective.rom", std::ios::binary | std::ios::trunc);
+      image_out.write(reinterpret_cast<const char *>(effective.image.data()), static_cast<std::streamsize>(effective.image.size()));
+      image_out.close();
+      if (input_ec || !image_out) return fail(options, log, original_sha, "analyze", 1, "The effective image could not be written.", "DATA_ARTIFACT_WRITE");
+      options.rom = input / "effective.rom";
+      log.line("data mod: package=" + options.data_identity + " original_sha256=" + original_sha + " effective_sha256=" + effective.effective_sha256);
     }
     if (!options.luau_package.empty()) {   // SEG-137-T007: verify the package, derive its effective image, compile its scripts; `--rom` is replaced by the effective image for the rest of the build
       const auto original = segarecomp::read_binary(options.rom);
