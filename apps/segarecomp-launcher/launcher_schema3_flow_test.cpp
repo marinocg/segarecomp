@@ -208,6 +208,29 @@ int main(int argc, char **argv) {
     entry->selected_variant = installed.identity;
   }
 
+  // ---- an oversized original image is refused BEFORE anything is read or allocated at its declared size (sparse file, far above the product's maximum image size) ----
+  {
+    const fs::path huge = root.parent_path() / "huge.rom";
+    {
+      std::ofstream make(huge, std::ios::binary | std::ios::trunc);
+      make << "x";
+    }
+    std::error_code resize_ec;
+    fs::resize_file(huge, std::uintmax_t{64} << 20U, resize_ec);   // 64 MiB declared, mostly a hole
+    expect(!resize_ec, "the oversized fixture file can be declared");
+    RomView oversized = mod;
+    oversized.path = huge;
+    expect(!verify_installed_mod(oversized).empty(), "verify_installed_mod refuses an oversized original image");
+    RomView sel = vanilla;
+    sel.path = huge;
+    expect(!select_luau_mod(sel, native).empty() && !sel.luau_mod(), "select_luau_mod refuses an oversized original image");
+    RomView missing = mod;
+    missing.path = root.parent_path() / "missing.rom";
+    expect(!verify_installed_mod(missing).empty(), "a missing original image is refused");
+    std::error_code rm;
+    fs::remove(huge, rm);
+  }
+
   // ---- tampered installed bytes are refused at build time ----
   {
     const std::string original = slurp(stored);

@@ -53,9 +53,9 @@ void App::patch_chosen(const std::string &id, const std::string &path) {
       caps.clear();
       for (const std::string &name : preview.info.requires_capabilities) caps += (caps.empty() ? "" : ", ") + name;
     }
-    modal_.lines.push_back("WARNING: this patch contains executable C source code by " + preview.info.author + (preview.info.license.empty() ? std::string() : " (" + preview.info.license + ")") +
-                           ". Segarecomp will compile it into the separate Patched program and it runs with that program's full permissions. It is NOT sandboxed. Install it only if you trust its source.");
-    modal_.lines.push_back("Source SHA-256 " + short_hash(preview.info.native_sha256) + ". Package identity " + short_hash(preview.info.identity) + ". Reads: " + caps + ". Native patch ABI " + std::to_string(preview.info.native_abi) + (preview.schema3 ? " (schema 3 mod: it plays as its own modded program, never combined with another mod)." : "."));
+    modal_.lines.push_back(std::string(preview.schema3 ? "WARNING: this mod contains executable C source code by " : "WARNING: this patch contains executable C source code by ") + preview.info.author + (preview.info.license.empty() ? std::string() : " (" + preview.info.license + ")") +
+                           (preview.schema3 ? ". Segarecomp will compile it into a separate modded program and it runs with that program's full permissions (host-process permissions). It is NOT sandboxed. Install it only if you trust its source." : ". Segarecomp will compile it into the separate Patched program and it runs with that program's full permissions. It is NOT sandboxed. Install it only if you trust its source."));
+    modal_.lines.push_back("Source SHA-256 " + short_hash(preview.info.native_sha256) + ". Package identity " + short_hash(preview.info.identity) + ". Reads: " + caps + (preview.schema3 ? ". Native mod ABI " : ". Native patch ABI ") + std::to_string(preview.info.native_abi) + (preview.schema3 ? " (schema 3 mod: it plays as its own modded program, never combined with another mod)." : "."));
     modal_.lines.push_back("Approving applies to this exact package only; a changed package must be approved again. Vanilla is never affected.");
   }
   trace("patch=preview_ok");

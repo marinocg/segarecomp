@@ -68,7 +68,7 @@ std::optional<mod::Rejection> scheduled_support(const mod::Package &package) {
   const std::vector<std::string> live = scheduled_capabilities();
   for (const std::string &c : m.capabilities)
     if (std::find(live.begin(), live.end(), c) == live.end())
-      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, scenery.words, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod)"};
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod)"};
   return std::nullopt;
 }
 
@@ -88,7 +88,7 @@ std::optional<mod::Rejection> native_scheduled_support(const mod::Package &packa
   const std::vector<std::string> live = native_scheduled_capabilities();
   for (const std::string &c : m.capabilities)
     if (std::find(live.begin(), live.end(), c) == live.end())
-      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod, hook.function)"};
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, scenery.words, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod, hook.function)"};
   if (m.has_hooks && std::find(m.capabilities.begin(), m.capabilities.end(), "hook.function") == m.capabilities.end())
     return mod::Rejection{"E_LIVE_CAPABILITY", "a package with function hooks must require hook.function"};
   return std::nullopt;

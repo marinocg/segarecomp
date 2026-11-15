@@ -27,7 +27,7 @@ bool read_bounded(const fs::path &path, std::size_t limit, std::vector<std::uint
 
 std::string refusal_for(const std::string &error) { return "This patch cannot be installed: " + error + "."; }
 
-// SEG-143-T008: the schema 3 branch of the one verification routine (Luau and native ABI 2 packages; a data-only package has nothing the played program runs and is refused plainly).
+// SEG-143-T008: the schema 3 branch of the one verification routine (Luau, native ABI 2 and data-only packages; the build route per class is the launcher core's).
 PatchPreview verify_mod(const LibraryEntry &entry, const segarecomp::mod::Package &mp, const fs::path &original_rom, std::vector<std::uint8_t> bytes, std::vector<std::uint8_t> *package_bytes) {
   PatchPreview out;
   const segarecomp::mod::Manifest &m = mp.manifest;
