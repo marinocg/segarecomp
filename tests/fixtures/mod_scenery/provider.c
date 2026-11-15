@@ -32,7 +32,7 @@ static void provider_phase(void *state, const SegaModHost *host) {
       for (c = 0U; c < COLS; ++c) {
         const int32_t cell = x0 + (int32_t)c;
         const int inside = cell >= 24 && cell < 64;   /* the columns the program's own plane holds: a pure function of the cell, never of the camera */
-        words[r * COLS + c] = inside ? 1U : ((cell & 1) == 0 ? 0x2002U : 0x2003U);
+        words[r * COLS + c] = inside ? ((cell & 1) == 0 ? 1U : 3U) : ((cell & 1) == 0 ? 0x2002U : 0x2003U);
       }
     (void)render->scene("main", 4U);
     (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);

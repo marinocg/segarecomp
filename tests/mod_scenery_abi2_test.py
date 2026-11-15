@@ -24,8 +24,8 @@ PAD = "0 R\n20 -\n"   # Right held for 20 turns, then released: the last 19 pres
 
 
 def golden(side, camera):
-    """The expected surface margins: columns beyond the picture show the authored level cells; the picture itself is the fixture's own (green) plane."""
-    green, blue, cyan = rgb(0x00E0), rgb(0x0E00), rgb(0x0EE0)
+    """The expected surface margins: columns beyond the picture show the authored level cells; the picture itself is the fixture's own plane (alternating green / red columns)."""
+    green, red, blue, cyan = rgb(0x00E0), rgb(0x000E), rgb(0x0E00), rgb(0x0EE0)
     rows = []
     for y in range(H):
         row = []
@@ -34,7 +34,7 @@ def golden(side, camera):
                 row.append(None)
                 continue
             cell = (x + camera * 8) // 8   # plane x = screen x - hscroll with hscroll = -(camera * 8)
-            row.append(green if 24 <= cell < 64 else (blue if cell % 2 == 0 else cyan))
+            row.append((green if cell % 2 == 0 else red) if 24 <= cell < 64 else (blue if cell % 2 == 0 else cyan))
         rows.append(row)
     return rows
 
@@ -143,6 +143,33 @@ def main():
                 check(summary.get("faulted") is False, f"{name}: no fault: {summary.get('fault')}")
             if name == "stale":
                 check(0 < scenery["covered"] < scenery["requested"], f"stale: only the frame the window was rendered for is credited ({scenery})")
+        # ---- ACTIVE scrolling: Right is held until the program ends, so the presented frame is captured WHILE the camera changes on consecutive frames ----
+        MOVING = "0 R\n"
+        mutant = project("t-shifted-cell", lambda t: t.replace("const int32_t cell = x0 + (int32_t)c;", "const int32_t cell = x0 + (int32_t)c + 1;"))   # a window whose words belong to the NEXT cell: the one-cell / one-frame misassociation
+        if h.failures:
+            return 1
+        for ratio in ("16:9", "32:9"):
+            sd = side_of(*map(int, ratio.split(":")))
+            tag = ratio.replace(":", "x")
+            for label, program in (("modded", modded), ("shifted", mutant)):
+                surf, lines, rep, ram = play(program, f"mv-{label}-{tag}", ratio, MOVING)
+                cam = int.from_bytes(ram[0x12:0x14], "big")
+                _, _, _, ram_v = play(tmp / "vanilla", f"mv-vanilla-{tag}", ratio, MOVING)
+                vsurf = play(tmp / "vanilla", f"mv-vanilla-{tag}", ratio, MOVING)[0]
+                # the camera the PRESENTED frame used is read off the native picture itself (alternating green / red columns: its parity), never off the mod: the guest's final word or the one before it
+                def picture_ok(k):
+                    return all(vsurf[y][sd + x] == (rgb(0x00E0) if ((x + 8 * k) // 8) % 2 == 0 else rgb(0x000E)) for y in (40, 120, 200) for x in range(0, W, 3))
+                used = [k for k in (cam, cam - 1) if picture_ok(k)]
+                check(cam >= 30 and len(used) == 1 and surf[100][sd + 160] == vsurf[100][sd + 160] and ram == ram_v, f"{label} {ratio}: the camera is still moving at the end ({cam}), the native picture reveals exactly one camera for the presented frame {used} and equals Vanilla's")
+                if not used:
+                    continue
+                want = golden(sd, used[0])
+                wrong = sum(1 for y in range(H) for xi in range(W + 2 * sd) if want[y][xi] is not None and surf[y][xi] != want[y][xi] and not (xi < 24 and y < 8))
+                sc = rep["scenes"][0]["components"]["scenery"]
+                if label == "modded":
+                    check(wrong == 0 and sc["covered"] == sc["requested"] > 0, f"moving camera {ratio}: the authored margins equal the independent golden for the camera of the presented frame ({wrong} pixels differ, {sc})")
+                else:
+                    check(wrong > 0, f"moving camera {ratio}: a window whose words are misassociated by one cell is DETECTED by the golden ({wrong} pixels differ)")
         # ---- frame contract (off-by-one-frame hazards): a fault midway, a scene change while a window is pending, save/restore and rewind across a pending submission ----
         mid = project("t-fault-midway", lambda t: t.replace(both, "    if (camera == 10U) {\n      (void)render->scenery_window(0U, x0, 0, 129U, ROWS, words);\n    } else {\n" + both + "    }\n"))
         scene = project("t-scene-change", lambda t: t.replace('render->scene("main", 4U);', 'render->scene(camera >= 10U ? "other" : "main", camera >= 10U ? 5U : 4U);'))

@@ -46,7 +46,7 @@ class Code:
 
 
 def make_rom() -> bytes:
-    """VDP: 40-cell picture, plane A at 0xC000 (64 x 32), horizontal scroll table at 0xFC00 (full screen). Plane A is filled with tile 1 (colour 1 of palette line 0). Each of the 40 turns: while Right is held the
+    """VDP: 40-cell picture, plane A at 0xC000 (64 x 32), horizontal scroll table at 0xFC00 (full screen). Plane A alternates tile 1 and tile 3 by column (green / red of palette line 0). Each of the 40 turns: while Right is held the
     camera word at 0xFF0012 grows by one, and the program writes the plane-A horizontal scroll -(camera * 8) into the table. Camera stays inside 0..24 in the tests (a 10-bit scroll value never wraps)."""
     c = Code()
     c.w(0x41F9); c.l(0x00C00004)                     # lea 0xC00004,a0   (VDP control)
@@ -64,10 +64,11 @@ def make_rom() -> bytes:
         for _ in range(8):
             c.w(0x22BC); c.l(fill)
     c.w(0x20BC); c.l(0x40000003)                     # VRAM write 0xC000: plane A
-    c.w(0x303C, 64 * 28 - 1)                         # move.w #1791,d0
+    c.w(0x303C, 64 * 28 // 2 - 1)                     # move.w #895,d0   (two cells per pass)
     c.label("fill")
-    c.w(0x32BC, 1)                                   # move.w #1,(a1)
-    c.w(0x51C8, 0xFFFA)                              # dbra d0,fill
+    c.w(0x32BC, 1)                                   # move.w #1,(a1)   even cells: tile 1 (green)
+    c.w(0x32BC, 3)                                   # move.w #3,(a1)   odd cells: tile 3 (red): the picture itself shows the scroll's parity
+    c.w(0x51C8, 0xFFF6)                              # dbra d0,fill
     c.w(0x45F9); c.l(0x00FF0000)                     # lea 0xFF0000,a2   (work RAM)
     c.w(0x13FC, 0x0040); c.l(0x00A10009)             # move.b #0x40,0xA10009
     c.w(0x13FC, 0x0040); c.l(0x00A10003)             # move.b #0x40,0xA10003
