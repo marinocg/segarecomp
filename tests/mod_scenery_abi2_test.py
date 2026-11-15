@@ -23,7 +23,7 @@ CAMERA_FINAL = 20
 PAD = "0 R\n20 -\n"   # Right held for 20 turns, then released: the last 19 presented frames share camera 20 (plane A scroll -160)
 
 
-def golden(side, camera):
+def golden(side, camera, alternating=True):
     """The expected surface margins: columns beyond the picture show the authored level cells; the picture itself is the fixture's own plane (alternating green / red columns)."""
     green, red, blue, cyan = rgb(0x00E0), rgb(0x000E), rgb(0x0E00), rgb(0x0EE0)
     rows = []
@@ -34,7 +34,7 @@ def golden(side, camera):
                 row.append(None)
                 continue
             cell = (x + camera * 8) // 8   # plane x = screen x - hscroll with hscroll = -(camera * 8)
-            row.append((green if cell % 2 == 0 else red) if 24 <= cell < 64 else (blue if cell % 2 == 0 else cyan))
+            row.append((green if cell % 2 == 0 or not alternating else red) if 24 <= cell < 64 else (blue if cell % 2 == 0 else cyan))
         rows.append(row)
     return rows
 

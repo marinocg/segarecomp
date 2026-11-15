@@ -152,7 +152,7 @@ def main():
             ms = lines["MOD_SUMMARY"][0]
             check(ms["faulted"] is False and ms["committed_writes"] == 1, f"{ratio}: no fault and exactly ONE guest write (the restore): {ms}")
             ax, cam = wm["actor"] - 8 * wm["camera"], wm["camera"]
-            want = golden(side, cam) if side else [[None] * W for _ in range(H)]
+            want = golden(side, cam, alternating=False) if side else [[None] * W for _ in range(H)]
             sprite_visible = 0 <= ax and ax + 8 <= W + side and ax >= W
             wrong_px = 0
             for y in range(H):
