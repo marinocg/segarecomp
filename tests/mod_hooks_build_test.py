@@ -397,6 +397,7 @@ def main():
             check(h.build(rom, tmp / "marker-v", package, identity, viewer=True, native=True).returncode == 0, "marker viewer program builds")
             _, mlines, _, mram = h.play(tmp / "marker-v", "marker-v", budget=40_000_000)
             check(mram.is_file() and vram.is_file() and mram.read_bytes()[0x20:0x22] == b"\x12\x34" and vram.read_bytes()[0x20:0x22] != b"\x12\x34", "the played program's work RAM shows the replacement's marker (the callback really ran)")
+            print("mod_hooks_build_test: SDL3 viewer section ran")
 
         if h.failures:
             print(f"mod_hooks_build_test: {len(h.failures)} failure(s)")
