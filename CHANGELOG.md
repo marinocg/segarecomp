@@ -7,6 +7,11 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Function hooks in built Genesis programs (ADR 0308)
+
+* A native ABI 2 package's `[[hook]]` declarations are now resolved against the exact source image, classified against the compiled program and linked into headless and played Genesis programs (`segarecomp build --native-package`): `before`, `after`, `before-after` and `replace` callbacks run with the cycle, ordering and transactional-failure rules of ADR 0298. A hook that is a no-op, or a replacement that declines, leaves the program bit-identical to Vanilla; save states taken with a hooked call in flight restore it.
+* Anything the build cannot prove is refused with a stable `E_HOOK_*` class and leaves no executable; a Luau package that declares hooks is refused (`E_HOOK_CALLBACK_UNSUPPORTED`). `mod diff-run` / `mod test` report hook counters. Evidence is a fabricated image only: no real-game hook claim, one mod, Genesis only.
+
 ### Live Genesis mods, native ABI 2 and virtual sprites across the widescreen surface (ADR 0305, 0306, 0307; combined delivery F28)
 
 * The **played SDL3 program** now runs a scheduled Luau gameplay mod through the same scheduler as the headless one: guest-RAM effects, input, the HUD (while the mod is healthy), and the mod's own state in save states and rewind. A native **ABI 2** provider can be built into headless and played programs (`segarecomp build --native-package`), with a typed render feature for the HUD and layers; `mod test` / `mod diff-run` accept it. Native code is host code: approval of the exact package identity is the boundary, not a sandbox.

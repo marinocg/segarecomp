@@ -32,6 +32,7 @@
 #include <iostream>
 #include <optional>
 #include <span>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -148,6 +149,12 @@ struct Options {
   bool native_mod = false;           // SEG-138-T011: the scheduled mod is a native ABI 2 provider (no Luau VM)
   std::vector<std::pair<fs::path, std::string>> native_mod_units;   // the staged native-c11 files (path, sha256 of the verified package payload); every .c is a compile unit
   fs::path native_mod_dir;           // <output>/native-mod: staged sources and the constant artifact
+  // SEG-138-T012 (ADR 0308): the function hooks of the native package, resolved against the exact source image. `hook_plan_file` is the plan the emitter classifies (empty = no hooks: the exact unhooked program);
+  // `hook_bindings` are the (site id, hook id the provider's `hook` entry receives) pairs the scheduler is attached with; `hook_phase_mask` the hook phases the provider registers.
+  fs::path hook_plan_file;
+  std::vector<std::pair<std::string, std::uint32_t>> hook_bindings;
+  std::uint32_t hook_phase_mask = 0;
+  std::string test_hook_binding;     // `--test-hook-binding <id>`: tests only; adds a binding that names no generated site, which the cross-check must refuse
   bool luau_scheduled = false;       // SEG-138-T009/T010: the scheduled-mod path (phases, memory ranges): always headless; in a viewer build when the package needs more than the HUD-only ABI 1 seam
   std::string luau_ranges_c;         // the declared ranges of the exact source revision, as C constants
   std::string luau_original_sha256, luau_effective_sha256, luau_bytecode_digest, luau_mod_id, luau_capabilities;
@@ -166,6 +173,7 @@ enum class Target { genesis, master_system };
 struct Log {
   std::ofstream file;
   bool plan_applied = false;   // the last emission applied the explicit --admission-plan (alias set matched)
+  std::string hook_rejection;  // SEG-138-T012: the stable E_HOOK_* class of the last emission's classification failure ("" = none)
   std::string admission_line;  // SEG-047: the last emission's sanitized `m68k admission: requested=optimized ...` report
   segarecomp::machine::master_system::AdmissionReport sms_admission;  // SEG-057-T002: the SMS Optimized request's resolution
   void line(const std::string &text) { file << text << '\n'; file.flush(); }
@@ -252,6 +260,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
     else if (key == "--test-frame-seam" && value == "1") options.frame_seam = true;
+    else if (key == "--test-hook-binding") options.test_hook_binding = value;
     else if (key == "--luau-package") { if (!options.luau_package.empty()) return std::nullopt; options.luau_package = fs::path(value); }
     else if (key == "--luau-identity") { if (!options.luau_identity.empty()) return std::nullopt; options.luau_identity = value; }
     else if (key == "--native-package") { if (!options.native_package.empty()) return std::nullopt; options.native_package = fs::path(value); }
@@ -904,6 +913,8 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
   std::vector<std::string> emit_args{"segarecomp", "emit-general-startup-bridge-c", "--rom", options.rom.string(),
                                      "--reset-entry", "--rom-sha256", sha, "--immutable-rom-aot"};
   if (options.mapper == "lock_on") emit_args.push_back("--genesis-lock-on");  // ADR 0268 (validated in the analyze stage)
+  if (!options.hook_plan_file.empty()) emit_args.insert(emit_args.end(), {"--function-hooks", options.hook_plan_file.string()});   // SEG-138-T012
+  log.hook_rejection.clear();
   for (const m68k_alias::CopyAlias &alias : aliases) {
     char text[32];
     std::snprintf(text, sizeof(text), "%08x:%08x:%08x", static_cast<unsigned>(alias.execution), static_cast<unsigned>(alias.source),
@@ -947,6 +958,12 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
       if (line.rfind("segarecomp: m68k admission: requested=optimized", 0) == 0) log.admission_line = line;
   }
   if (emit_rc != 0) {
+    const std::string err = captured_err.str();   // `/* translation rejected: E_HOOK_...: ... (hook <id>) */`: the stable class survives to the build's diagnostic
+    if (const std::size_t at = err.find("translation rejected: E_HOOK_"); at != std::string::npos) {
+      std::size_t end = at + 22U;
+      while (end < err.size() && (std::isupper(static_cast<unsigned char>(err[end])) != 0 || err[end] == '_')) ++end;
+      log.hook_rejection = err.substr(at + 22U, end - at - 22U);
+    }
     fs::remove(route.source, ec);
     fs::remove_all(route.shard_dir, ec);
     return false;
@@ -1139,6 +1156,12 @@ bool write_native_artifact(Options &options, const segarecomp::mod::Manifest &ma
   c << "const unsigned long segarecomp_mod_range_count = " << ranges.size() << "UL;\nconst unsigned long segarecomp_mod_ranges[][4] = {";
   for (const auto &r : ranges) c << "\n  {SEGARECOMP_GEN_SPACE_WORK_RAM, " << r.offset << "UL, " << r.length << "UL, " << (r.access == "read" ? 1 : r.access == "write" ? 2 : 3) << "UL},";
   c << "\n  {0, 0, 0, 0}};\n";
+  // SEG-138-T012: the function hooks the provider implements for THIS revision: the generated site id and the hook id its `hook` entry receives (the declaration's index in the canonical, id-sorted manifest order),
+  // and the hook phases it registers (bit per SegaModPhase).
+  c << "const unsigned long segarecomp_mod_hook_count = " << options.hook_bindings.size() << "UL, segarecomp_mod_hook_phases = " << options.hook_phase_mask << "UL;\n";
+  c << "struct segarecomp_mod_hook_binding { const char *id; unsigned long hook_id; };\nconst struct segarecomp_mod_hook_binding segarecomp_mod_hooks[] = {";
+  for (const auto &binding : options.hook_bindings) c << "\n  {\"" << binding.first << "\", " << binding.second << "UL},";
+  c << "\n  {0, 0}};\n";
   options.luau_artifact_source = options.native_mod_dir / "native_artifact.c";
   std::ofstream out(options.luau_artifact_source, std::ios::binary | std::ios::trunc);
   out << c.str();
@@ -1271,7 +1294,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       if (build.play) continue;   // the viewer foundation already links them
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name, {"-I", (build.root / "libs" / "viewer" / "src").string()});
     }
-    add(final_only, build.viewer / "mod_capture.cpp", "mod-native-host", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_NATIVE=1", "-I", build.runtime.string(), "-I", build.viewer.string()}); if (!extra_define.empty()) f.push_back(extra_define); return f; }(), true);
+    add(final_only, build.viewer / "mod_capture.cpp", "mod-native-host", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_NATIVE=1", "-I", build.runtime.string(), "-I", build.viewer.string()}); if (!extra_define.empty()) f.push_back(extra_define); if (!options.hook_plan_file.empty()) f.push_back("-DSEGARECOMP_MOD_HOOKS=1"); return f; }(), true);
     add(final_only, build.runtime / "mod_scheduler.c", "mod-scheduler", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
     if (!build.play) add(final_only, build.runtime / "genesis_snapshot.c", "genesis-snapshot", {"-DSEGARECOMP_GENESIS_SOUND"});
     add(final_only, options.luau_artifact_source, "mod-native-artifact");
@@ -1732,17 +1755,57 @@ int run_build(Options options) {
       const auto original = segarecomp::read_binary(options.rom);
       const std::string original_sha = segarecomp::sha256_hex(original);
       const auto package = segarecomp::mod::read_package_file(options.native_package);
-      if (!package.ok) return fail(options, log, original_sha, "analyze", 1, "The native package is not valid: " + package.rejection.message, "NATIVE_PACKAGE_INVALID");
+      if (!package.ok)   // SEG-138-T012: a declaration-level hook rejection keeps its stable E_HOOK_* class
+        return fail(options, log, original_sha, "analyze", 1, "The native package is not valid: " + package.rejection.message, package.rejection.code.rfind("E_HOOK_", 0) == 0 ? package.rejection.code : "NATIVE_PACKAGE_INVALID");
       if (package.identity != options.native_identity) return fail(options, log, original_sha, "analyze", 1, "The native package is not the one that was approved.", "NATIVE_IDENTITY_CHANGED");
       if (const auto refusal = segarecomp::luau::native_scheduled_support(package)) return fail(options, log, original_sha, "analyze", 1, refusal->message, refusal->code);
       const auto effective = segarecomp::mod::effective_image(package, original);
-      if (!effective.ok) return fail(options, log, original_sha, "analyze", 1, "The image is not the one the native package declares: " + effective.rejection.message, "NATIVE_IMAGE_MISMATCH");
+      if (!effective.ok) {
+        const bool declared = std::any_of(package.manifest.revisions.begin(), package.manifest.revisions.end(), [&](const auto &revision) { return revision.sha256 == original_sha; });
+        return fail(options, log, original_sha, "analyze", 1, "The image is not the one the native package declares: " + effective.rejection.message, package.manifest.has_hooks && !declared ? "E_HOOK_DIGEST" : "NATIVE_IMAGE_MISMATCH");   // hooks are resolved against the exact image digest
+      }
       std::string label;
       for (const auto &revision : package.manifest.revisions) if (revision.sha256 == original_sha) label = revision.label;
       if (label.empty()) return fail(options, log, original_sha, "analyze", 1, "The image is not a revision the package declares.", "NATIVE_IMAGE_MISMATCH");
       const std::vector<segarecomp::mod::MemoryRange> ranges = segarecomp::mod::memory_for_revision(package.manifest, label);
-      const auto granted_caps = segarecomp::luau::scheduled_host_config(package.manifest).capabilities;   // required + supported optional names, restricted to the scheduled set
+      const auto granted_caps = segarecomp::luau::native_scheduled_host_config(package.manifest).capabilities;   // required + supported optional names, restricted to the scheduled set (+ hook.function for a native provider)
       const auto granted = [&](const char *name) { return std::find(granted_caps.begin(), granted_caps.end(), name) != granted_caps.end(); };
+      if (package.manifest.has_hooks) {   // SEG-138-T012 (ADR 0308): resolve the declarations against the EXACT source image (verified symbols, E_HOOK_DIGEST) and give the emitter the plan; the vectors come from the effective image's header
+        const auto resolved = segarecomp::mod::resolve_hooks_for_image(package.manifest, original);
+        if (!resolved.ok) return fail(options, log, original_sha, "analyze", 1, "The function hooks do not resolve for this image: " + resolved.rejection.message, resolved.rejection.code);
+        std::ostringstream plan;
+        std::set<std::uint32_t> vectors;
+        for (std::size_t vector = 2; vector < 64 && vector * 4 + 4 <= effective.image.size(); ++vector) {   // vector 0 is the stack pointer and 1 the reset entry; every other nonzero long is an exception/interrupt target
+          const std::uint32_t target = (std::uint32_t{effective.image[vector * 4]} << 24U) | (std::uint32_t{effective.image[vector * 4 + 1]} << 16U) | (std::uint32_t{effective.image[vector * 4 + 2]} << 8U) | effective.image[vector * 4 + 3];
+          if (target != 0U) vectors.insert(target);
+        }
+        for (const std::uint32_t target : vectors) { char text[24]; std::snprintf(text, sizeof text, "vector %08x\n", static_cast<unsigned>(target)); plan << text; }
+        std::uint32_t phases = 0;
+        std::uint32_t index = 0;
+        std::vector<std::pair<std::string, std::uint32_t>> bindings;
+        for (const auto &hook : package.manifest.hooks) {   // hook ids are the manifest (id-sorted) index; a hook scoped to another revision has no site here and is not bound
+          const auto site = std::find_if(resolved.hooks.begin(), resolved.hooks.end(), [&](const segarecomp::mod::ResolvedHook &r) { return r.id == hook.id; });
+          if (site != resolved.hooks.end()) {
+            char text[160];
+            std::snprintf(text, sizeof text, "site %s %08x %s %08x %08x %d %d %u\n", site->id.c_str(), static_cast<unsigned>(site->entry), site->mode.c_str(), static_cast<unsigned>(site->reads), static_cast<unsigned>(site->writes),
+                          site->replace_declared ? 1 : 0, site->flags_written ? 1 : 0, static_cast<unsigned>(site->cost));
+            plan << text;
+            bindings.emplace_back(site->id, index);
+            phases |= (site->mode == "after" ? 0U : 1U << 5U) | (site->mode == "after" || site->mode == "before-after" ? 1U << 6U : 0U);   // SEGA_MOD_PHASE_HOOK_ENTRY (5) serves before/replace, HOOK_EXIT (6) serves after
+          }
+          ++index;
+        }
+        if (bindings.empty()) return fail(options, log, original_sha, "analyze", 1, "The package declares function hooks but none applies to this revision.", "E_HOOK_REVISION");
+        std::error_code plan_ec;
+        fs::create_directories(options.output / "hooks", plan_ec);
+        options.hook_plan_file = options.output / "hooks" / "function_hooks.plan";
+        std::ofstream plan_out(options.hook_plan_file, std::ios::binary | std::ios::trunc);
+        plan_out << plan.str();
+        plan_out.close();
+        if (plan_ec || !plan_out) return fail(options, log, original_sha, "analyze", 1, "The function-hook plan could not be written.", "NATIVE_ARTIFACT_WRITE");
+        options.hook_bindings = std::move(bindings);
+        options.hook_phase_mask = phases;
+      }
       bool reads = false, writes = false;
       for (const auto &r : ranges) { reads = reads || r.access != "write"; writes = writes || r.access != "read"; }
       if ((granted("memory.read.m68k.work_ram") && !reads) || (granted("memory.write.m68k.work_ram") && !writes))
@@ -1981,9 +2044,33 @@ int run_build(Options options) {
         if (!line.empty()) units.push_back(shard_dir / line);
     } else {
       // The existing emit route, in-process; no ADR 0049 alias yet (the build-time preparation adds them, SEG-028-T005).
-      if (!emit_genesis_m68k(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, {}, {}, units))
+      if (!emit_genesis_m68k(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, {}, {}, units)) {
+        if (!log.hook_rejection.empty())   // SEG-138-T012: a hook the compiled program cannot carry: stable class, no executable
+          return fail(options, log, sha, "generate", 1, "A function hook of the package cannot be linked into this program: " + log.hook_rejection + ".", log.hook_rejection);
         return fail(options, log, sha, "generate", 1,
                     "Segarecomp could not translate this game yet (compatibility is experimental).");
+      }
+      if (!options.hook_plan_file.empty()) {   // SEG-138-T012: the scheduler's bindings are cross-checked against the generated site table; a binding that names no generated site is refused here
+        std::set<std::string> generated;
+        for (const fs::path &unit : units) {
+          std::ifstream text(unit);
+          for (std::string line; std::getline(text, line);) {
+            const std::size_t quote = line.find(", \"");
+            if (line.rfind("  { UINT32_C(", 0) != 0 || quote == std::string::npos) continue;
+            const std::size_t end = line.find('"', quote + 3U);
+            if (end != std::string::npos) generated.insert(line.substr(quote + 3U, end - quote - 3U));
+          }
+        }
+        std::vector<std::string> wanted;
+        for (const auto &binding : options.hook_bindings) wanted.push_back(binding.first);
+        if (!options.test_hook_binding.empty()) wanted.push_back(options.test_hook_binding);
+        for (const std::string &id : wanted)
+          if (generated.count(id) == 0U) {
+            fs::remove_all(shard_dir, ec);
+            fs::remove(source, ec);
+            return fail(options, log, sha, "generate", 1, "The hook binding " + id + " names no generated hook site.", "E_HOOK_BINDING");
+          }
+      }
     }
     if (!units_complete(units)) return fail(options, log, sha, "generate", 1, "Generated code is incomplete.");
     stage("generate", "done");

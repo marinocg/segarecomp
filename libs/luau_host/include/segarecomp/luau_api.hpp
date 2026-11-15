@@ -147,8 +147,10 @@ struct HostConfig {
 [[nodiscard]] std::vector<std::string> scheduled_capabilities();
 [[nodiscard]] std::optional<mod::Rejection> scheduled_support(const mod::Package &package);
 [[nodiscard]] HostConfig scheduled_host_config(const mod::Manifest &manifest);
-// SEG-138-T011 (ADR 0305): the same scheduled path for a NATIVE ABI 2 package (trust class native, `abi.native` 2, Genesis, native-c11 sources, no Luau, no hooks); same rejection classes.
+// SEG-138-T011 (ADR 0305): the same scheduled path for a NATIVE ABI 2 package (trust class native, `abi.native` 2, Genesis, native-c11 sources, no Luau; hooks allowed, SEG-138-T012); same rejection classes. A package with hooks and a Luau provider is E_HOOK_CALLBACK_UNSUPPORTED (live_support and scheduled_support).
 [[nodiscard]] std::optional<mod::Rejection> native_scheduled_support(const mod::Package &package);
+[[nodiscard]] std::vector<std::string> native_scheduled_capabilities();
+[[nodiscard]] HostConfig native_scheduled_host_config(const mod::Manifest &manifest);
 
 // ---- overlay rasterization (the fixed HUD overlay path) ----
 struct OverlayImage {

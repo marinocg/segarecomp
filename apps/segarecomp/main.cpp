@@ -37,6 +37,9 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <set>
+#include <sstream>
+#include <variant>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -50,7 +53,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp genesis-z80-static-report --rom <image>\n  segarecomp patch <inspect|verify|apply> ... (portable .segapatch packages; see docs/product/patch-packages.md)\n  segarecomp mod <init|check|build|inspect|convert-audio> ... (mod projects and schema 3 packages; see docs/product/mod-projects.md)\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system|sega-cd>]\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--genesis-lock-on] [--legacy-aot-entries] [--shared-return-targets] [--aot-operand-sharing] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--genesis-lock-on] [--legacy-aot-entries] [--shared-return-targets] [--aot-operand-sharing] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--function-hooks <plan>] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp classify-ram-jump-thunk <execution-hex8> <hex-bytes>\n"
@@ -75,6 +78,83 @@ void print_usage(std::ostream &output) {
   return bytes;
 }
 } // namespace
+
+namespace {
+// SEG-138-T012: the `--function-hooks` plan. Lines: `vector <hex8>` (at most 62: the exception vectors 2..63) and
+// `site <id> <entry-hex8> <mode> <reads-hex8> <writes-hex8> <replace 0|1> <flags 0|1> <cost>` (1..64 sites). Single-space separated, exact field counts; <= 16 KiB, <= 256 bytes per line. Returns "" or the rejection reason.
+std::string parse_function_hook_plan(const std::string &path, segarecomp::M68kFunctionHookPlan &plan) {
+  constexpr std::size_t kMaxBytes = 16384U, kMaxLine = 256U, kMaxSites = 64U, kMaxVectors = 62U;
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return "cannot read the plan";
+  std::string text(kMaxBytes + 1U, '\0');
+  in.read(text.data(), static_cast<std::streamsize>(text.size()));
+  text.resize(static_cast<std::size_t>(in.gcount()));
+  if (text.size() > kMaxBytes) return "the plan exceeds 16384 bytes";
+  const auto hex8 = [](const std::string &t, std::uint32_t &out) {
+    if (t.size() != 8U) return false;
+    out = 0;
+    for (const char c : t) {
+      const int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;   // lower-case, as the build writes it
+      if (d < 0) return false;
+      out = (out << 4U) | static_cast<std::uint32_t>(d);
+    }
+    return true;
+  };
+  std::set<std::string> ids;
+  std::set<std::uint32_t> entries, vectors;
+  std::size_t line_no = 0, at = 0;
+  while (at < text.size()) {
+    std::size_t end = text.find('\n', at);
+    if (end == std::string::npos) end = text.size();
+    const std::string line = text.substr(at, end - at);
+    at = end + 1U;
+    ++line_no;
+    const std::string where = "line " + std::to_string(line_no) + ": ";
+    if (line.size() > kMaxLine) return where + "the line is too long";
+    if (line.empty()) continue;
+    std::vector<std::string> f;
+    for (std::size_t i = 0; i <= line.size();) {
+      std::size_t sp = line.find(' ', i);
+      if (sp == std::string::npos) sp = line.size();
+      f.push_back(line.substr(i, sp - i));
+      i = sp + 1U;
+    }
+    if (f[0] == "vector") {
+      std::uint32_t target = 0;
+      if (f.size() != 2U || !hex8(f[1], target)) return where + "a vector line is `vector <hex8>`";
+      if (vectors.size() >= kMaxVectors || !vectors.insert(target).second) return where + "too many or duplicate vectors";
+      plan.vectors.push_back(target);
+    } else if (f[0] == "site") {
+      if (f.size() != 9U) return where + "a site line has exactly 9 fields";
+      segarecomp::M68kHookSite site;
+      if (plan.sites.size() >= kMaxSites) return where + "more than 64 sites";
+      site.id = f[1];
+      if (site.id.empty() || site.id.size() > 64U || !std::all_of(site.id.begin(), site.id.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.'; }))
+        return where + "invalid site id";
+      if (!hex8(f[2], site.entry) || !hex8(f[4], site.reads) || !hex8(f[5], site.writes)) return where + "invalid hexadecimal field";
+      if (f[3] == "before") site.mode = segarecomp::M68kHookMode::before;
+      else if (f[3] == "after") site.mode = segarecomp::M68kHookMode::after;
+      else if (f[3] == "before-after") site.mode = segarecomp::M68kHookMode::before_after;
+      else if (f[3] == "replace") site.mode = segarecomp::M68kHookMode::replace;
+      else return where + "unknown mode";
+      if ((f[6] != "0" && f[6] != "1") || (f[7] != "0" && f[7] != "1")) return where + "a flag is 0 or 1";
+      site.replace_declared = f[6] == "1";
+      site.flags_written = f[7] == "1";
+      if (f[8].empty() || f[8].size() > 5U || !std::all_of(f[8].begin(), f[8].end(), [](char c) { return c >= '0' && c <= '9'; })) return where + "invalid cost";
+      const unsigned long cost = std::stoul(f[8]);   // at most five digits: cannot throw
+      if (cost > 65535UL) return where + "the cost exceeds 65535";
+      site.cost = static_cast<std::uint32_t>(cost);
+      if (!ids.insert(site.id).second) return where + "duplicate site id";
+      if (!entries.insert(site.entry).second) return where + "duplicate site address";
+      plan.sites.push_back(std::move(site));
+    } else {
+      return where + "unexpected record type";
+    }
+  }
+  if (plan.sites.empty()) return "the plan declares no site";
+  return {};
+}
+}  // namespace
 
 int run_cli(int argc, char **argv) {
 #if defined(_WIN32)
@@ -166,6 +246,7 @@ int run_cli(int argc, char **argv) {
       bool shared_return_targets = false;
       bool aot_operand_sharing = false;
       bool genesis_lock_on = false;  // ADR 0268: declared lock-on composite (`build --mapper lock_on`)
+      std::optional<std::string_view> function_hooks_plan;  // SEG-138-T012: the build-resolved function-hook plan (ADR 0298), one `vector`/`site` line each; absent = the exact unhooked program
       for (int index = 4; index < argc;) {
         const std::string_view option = argv[index];
         if (option == "--reset-entry") {
@@ -269,6 +350,10 @@ int run_cli(int argc, char **argv) {
         } else if (option == "--generated-c-shard-dir") {
           if (generated_c_shard_dir || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           generated_c_shard_dir = argv[index + 1];
+          index += 2;
+        } else if (option == "--function-hooks") {
+          if (function_hooks_plan || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          function_hooks_plan = argv[index + 1];
           index += 2;
         } else if (option == "--aot-operand-sharing") {
           if (aot_operand_sharing) { print_usage(std::cerr); return 2; }
@@ -692,6 +777,21 @@ int run_cli(int argc, char **argv) {
       // immutable-ROM AOT entries) and otherwise writes the single --generated-c-output file: a pure,
       // deterministic function of the accepted program size, so small programs keep the historical
       // one-file artifact and one giant TU is never produced for a large one.
+      // SEG-138-T012 (ADR 0298): the plan the build resolved from the package's verified symbols; parsed fail-closed (bounded, exact fields) by parse_function_hook_plan. A rejected plan is a usage error, never a silently unhooked program.
+      segarecomp::M68kFunctionHookPlan hook_plan_storage;
+      const segarecomp::M68kFunctionHookPlan *hook_plan = nullptr;
+      if (function_hooks_plan) {
+        if (const std::string plan_error = parse_function_hook_plan(std::string(*function_hooks_plan), hook_plan_storage); !plan_error.empty()) {
+          std::cerr << "segarecomp: function-hook plan rejected: " << plan_error << '\n';
+          return 2;
+        }
+        hook_plan = &hook_plan_storage;
+        // Hooks classify against the compiled program: only the partial-program route carries one (an accepted whole-program analysis does not), so any other result is refused, never emitted unhooked.
+        if (!std::holds_alternative<segarecomp::FrontendPartialProgram>(result)) {
+          std::cerr << "/* translation rejected: E_HOOK_NOT_COMPILED: the program has no classifiable compiled instruction set (hook " << (hook_plan_storage.sites.empty() ? "-" : hook_plan_storage.sites.front().id) << ") */\n";
+          return 1;
+        }
+      }
       const segarecomp::ImmutableRomAotDirectEntriesScope direct_entries_scope(aot_direct_entries);
       const segarecomp::GeneratedCSharedReturnTargetsScope shared_return_targets_scope(shared_return_targets);
       const segarecomp::ImmutableRomAotOperandSharingScope aot_operand_sharing_scope(aot_operand_sharing);
@@ -709,7 +809,7 @@ int run_cli(int argc, char **argv) {
         std::string rejection;
         bool emitted = false;
         if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) {
-          rejection = segarecomp::emit_m68k_general_startup_bridge_c_to(sink, *partial, digest_value, provenance_diagnostics);
+          rejection = segarecomp::emit_m68k_general_startup_bridge_c_to(sink, *partial, digest_value, provenance_diagnostics, hook_plan);
           if (rejection.empty() && provenance_diagnostics) {
             const auto &a = partial->accepted_prefix;
             sink << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(
@@ -743,7 +843,7 @@ int run_cli(int argc, char **argv) {
           std::ofstream file{partial_path, std::ios::binary | std::ios::trunc};
           if (!file) { std::cerr << "segarecomp: cannot open generated-C output\n"; return 2; }
           if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) {
-            rejection = segarecomp::emit_m68k_general_startup_bridge_c_to(file, *partial, digest_value, provenance_diagnostics);
+            rejection = segarecomp::emit_m68k_general_startup_bridge_c_to(file, *partial, digest_value, provenance_diagnostics, hook_plan);
             if (rejection.empty() && provenance_diagnostics) {
               const auto &a = partial->accepted_prefix;
               file << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(
@@ -766,7 +866,7 @@ int run_cli(int argc, char **argv) {
         return 0;
       }
       if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) {
-        std::cout << segarecomp::emit_m68k_general_startup_bridge_c(*partial, digest_value, provenance_diagnostics);
+        std::cout << segarecomp::emit_m68k_general_startup_bridge_c(*partial, digest_value, provenance_diagnostics, hook_plan);
         if (provenance_diagnostics) {
           const auto &a = partial->accepted_prefix;
           std::cout << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(

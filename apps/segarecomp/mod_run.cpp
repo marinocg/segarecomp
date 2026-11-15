@@ -172,6 +172,8 @@ struct ModResult {
   bool present = false, faulted = false, nondeterministic = false;
   std::string id, fault, write_digest, overlay_sha256, roundtrip_status, state_sha256;
   std::uint64_t callbacks = 0, committed_writes = 0, overlay_ops = 0;
+  bool hooks = false;   // SEG-138-T012: the program links function hooks; its counters (callbacks by hook phase, skipped events)
+  std::uint64_t hook_entry = 0, hook_exit = 0, hook_abandoned = 0, hook_unproven = 0, hook_overflowed = 0;
 };
 struct Observed {
   std::string outcome, final_state, pcm, frame_log_error;
@@ -270,6 +272,15 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
     obs.mod.callbacks = num_field(*m, "callbacks");
     obs.mod.committed_writes = num_field(*m, "committed_writes");
     obs.mod.overlay_ops = num_field(*m, "overlay_ops");
+    if (const std::size_t hk = m->find("\"hooks\":{"); hk != std::string::npos) {
+      obs.mod.hooks = true;
+      const std::string hooks = m->substr(hk, m->find('}', hk) - hk);
+      obs.mod.hook_entry = num_field(hooks, "entry");
+      obs.mod.hook_exit = num_field(hooks, "exit");
+      obs.mod.hook_abandoned = num_field(hooks, "abandoned");
+      obs.mod.hook_unproven = num_field(hooks, "unproven");
+      obs.mod.hook_overflowed = num_field(hooks, "overflowed");
+    }
     obs.mod.nondeterministic = m->find("\"nondeterministic\":true") != std::string::npos;
     const std::size_t rt = m->find("\"roundtrip\":");
     obs.mod.roundtrip_status = rt == std::string::npos ? std::string() : str_field(*m, "status", rt);
@@ -296,6 +307,13 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
   return std::nullopt;
 }
 
+// SEG-138-T012: the hook counters of a hooked program (empty for a program that links no hooks), shared by `mod diff-run` and `mod test`.
+std::string hooks_json(const ModResult &m) {
+  if (!m.hooks) return {};
+  return ",\"hooks\":{\"entry\":" + std::to_string(m.hook_entry) + ",\"exit\":" + std::to_string(m.hook_exit) + ",\"abandoned\":" + std::to_string(m.hook_abandoned) + ",\"unproven\":" +
+         std::to_string(m.hook_unproven) + ",\"overflowed\":" + std::to_string(m.hook_overflowed) + "}";
+}
+
 std::string observed_json(const Observed &o, bool aggregate) {
   std::string j = "{\"outcome\":\"" + esc(o.outcome) + "\",\"frames_captured\":" + std::to_string(o.frames_captured) + ",\"frames_published\":" + std::to_string(o.frames_published) +
                   ",\"final_frame_sha256\":\"" + (o.digests.empty() ? std::string() : o.digests.back()) + "\",\"final_work_ram_sha256\":\"" + o.final_state + "\"";
@@ -303,7 +321,9 @@ std::string observed_json(const Observed &o, bool aggregate) {
   if (o.mod.present) {
     j += ",\"mod\":{\"id\":\"" + esc(o.mod.id) + "\",\"faulted\":" + (o.mod.faulted ? "true" : "false") + ",\"fault\":\"" + esc(o.mod.fault) + "\",\"callbacks\":" + std::to_string(o.mod.callbacks) +
          ",\"committed_writes\":" + std::to_string(o.mod.committed_writes) + ",\"write_digest\":\"" + o.mod.write_digest + "\",\"overlay_ops\":" + std::to_string(o.mod.overlay_ops) + ",\"overlay_sha256\":\"" +
-         o.mod.overlay_sha256 + "\",\"nondeterministic\":" + (o.mod.nondeterministic ? "true" : "false") + "}";
+         o.mod.overlay_sha256 + "\",\"nondeterministic\":" + (o.mod.nondeterministic ? "true" : "false");
+    j += hooks_json(o.mod);
+    j += "}";
   }
   (void)aggregate;
   return j + "}";
@@ -675,6 +695,7 @@ int run_test(const RunOptions &o) {
     if (!failure.empty()) results += ",\"first_divergence\":{" + failure + "}";
     results += ",\"observed\":{\"final_frame_sha256\":\"" + (obs.digests.empty() ? std::string() : obs.digests.back()) + "\",\"final_work_ram_sha256\":\"" + obs.final_state + "\"";
     if (!obs.pcm.empty()) results += ",\"pcm_sha256\":\"" + obs.pcm + "\"";
+    results += hooks_json(obs.mod);
     if (!obs.ram_frames.empty() && !o.aggregate) { results += ",\"ram_frames\":["; for (std::size_t i = 0; i < obs.ram_frames.size(); ++i) results += (i ? ",\"" : "\"") + obs.ram_frames[i] + "\""; results += "]"; }
     results += "}}";
     first = false;

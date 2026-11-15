@@ -38,6 +38,7 @@ std::optional<mod::Rejection> live_support(const mod::Package &package) {
   for (const mod::Payload &p : m.payloads)   // nothing the live path does not use may be silently dropped: only the scripts and the data that make the effective image
     if (p.kind != "luau-source" && p.kind != "rom-edit-set" && p.kind != "guest-code" && p.kind != "bps-image")
       return mod::Rejection{"E_LIVE_PAYLOAD", "the payload " + p.path + " (" + p.kind + ") is not used by the live path; remove it or use a package without it"};
+  if (m.has_hooks) return mod::Rejection{"E_HOOK_CALLBACK_UNSUPPORTED", "function hook callbacks are native ABI 2 only; a Luau callback for a hook is not supported"};
   if (m.abi_native != 0) return mod::Rejection{"E_LIVE_ABI", "a native ABI 2 provider does not run here"};
   const std::vector<std::string> live = live_capabilities();
   for (const std::string &c : m.capabilities)
@@ -62,14 +63,16 @@ std::optional<mod::Rejection> scheduled_support(const mod::Package &package) {
   for (const mod::Payload &p : m.payloads)
     if (p.kind != "luau-source" && p.kind != "rom-edit-set" && p.kind != "guest-code" && p.kind != "guest-asm" && p.kind != "bps-image")
       return mod::Rejection{"E_LIVE_PAYLOAD", "the payload " + p.path + " (" + p.kind + ") is not used by the scheduled path; remove it or use a package without it"};
+  if (m.has_hooks) return mod::Rejection{"E_HOOK_CALLBACK_UNSUPPORTED", "function hook callbacks are native ABI 2 only; a Luau callback for a hook is not supported"};
   if (m.abi_native != 0) return mod::Rejection{"E_LIVE_ABI", "a native ABI 2 provider does not run here"};
-  if (m.has_hooks) return mod::Rejection{"E_LIVE_CAPABILITY", "function hooks are not linked into a built program yet"};
   const std::vector<std::string> live = scheduled_capabilities();
   for (const std::string &c : m.capabilities)
     if (std::find(live.begin(), live.end(), c) == live.end())
       return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod)"};
   return std::nullopt;
 }
+
+std::vector<std::string> native_scheduled_capabilities();
 
 std::optional<mod::Rejection> native_scheduled_support(const mod::Package &package) {
   const mod::Manifest &m = package.manifest;
@@ -82,12 +85,27 @@ std::optional<mod::Rejection> native_scheduled_support(const mod::Package &packa
   for (const mod::Payload &p : m.payloads)   // nothing the program does not use may be silently dropped: the native units and the data that make the effective image
     if (p.kind != "native-c11" && p.kind != "rom-edit-set" && p.kind != "guest-code" && p.kind != "guest-asm" && p.kind != "bps-image")
       return mod::Rejection{"E_LIVE_PAYLOAD", "the payload " + p.path + " (" + p.kind + ") is not used by the scheduled path; remove it or use a package without it"};
-  if (m.has_hooks) return mod::Rejection{"E_LIVE_CAPABILITY", "function hooks are not linked into a built program yet"};
-  const std::vector<std::string> live = scheduled_capabilities();
+  const std::vector<std::string> live = native_scheduled_capabilities();
   for (const std::string &c : m.capabilities)
     if (std::find(live.begin(), live.end(), c) == live.end())
-      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod)"};
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod, hook.function)"};
+  if (m.has_hooks && std::find(m.capabilities.begin(), m.capabilities.end(), "hook.function") == m.capabilities.end())
+    return mod::Rejection{"E_LIVE_CAPABILITY", "a package with function hooks must require hook.function"};
   return std::nullopt;
+}
+
+// SEG-138-T012 (ADR 0308): a native provider additionally gets `hook.function` (statically resolved function hooks, ADR 0298); a Luau package never does.
+std::vector<std::string> native_scheduled_capabilities() {
+  std::vector<std::string> caps = scheduled_capabilities();
+  caps.push_back("hook.function");
+  return caps;
+}
+
+HostConfig native_scheduled_host_config(const mod::Manifest &manifest) {
+  HostConfig h = host_config_for(manifest);
+  const std::vector<std::string> live = native_scheduled_capabilities();
+  h.capabilities.erase(std::remove_if(h.capabilities.begin(), h.capabilities.end(), [&](const std::string &c) { return std::find(live.begin(), live.end(), c) == live.end(); }), h.capabilities.end());
+  return h;
 }
 
 HostConfig scheduled_host_config(const mod::Manifest &manifest) {
