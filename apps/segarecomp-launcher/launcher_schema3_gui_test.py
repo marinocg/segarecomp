@@ -207,7 +207,7 @@ def main():
         check("data-only mod", trace)
         dargs = p.lines(p.args_log)[-1].split()
         expect("--data-package" in dargs and dargs[dargs.index("--data-identity") + 1] == data_ident and "--native-package" not in dargs and "--luau-package" not in dargs, f"the build was asked for the data route with the exact identity: {dargs}")
-        ddir = next(x for x in p.builds() if x not in (vdir, mdir))
+        ddir = next(x for x in p.builds() if x not in (vdir, mdir) and json.loads((x / "metadata.json").read_text()).get("mod_kind") == "data")
         dmeta = json.loads((ddir / "metadata.json").read_text())
         expect(dmeta.get("mod_kind") == "data" and dmeta.get("luau_identity") == data_ident and ddir != mdir, f"the data variant has its own entry and record: {dmeta}")
         # (the fake build driver does not apply edits; that the real driver compiles the verified EFFECTIVE image is proven by launcher_schema3_flow_test)
@@ -217,6 +217,24 @@ def main():
         expect(str(ddir) in p.lines(p.game_log)[-1], "the data-only variant starts from its own folder")
         trace = p.run(OPEN + ["frames 6", "patch_remove 1", "frames 10", "patch_confirm", "frames 20", "expect patches=1", "quit"])
         check("remove data-only", trace)
+
+        # 6c. a LUAU mod: no code approval, built through the Luau route with the exact identity, played, removed
+        luau_project = tmp / "luau"
+        r = subprocess.run([real_cli, "mod", "init", str(luau_project), "--platform", "genesis", "--id", "synthetic-luau", "--template", "luau", "--rom-sha256", sha(src)], text=True, capture_output=True, timeout=300)
+        assert r.returncode == 0, r.stdout
+        luau_pkg = tmp / "luau.segapatch"
+        r = subprocess.run([real_cli, "mod", "pack", str(luau_project), "--out", str(luau_pkg)], text=True, capture_output=True, timeout=300)
+        assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
+        luau_ident = manifest_identity(luau_pkg)
+        trace = p.run(OPEN + [f"patch_pick {luau_pkg}", "frames 12", "expect modal=1", "patch_confirm", "frames 20", "expect modal=0", "expect patches=2",
+                              "variant patched=1", "frames 10", "expect status=Not built", "expect can_play=0", "build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready",
+                              "play", "frames 20", "wait_play_end", "frames 6", "variant vanilla", "frames 10", "expect variant=vanilla", "quit"])
+        check("luau mod", trace)
+        largs = p.lines(p.args_log)[-1].split()
+        expect("--luau-package" in largs and largs[largs.index("--luau-identity") + 1] == luau_ident and "--native-package" not in largs and "--data-package" not in largs, f"the build was asked for the Luau route with the exact identity: {largs}")
+        expect((vdir / ("game" + EXE_SUFFIX)).read_bytes() == vexe, "Vanilla stays untouched by the Luau variant")
+        trace = p.run(OPEN + ["frames 6", "patch_remove 1", "frames 10", "patch_confirm", "frames 20", "expect patches=1", "quit"])
+        check("remove luau", trace)
 
         # 7. an unapproved record never runs and never builds (the approval is the user's, per identity); restoring it plays again
         catalog = p.lib / "library.json"

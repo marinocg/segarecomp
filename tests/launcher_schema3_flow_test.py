@@ -77,7 +77,13 @@ path = "edits/main.edits"
         data_pkg = tmp / "data.segapatch"
         r = subprocess.run([str(cli), "mod", "pack", str(data_project), "--out", str(data_pkg)], text=True, capture_output=True, timeout=300)
         assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
-        packages = [package("native", rom), package("wrong", other), data_pkg]
+        luau_project = tmp / "luau"
+        r = subprocess.run([str(cli), "mod", "init", str(luau_project), "--platform", "genesis", "--id", "fixture-luau", "--template", "luau", "--rom-sha256", hashlib.sha256(rom.read_bytes()).hexdigest()], text=True, capture_output=True, timeout=300)
+        assert r.returncode == 0, r.stdout
+        luau_pkg = tmp / "luau.segapatch"
+        r = subprocess.run([str(cli), "mod", "pack", str(luau_project), "--out", str(luau_pkg)], text=True, capture_output=True, timeout=300)
+        assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
+        packages = [package("native", rom), package("wrong", other), data_pkg, luau_pkg]
         env = dict(os.environ, LD_LIBRARY_PATH=str(sdl / "lib") + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""), SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
         r = subprocess.run([test_exe, str(install), str(rom), str(other), *map(str, packages)], text=True, capture_output=True, env=env, timeout=1500)
         sys.stdout.write(r.stdout)

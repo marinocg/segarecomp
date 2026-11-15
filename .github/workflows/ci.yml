@@ -123,6 +123,9 @@ jobs:
           - name: Linux
             os: ubuntu-24.04
             part: f28
+          - name: Linux
+            os: ubuntu-24.04
+            part: f29
           - name: Windows
             os: windows-latest
     steps:
@@ -167,7 +170,7 @@ jobs:
           cmake -S . -B build/sdl3 -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DSEGARECOMP_ENABLE_SDL3_VIEWER=ON -DSEGARECOMP_BUILD_LAUNCHER=ON -DBUILD_TESTING=ON $hint
       - name: Build the SDL3 viewer targets (Genesis, Master System) and the consumer launcher
-        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp_viewer_sega_cd_sdl3 segarecomp_viewer_master_system_sdl3 segarecomp_viewer_master_system_main_check segarecomp-launcher launcher_policy_test launcher_sms_policy_test launcher_mod_variant_test library_catalog_test cartridge_recognition_test storage_test launcher_ui_support_test launcher_build_cancel_test older_build_test file_picker_test sv_host_test sv_vsprite_admission_test sv_state_test sv_state_service_test sv_viewer_core_test sv_input_diag_test fake_segarecomp fake_game fake_scd_program launcher_sega_cd_test segarecomp
+        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp_viewer_sega_cd_sdl3 segarecomp_viewer_master_system_sdl3 segarecomp_viewer_master_system_main_check segarecomp-launcher launcher_policy_test launcher_sms_policy_test launcher_mod_variant_test launcher_schema3_flow_test library_catalog_test cartridge_recognition_test storage_test launcher_ui_support_test launcher_build_cancel_test older_build_test file_picker_test sv_host_test sv_vsprite_admission_test sv_state_test sv_state_service_test sv_viewer_core_test sv_input_diag_test fake_segarecomp fake_game fake_scd_program launcher_sega_cd_test segarecomp
       - name: Run the launcher AOT-policy test and the SEG-058 library, storage and viewer-host tests (CTest; dummy video driver, no packaging dependency)
         shell: bash
         run: |
@@ -189,6 +192,15 @@ jobs:
               grep -q 'tests passed, 0 tests failed out of 7' f28.log || { echo "the seven F28/T012 tests did not all pass"; exit 1; }
               grep -q 'mod_hooks_build_test: SDL3 viewer section ran' f28.log || { echo "the SDL3 hook-execution section of mod_hooks_build_test did not run"; exit 1; }
               if grep -Eiq '(mod_[a-z0-9_]+_test): skipped' f28.log; then echo "an F28 test skipped itself"; exit 1; fi ;;
+            f29)
+              # F29 acceptance (SEG-140-T011, SEG-143-T008, SEG-149-T001): the ABI 2 scenery contract, the launcher's local schema 3 flows (core with the real build driver, and through the window) and the integrated
+              # synthetic widescreen + gameplay mod at four aspects. All four MUST exist, run and not skip themselves on Linux.
+              f29='^(mod_scenery_abi2_test|launcher_schema3_flow_test|launcher_schema3_gui_test|mod_widescreen_example_test)$'
+              count=$(ctest --test-dir build/sdl3 -N -R "$f29" | sed -n 's/^Total Tests: //p')
+              [ "$count" = "4" ] || { echo "expected 4 F29 acceptance tests, found $count"; exit 1; }
+              ctest --test-dir build/sdl3 -j 2 -R "$f29" --no-tests=error --output-on-failure --timeout 1800 -V | tee f29.log
+              grep -q 'tests passed, 0 tests failed out of 4' f29.log || { echo "the four F29 tests did not all pass"; exit 1; }
+              if grep -Eiq '(mod_[a-z0-9_]+_test|launcher_[a-z0-9_]+_test): skipped' f29.log; then echo "an F29 test skipped itself"; exit 1; fi ;;
           esac
 
   luau-sanitizers:

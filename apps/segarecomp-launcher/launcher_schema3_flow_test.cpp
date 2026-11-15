@@ -50,11 +50,11 @@ BuildOutcome build(const RomView &rom, const Layout &layout, std::string *messag
 }  // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 7) {
-    std::cerr << "usage: launcher_schema3_flow_test <install-root> <rom> <other-rom> <native.segapatch> <wrong-rom.segapatch> <data.segapatch>\n";
+  if (argc < 8) {
+    std::cerr << "usage: launcher_schema3_flow_test <install-root> <rom> <other-rom> <native.segapatch> <wrong-rom.segapatch> <data.segapatch> <luau.segapatch>\n";
     return 2;
   }
-  const fs::path root = argv[1], rom_path = argv[2], other_path = argv[3], native = argv[4], wrong = argv[5], data = argv[6];
+  const fs::path root = argv[1], rom_path = argv[2], other_path = argv[3], native = argv[4], wrong = argv[5], data = argv[6], luau = argv[7];
   const fs::path cache = root.parent_path() / "cache", library = root.parent_path() / "library";
   fs::create_directories(cache);
   fs::create_directories(library);
@@ -170,6 +170,35 @@ int main(int argc, char **argv) {
     expect(!verify_installed_mod(dv).empty() && build(dv, layout, &message) != BuildOutcome::succeeded, "a tampered data package never builds");
     { std::ofstream out(stored_data, std::ios::binary | std::ios::trunc); out << good; }
     expect(remove_patch(*entry, d.identity, library) && digest_of(entry_executable(vanilla_entry)) == vanilla_game, "removing it leaves Vanilla untouched");
+    entry->selected_variant = installed.identity;
+  }
+
+  // ---- a LUAU schema 3 mod: no code approval (no native source), built through the Luau route with the exact identity ----
+  {
+    PatchInstall l = install_patch(*entry, luau, rom_path, library, 1005, false);
+    expect(l.ok && l.added, "a Luau package installs: " + l.error);
+    const InstalledPatch *rec = entry->find_patch(l.identity);
+    expect(rec != nullptr && rec->schema3 && rec->mod_trust == "luau" && !rec->has_native(), "the record is a Luau mod");
+    entry->selected_variant = l.identity;
+    const RomView lv = view_for_variant(*entry, l.identity);
+    const fs::path luau_entry = entry_dir(lv, layout);
+    expect(lv.luau_mod() && !lv.luau_native && !lv.luau_data && !lv.patched() && !lv.luau_pin.empty() && verify_installed_mod(lv).empty(), "selecting it yields a Luau variant with the pinned compiler");
+    expect(luau_entry != vanilla_entry && luau_entry != mod_entry && genesis_save_dir(lv) != vanilla_saves, "its entry and saves are its own");
+    expect(build(lv, layout, &message) == BuildOutcome::succeeded && entry_ready_for(luau_entry, lv, layout), "the Luau variant builds: " + message);
+    const std::string lmeta = slurp(luau_entry / "metadata.json");
+    expect(lmeta.find("\"luau_identity\":\"" + l.identity + "\"") != std::string::npos && lmeta.find("luau_bytecode_digest") != std::string::npos && lmeta.find("mod_kind") == std::string::npos, "the record names the package and its bytecode digest (the Luau route, not native or data)");
+    RomView as_native = lv;
+    as_native.luau_native = true;
+    expect(!entry_ready_for(luau_entry, as_native, layout) && !verify_installed_mod(as_native).empty(), "a Luau program is never reused as another kind");
+    expect(digest_of(entry_executable(vanilla_entry)) == vanilla_game, "Vanilla is untouched");
+    const fs::path stored_luau = library / "patches" / (l.identity + ".segapatch");
+    const std::string good = slurp(stored_luau);
+    std::string bad = good;
+    bad[bad.size() / 2] = static_cast<char>(bad[bad.size() / 2] ^ 0x55);
+    { std::ofstream out(stored_luau, std::ios::binary | std::ios::trunc); out << bad; }
+    expect(!verify_installed_mod(lv).empty() && build(lv, layout, &message) != BuildOutcome::succeeded, "a tampered Luau package never builds");
+    { std::ofstream out(stored_luau, std::ios::binary | std::ios::trunc); out << good; }
+    expect(remove_patch(*entry, l.identity, library), "removing it works");
     entry->selected_variant = installed.identity;
   }
 

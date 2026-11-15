@@ -84,7 +84,11 @@ def main():
         (data_dir / "edits").mkdir(parents=True)
         (data_dir / "edits/main.edits").write_text("fixture u16 0x%08x 0x00e0 0x0e00\n" % (image.find(b"\x32\xbc\x00\xe0") + 2))
         (data_dir / "mod.toml").write_text('[mod]\nid = "fixture-data-edit"\nauthor = "segarecomp tests"\nversion = "0.1.0"\nname = "Fixture data edit"\nlicense = "CC0-1.0"\n\n[target]\nplatform = "genesis"\n\n[[target.revision]]\nlabel = "fixture"\nsha256 = "%s"\n\n[[source]]\nkind = "rom-edit-set"\npath = "edits/main.edits"\n' % image_sha)
-        data_pkg, _ = pack(data_dir)
+        data_pkg, data_id = pack(data_dir)
+        luau_dir = tmp / "luau-src"
+        r = h.run_cli("mod", "init", luau_dir, "--platform", "genesis", "--id", "fixture-luau", "--template", "luau", "--rom-sha256", image_sha)
+        check(r.returncode == 0, f"mod init luau: {r.stdout[:200]}")
+        luau_pkg, _ = pack(luau_dir)
 
         # ---- 2. the launcher flow (install, exact-ROM check, approval, select, build, reverify, uninstall) on the real build driver; its programs play ----
         install = tmp / "install"
@@ -101,7 +105,7 @@ def main():
         zig.chmod(0o755)
         report = tmp / "flow.report"
         env = h.env(SEGARECOMP_S3_REPORT=str(report))
-        r = subprocess.run([flow, str(install), str(rom), str(other), str(pkg), str(wrong), str(data_pkg)], text=True, capture_output=True, env=env, timeout=1500)
+        r = subprocess.run([flow, str(install), str(rom), str(other), str(pkg), str(wrong), str(data_pkg), str(luau_pkg)], text=True, capture_output=True, env=env, timeout=1500)
         check(r.returncode == 0 and "launcher_schema3_flow_test: ok" in r.stdout, f"the launcher flow passes (install, approval, select, build, tamper/identity refusals, uninstall): {r.stdout[-300:]}{r.stderr[-800:]}")
         if h.failures:
             return 1
@@ -173,6 +177,16 @@ def main():
         check(results["32:9"][1].get("actors", {}).get("covered", 0) > 0, "32:9: the actor is credited where it was presented in the margin")
         right = lambda ratio: (results[ratio][2] or {}).get("virtual_sprites", {}).get("pixels_right", 0)   # noqa: E731
         check(right("32:9") > right("21:9") >= right("16:9") >= right("4:3") == 0, f"the actor reaches the margin only where the aspect presents it ({[right(r) for r in ('4:3', '16:9', '21:9', '32:9')]})")
+
+        # ---- 3b. the data-only variant compiles the verified EFFECTIVE image: the typed palette edit changes what the program draws; the native/Luau flags are not used; a wrong identity never builds ----
+        r = h.build(rom, tmp / "data", None, None, extra=("--data-package", data_pkg, "--data-identity", data_id))
+        check(r.returncode == 0, f"the data-only variant builds: {r.stdout[-300:]}{r.stderr[-300:]}")
+        dsurf, dram, dlines, _ = play(tmp / "data", "d-4x3", "4:3")
+        vbase, vram, _, _ = play(tmp / "vanilla", "dv-4x3", "4:3")
+        check(dsurf[100][160] == rgb(0x0E00) and vbase[100][160] == rgb(0x00E0) and dram == vram and "MOD_SUMMARY" not in dlines and "MOD_LOADED" not in str(dlines),
+              f"the data variant's picture shows the edited colour {dsurf[100][160]} where Vanilla shows {vbase[100][160]}, the guest state is identical, no mod runs")
+        r = h.build(rom, tmp / "data-bad", None, None, extra=("--data-package", data_pkg, "--data-identity", "00" * 32))
+        check(r.returncode != 0 and not (tmp / "data-bad/game").exists(), "a data package under another identity never builds")
 
         # ---- 4. save / restore / rewind / replay (32:9) ----
         base, ram_v, _, _ = play(tmp / "vanilla", "n-vanilla", "32:9")
