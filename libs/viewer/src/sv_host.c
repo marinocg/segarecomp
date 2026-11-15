@@ -1449,6 +1449,15 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
   }
   /* SEG-140-T005 (review): a rejected planner verdict refuses the whole extension presentation, so nothing the provider supplied (columns, HUD, virtual-sprite contribution) is shown or counted */
   const int geom_ok = h->geom_status == SV_GEOM_OK;
+  /* SEG-140-T008 (review): a picture-region virtual-sprite contribution rides on the extension surface's admission verdict too (ADR 0304 decision 3b). The verdict is the one above (geometry, size, pitch, identity);
+   * the only relaxation is Original, where nothing is asked for, the viewer always hands over its surface and a native-only presentation is the normal case: there the surface must still be structurally valid. */
+  int picture_admitted = 0;
+  if (ext != NULL && geom_ok && ext->status != SV_WS_UNAVAILABLE && ext->sequence == sequence) {
+    SvExtendedSurface structural = *ext;
+    structural.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;   /* the mode is judged separately below */
+    picture_admitted = sv_extended_surface_check(&structural, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK &&
+                       ((int)ext->mode <= (int)h->settings.video.widescreen || h->settings.video.widescreen == SV_WIDESCREEN_ORIGINAL);
+  }
   const int accepted = ext != NULL && geom_ok && (int)ext->mode <= (int)h->settings.video.widescreen && sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK;
   if (ext != NULL && ext->status != SV_WS_UNAVAILABLE && !offered) {
     /* SEG-140-T005: a surface for another frame is stale: it is never shown, never counted, and the reason is visible (no stale content may masquerade as current) */
@@ -1481,7 +1490,7 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
       /* an extension column is credited only when it is really displayed: the surface accepted, and a side treatment that shows the supplied columns (Comfort and Borders replace them with a fill, so a sprite
        * drawn there is discarded and counts for nothing) */
       const int shown = accepted && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
-      vs_picture = pic_px > 0u && geom_ok && ext->actor_picture != NULL;
+      vs_picture = pic_px > 0u && picture_admitted && ext->actor_picture != NULL;
       vs_left = left_px > 0u && shown;
       vs_right = right_px > 0u && shown;
       if (!vs_picture && !vs_left && !vs_right) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }
