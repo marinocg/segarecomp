@@ -59,6 +59,8 @@ def main():
         rom.write_bytes(image)
         image_sha = sha(image)
 
+        identities = {}
+
         def project(name, edit=None, toml=None):
             d = tmp / (name + "-src")
             (d / "src").mkdir(parents=True)
@@ -75,6 +77,7 @@ def main():
             check(r.returncode == 0 and doc.get("ok"), f"pack {name}: {r.stdout[:300]}")
             built = h.build(rom, tmp / name, out, doc.get("package_identity"), native=True)
             check(built.returncode == 0, f"{name} builds: {built.stdout[-400:]}{built.stderr[-300:]}")
+            identities[name] = doc.get("package_identity")
             return tmp / name
 
         check(h.build(rom, tmp / "vanilla").returncode == 0, "Vanilla builds")
@@ -96,12 +99,12 @@ def main():
         if h.failures:
             return 1
 
-        def play(program, name, ratio):
+        def play(program, name, ratio, pad=PAD, save=None, identity=None):
             cfg = tmp / (name + ".cfg")
             cfg.write_text(f"video.widescreen=extended_backgrounds\nvideo.widescreen_side_style=raw\nvideo.scale=1\nvideo.aspect=0\nvideo.widescreen_ratio={ratio}\n")
             report = tmp / (name + ".coverage.json")
             report.unlink(missing_ok=True)
-            run, lines, frame, ram = h.play(program, name, PAD, rom_sha=image_sha, extra={"SEGARECOMP_COVERAGE_REPORT": str(report), "SEGARECOMP_VIEWER_SETTINGS": str(cfg)})
+            run, lines, frame, ram = h.play(program, name, pad, save=save, identity=identity, rom_sha=image_sha, extra={"SEGARECOMP_COVERAGE_REPORT": str(report), "SEGARECOMP_VIEWER_SETTINGS": str(cfg)})
             check(lines.get("VIEWER_SUMMARY", [{}])[0].get("outcome") == "guest_stop", f"{name}: the program runs to its own guest stop: {run.stderr[-300:]}")
             side = side_of(*map(int, ratio.split(":")))
             return surface_from_bmp(read_bmp(frame), side), lines, (json.loads(report.read_text()) if report.is_file() else None), ram.read_bytes()
@@ -140,6 +143,34 @@ def main():
                 check(summary.get("faulted") is False, f"{name}: no fault: {summary.get('fault')}")
             if name == "stale":
                 check(0 < scenery["covered"] < scenery["requested"], f"stale: only the frame the window was rendered for is credited ({scenery})")
+        # ---- frame contract (off-by-one-frame hazards): a fault midway, a scene change while a window is pending, save/restore and rewind across a pending submission ----
+        mid = project("t-fault-midway", lambda t: t.replace(both, "    if (camera == 10U) {\n      (void)render->scenery_window(0U, x0, 0, 129U, ROWS, words);\n    } else {\n" + both + "    }\n"))
+        scene = project("t-scene-change", lambda t: t.replace('render->scene("main", 4U);', 'render->scene(camera >= 10U ? "other" : "main", camera >= 10U ? 5U : 4U);'))
+        if h.failures:
+            return 1
+        surf, lines, rep, ram = play(mid, "t-fault", "32:9")
+        sc = rep["scenes"][0]["components"]["scenery"]
+        check(lines["MOD_SUMMARY"][0]["faulted"] is True and 0 < sc["covered"] < rep["frames"] - 1, f"a fault midway: the frames before it are credited, none after, nothing stale is carried: {sc}")
+        check(all(surf[y][x] == base[y][x] for y in range(H) for x in list(range(side)) + list(range(side + W, W + 2 * side)) if not (x < 24 and y < 8)), "after the fault the final frame is the generic one (no leftover authored column)")
+        surf, lines, rep, ram = play(scene, "t-scene", "32:9")
+        main = next(x for x in rep["scenes"] if x["id"] == "main")["components"]["scenery"]
+        undeclared = next(x for x in rep["scenes"] if x["id"] == "*")["components"]["scenery"]
+        check(0 < main["covered"] < rep["frames"] - 1 and undeclared["covered"] == 0 and undeclared["undeclared"] > 0, f"a scene change while windows are pending: `main` is credited only before it, the new undeclared scene never: {main} {undeclared}")
+        ident = identities["modded"]
+        save = tmp / "save"
+        _, ls, _, _ = play(modded, "t-save", "32:9", "0 R\n12 RK\n13 R\n20 -\n", save=save, identity=ident)
+        check(ls["VIEWER_STATE"][0]["status"] == "ok", "a quick save succeeds with scenery in flight")
+        surf, lines, rep, ram = play(modded, "t-load", "32:9", "0 -\n3 M\n4 -\n", save=save, identity=ident)
+        sc = rep["scenes"][0]["components"]["scenery"]
+        cam = int.from_bytes(ram[0x12:0x14], "big")
+        want = golden(side, cam)
+        wrong = sum(1 for y in range(H) for xi in range(W + 2 * side) if want[y][xi] is not None and surf[y][xi] != want[y][xi] and not (xi < 24 and y < 8))
+        check(lines["VIEWER_STATE"][0]["status"] == "ok" and sc["covered"] < sc["requested"] and wrong == 0 and lines["MOD_SUMMARY"][0]["faulted"] is False,
+              f"after a restore the window of the pre-load timeline is never served (the first frame is generic), later frames are exact ({wrong} pixels differ, {sc})")
+        surf, lines, rep, ram = play(modded, "t-rewind", "32:9", "0 R\n14 RY\n15 R\n20 -\n", save=tmp / "rewind", identity=ident)
+        sc = rep["scenes"][0]["components"]["scenery"]
+        check([(e["event"], e["status"]) for e in lines.get("VIEWER_STATE", [])] == [("rewind", "ok")] and sc["covered"] < sc["requested"] and lines["MOD_SUMMARY"][0]["faulted"] is False,
+              f"a rewind across a pending submission leaves that frame generic and the mod healthy: {sc}")
         if h.failures:
             return 1
     print("mod_scenery_abi2_test: ok")
