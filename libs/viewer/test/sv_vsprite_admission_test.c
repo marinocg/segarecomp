@@ -51,7 +51,7 @@ static uint64_t out_hash(SvHost *h) {
   SDL_Surface *s = sv_host_capture_output(h);
   uint64_t x = 1469598103934665603ull;
   int y;
-  if (s == NULL) return 0;
+  if (s == NULL) return 0;   /* a missing capture is 0: the callers refuse it, it can never equal a native reference */
   for (y = s->h / 2; y < s->h; ++y) { const uint8_t *row = (const uint8_t *)s->pixels + (size_t)y * (size_t)s->pitch; int i; for (i = 0; i < s->w * 2; ++i) x = (x ^ row[i]) * 1099511628211ull; }   /* the lower-left quadrant: the host's once-per-change notice sits at the top right and is not what is compared */
   SDL_DestroySurface(s);
   return x;
@@ -83,8 +83,9 @@ static uint64_t run(const Case *c, int with_signal, char *json_out, size_t cap) 
   if (with_signal) {
     e.actor_stage = SV_ACT_COMPOSED; e.actor_provenance = 2; e.actor_pixels_authored = 64; e.actor_left_authored = (uint32_t)c->left; e.actor_right_authored = (uint32_t)c->right; e.actor_picture = g_comp;
   }
-  CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, seq, &e) == 0 || 1, "present");
+  CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, seq, &e) == 0, "the host presents the frame (a refused extension still presents the native picture)");
   hash = out_hash(h);
+  CHECK(hash != 0u, "the final output was captured");
   if (json_out != NULL) snprintf(json_out, cap, "%s", json_of(h));
   sv_host_close(h);
   return hash;
@@ -114,6 +115,7 @@ int main(void) {
     char with[16384], without[16384];
     const uint64_t signal_hash = run(c, 1, with, sizeof with), native_hash = run(c, 0, without, sizeof without);
     char what[160];
+    CHECK(signal_hash != 0u && native_hash != 0u, "both captures exist before any comparison");
     snprintf(what, sizeof what, "%s: the final pixels are the %s picture", c->name, c->expect_composed ? "COMPOSED" : "NATIVE");
     CHECK(c->expect_composed ? signal_hash != native_hash : signal_hash == native_hash, what);
     if (c->expect_composed) {
