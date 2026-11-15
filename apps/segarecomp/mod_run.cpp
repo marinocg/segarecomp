@@ -307,6 +307,13 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
   return std::nullopt;
 }
 
+// SEG-138-T012: the hook counters of a hooked program (empty for a program that links no hooks), shared by `mod diff-run` and `mod test`.
+std::string hooks_json(const ModResult &m) {
+  if (!m.hooks) return {};
+  return ",\"hooks\":{\"entry\":" + std::to_string(m.hook_entry) + ",\"exit\":" + std::to_string(m.hook_exit) + ",\"abandoned\":" + std::to_string(m.hook_abandoned) + ",\"unproven\":" +
+         std::to_string(m.hook_unproven) + ",\"overflowed\":" + std::to_string(m.hook_overflowed) + "}";
+}
+
 std::string observed_json(const Observed &o, bool aggregate) {
   std::string j = "{\"outcome\":\"" + esc(o.outcome) + "\",\"frames_captured\":" + std::to_string(o.frames_captured) + ",\"frames_published\":" + std::to_string(o.frames_published) +
                   ",\"final_frame_sha256\":\"" + (o.digests.empty() ? std::string() : o.digests.back()) + "\",\"final_work_ram_sha256\":\"" + o.final_state + "\"";
@@ -315,9 +322,7 @@ std::string observed_json(const Observed &o, bool aggregate) {
     j += ",\"mod\":{\"id\":\"" + esc(o.mod.id) + "\",\"faulted\":" + (o.mod.faulted ? "true" : "false") + ",\"fault\":\"" + esc(o.mod.fault) + "\",\"callbacks\":" + std::to_string(o.mod.callbacks) +
          ",\"committed_writes\":" + std::to_string(o.mod.committed_writes) + ",\"write_digest\":\"" + o.mod.write_digest + "\",\"overlay_ops\":" + std::to_string(o.mod.overlay_ops) + ",\"overlay_sha256\":\"" +
          o.mod.overlay_sha256 + "\",\"nondeterministic\":" + (o.mod.nondeterministic ? "true" : "false");
-    if (o.mod.hooks)
-      j += ",\"hooks\":{\"entry\":" + std::to_string(o.mod.hook_entry) + ",\"exit\":" + std::to_string(o.mod.hook_exit) + ",\"abandoned\":" + std::to_string(o.mod.hook_abandoned) + ",\"unproven\":" +
-           std::to_string(o.mod.hook_unproven) + ",\"overflowed\":" + std::to_string(o.mod.hook_overflowed) + "}";
+    j += hooks_json(o.mod);
     j += "}";
   }
   (void)aggregate;
@@ -690,6 +695,7 @@ int run_test(const RunOptions &o) {
     if (!failure.empty()) results += ",\"first_divergence\":{" + failure + "}";
     results += ",\"observed\":{\"final_frame_sha256\":\"" + (obs.digests.empty() ? std::string() : obs.digests.back()) + "\",\"final_work_ram_sha256\":\"" + obs.final_state + "\"";
     if (!obs.pcm.empty()) results += ",\"pcm_sha256\":\"" + obs.pcm + "\"";
+    results += hooks_json(obs.mod);
     if (!obs.ram_frames.empty() && !o.aggregate) { results += ",\"ram_frames\":["; for (std::size_t i = 0; i < obs.ram_frames.size(); ++i) results += (i ? ",\"" : "\"") + obs.ram_frames[i] + "\""; results += "]"; }
     results += "}}";
     first = false;

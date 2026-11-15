@@ -37,6 +37,7 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <variant>
 #include <string>
@@ -77,6 +78,83 @@ void print_usage(std::ostream &output) {
   return bytes;
 }
 } // namespace
+
+namespace {
+// SEG-138-T012: the `--function-hooks` plan. Lines: `vector <hex8>` (at most 62: the exception vectors 2..63) and
+// `site <id> <entry-hex8> <mode> <reads-hex8> <writes-hex8> <replace 0|1> <flags 0|1> <cost>` (1..64 sites). Single-space separated, exact field counts; <= 16 KiB, <= 256 bytes per line. Returns "" or the rejection reason.
+std::string parse_function_hook_plan(const std::string &path, segarecomp::M68kFunctionHookPlan &plan) {
+  constexpr std::size_t kMaxBytes = 16384U, kMaxLine = 256U, kMaxSites = 64U, kMaxVectors = 62U;
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return "cannot read the plan";
+  std::string text(kMaxBytes + 1U, '\0');
+  in.read(text.data(), static_cast<std::streamsize>(text.size()));
+  text.resize(static_cast<std::size_t>(in.gcount()));
+  if (text.size() > kMaxBytes) return "the plan exceeds 16384 bytes";
+  const auto hex8 = [](const std::string &t, std::uint32_t &out) {
+    if (t.size() != 8U) return false;
+    out = 0;
+    for (const char c : t) {
+      const int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;   // lower-case, as the build writes it
+      if (d < 0) return false;
+      out = (out << 4U) | static_cast<std::uint32_t>(d);
+    }
+    return true;
+  };
+  std::set<std::string> ids;
+  std::set<std::uint32_t> entries, vectors;
+  std::size_t line_no = 0, at = 0;
+  while (at < text.size()) {
+    std::size_t end = text.find('\n', at);
+    if (end == std::string::npos) end = text.size();
+    const std::string line = text.substr(at, end - at);
+    at = end + 1U;
+    ++line_no;
+    const std::string where = "line " + std::to_string(line_no) + ": ";
+    if (line.size() > kMaxLine) return where + "the line is too long";
+    if (line.empty()) continue;
+    std::vector<std::string> f;
+    for (std::size_t i = 0; i <= line.size();) {
+      std::size_t sp = line.find(' ', i);
+      if (sp == std::string::npos) sp = line.size();
+      f.push_back(line.substr(i, sp - i));
+      i = sp + 1U;
+    }
+    if (f[0] == "vector") {
+      std::uint32_t target = 0;
+      if (f.size() != 2U || !hex8(f[1], target)) return where + "a vector line is `vector <hex8>`";
+      if (vectors.size() >= kMaxVectors || !vectors.insert(target).second) return where + "too many or duplicate vectors";
+      plan.vectors.push_back(target);
+    } else if (f[0] == "site") {
+      if (f.size() != 9U) return where + "a site line has exactly 9 fields";
+      segarecomp::M68kHookSite site;
+      if (plan.sites.size() >= kMaxSites) return where + "more than 64 sites";
+      site.id = f[1];
+      if (site.id.empty() || site.id.size() > 64U || !std::all_of(site.id.begin(), site.id.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.'; }))
+        return where + "invalid site id";
+      if (!hex8(f[2], site.entry) || !hex8(f[4], site.reads) || !hex8(f[5], site.writes)) return where + "invalid hexadecimal field";
+      if (f[3] == "before") site.mode = segarecomp::M68kHookMode::before;
+      else if (f[3] == "after") site.mode = segarecomp::M68kHookMode::after;
+      else if (f[3] == "before-after") site.mode = segarecomp::M68kHookMode::before_after;
+      else if (f[3] == "replace") site.mode = segarecomp::M68kHookMode::replace;
+      else return where + "unknown mode";
+      if ((f[6] != "0" && f[6] != "1") || (f[7] != "0" && f[7] != "1")) return where + "a flag is 0 or 1";
+      site.replace_declared = f[6] == "1";
+      site.flags_written = f[7] == "1";
+      if (f[8].empty() || f[8].size() > 5U || !std::all_of(f[8].begin(), f[8].end(), [](char c) { return c >= '0' && c <= '9'; })) return where + "invalid cost";
+      const unsigned long cost = std::stoul(f[8]);   // at most five digits: cannot throw
+      if (cost > 65535UL) return where + "the cost exceeds 65535";
+      site.cost = static_cast<std::uint32_t>(cost);
+      if (!ids.insert(site.id).second) return where + "duplicate site id";
+      if (!entries.insert(site.entry).second) return where + "duplicate site address";
+      plan.sites.push_back(std::move(site));
+    } else {
+      return where + "unexpected record type";
+    }
+  }
+  if (plan.sites.empty()) return "the plan declares no site";
+  return {};
+}
+}  // namespace
 
 int run_cli(int argc, char **argv) {
 #if defined(_WIN32)
@@ -699,45 +777,13 @@ int run_cli(int argc, char **argv) {
       // immutable-ROM AOT entries) and otherwise writes the single --generated-c-output file: a pure,
       // deterministic function of the accepted program size, so small programs keep the historical
       // one-file artifact and one giant TU is never produced for a large one.
-      // SEG-138-T012 (ADR 0298): the plan the build resolved from the package's verified symbols. Lines: `vector <hex8>` and
-      // `site <id> <entry-hex8> <mode> <reads-hex8> <writes-hex8> <replace 0|1> <flags 0|1> <cost>`. A malformed plan is a usage error, never a silently unhooked program.
+      // SEG-138-T012 (ADR 0298): the plan the build resolved from the package's verified symbols; parsed fail-closed (bounded, exact fields) by parse_function_hook_plan. A rejected plan is a usage error, never a silently unhooked program.
       segarecomp::M68kFunctionHookPlan hook_plan_storage;
       const segarecomp::M68kFunctionHookPlan *hook_plan = nullptr;
       if (function_hooks_plan) {
-        std::ifstream plan_in{std::string(*function_hooks_plan)};
-        if (!plan_in) { std::cerr << "segarecomp: cannot read the function-hook plan\n"; return 2; }
-        for (std::string line; std::getline(plan_in, line);) {
-          if (line.empty()) continue;
-          std::istringstream fields(line);
-          std::string kind;
-          fields >> kind;
-          if (kind == "vector") {
-            std::string address;
-            fields >> address;
-            hook_plan_storage.vectors.push_back(static_cast<std::uint32_t>(std::stoul(address, nullptr, 16)));
-          } else if (kind == "site") {
-            segarecomp::M68kHookSite site;
-            std::string entry, mode, reads, writes;
-            int replace = 0, flags = 0;
-            unsigned long cost = 0;
-            fields >> site.id >> entry >> mode >> reads >> writes >> replace >> flags >> cost;
-            if (!fields) { std::cerr << "segarecomp: malformed function-hook plan line\n"; return 2; }
-            site.entry = static_cast<std::uint32_t>(std::stoul(entry, nullptr, 16));
-            site.reads = static_cast<std::uint32_t>(std::stoul(reads, nullptr, 16));
-            site.writes = static_cast<std::uint32_t>(std::stoul(writes, nullptr, 16));
-            site.replace_declared = replace != 0;
-            site.flags_written = flags != 0;
-            site.cost = static_cast<std::uint32_t>(cost);
-            if (mode == "before") site.mode = segarecomp::M68kHookMode::before;
-            else if (mode == "after") site.mode = segarecomp::M68kHookMode::after;
-            else if (mode == "before-after") site.mode = segarecomp::M68kHookMode::before_after;
-            else if (mode == "replace") site.mode = segarecomp::M68kHookMode::replace;
-            else { std::cerr << "segarecomp: malformed function-hook plan mode\n"; return 2; }
-            hook_plan_storage.sites.push_back(std::move(site));
-          } else {
-            std::cerr << "segarecomp: malformed function-hook plan line\n";
-            return 2;
-          }
+        if (const std::string plan_error = parse_function_hook_plan(std::string(*function_hooks_plan), hook_plan_storage); !plan_error.empty()) {
+          std::cerr << "segarecomp: function-hook plan rejected: " << plan_error << '\n';
+          return 2;
         }
         hook_plan = &hook_plan_storage;
         // Hooks classify against the compiled program: only the partial-program route carries one (an accepted whole-program analysis does not), so any other result is refused, never emitted unhooked.

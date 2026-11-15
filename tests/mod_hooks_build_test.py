@@ -177,6 +177,62 @@ def main():
         drhooks = (drdoc.get("modded") or {}).get("mod", {}).get("hooks", {})
         check(dr.returncode == 0 and drhooks.get("entry") == 40 and drhooks.get("exit") == 40, f"mod diff-run reports hook counters: {dr.stdout[:300]} {dr.stderr[-200:]}")
 
+        # `mod test` reports them in the scenario's observation, and a hook-free mod omits the field
+        scen = ('[[scenario]]\nname = "hooked"\nframes = 24\nbudget = 20000000\ntimeout = 120\ninput = "10:1:0x10"\nram = ["16:48"]\n')
+        for pname, with_hooks in (("mt-hooked", True), ("mt-plain", False)):
+            pd = project(pname, toml(rom_sha, WATCH.format(mode="before-after") if with_hooks else ""))
+            (pd / "tests.toml").write_text(scen)
+            tr = h.run_cli("mod", "test", pd, "--rom", rom, "--cc", compiler, "--sdk-dir", root / "platforms")
+            tdoc = json.loads(tr.stdout) if tr.stdout.strip() else {}
+            obs = (tdoc.get("scenarios") or [{}])[0].get("observed", {})
+            if with_hooks:
+                hh = obs.get("hooks", {})
+                check(tr.returncode == 0 and tdoc.get("ok") and hh.get("entry", 0) >= 20 and hh.get("exit", 0) >= 19 and hh.get("abandoned") == 0 and hh.get("unproven") == 0 and hh.get("overflowed") == 0,
+                      f"mod test reports hook counters in the scenario observation: {tr.stdout[:400]} {tr.stderr[-200:]}")
+                check("final_frame_sha256" in obs and "final_work_ram_sha256" in obs, "the existing observation fields are unchanged")
+            else:
+                check(tr.returncode == 0 and tdoc.get("ok") and "hooks" not in obs and "final_work_ram_sha256" in obs, f"a hook-free mod's mod test observation has no hooks field: {tr.stdout[:300]}")
+
+        # ---- the `--function-hooks` plan is an external input: every malformed plan is rejected before anything is generated ----
+        good_site = "site bump-watch 00000400 before-after 00020001 00000000 0 0 0"
+        plans = {
+            "empty": "",
+            "no-site": "vector 00000500\n",
+            "oversized": ("vector 00000500\n" + good_site + "\n").ljust(20000, "\n"),
+            "too-many-sites": "".join(f"site h{i} {0x400 + 2 * i:08x} before 00000000 00000000 0 0 0\n" for i in range(65)),
+            "bad-hex": "site a 0000040g before 00000000 00000000 0 0 0\n",
+            "uppercase-hex": "site a 0000040A before 00000000 00000000 0 0 0\n",
+            "short-hex": "site a 400 before 00000000 00000000 0 0 0\n",
+            "overflow-cost": "site a 00000400 before 00000000 00000000 0 0 99999999999999999999\n",
+            "cost-over-16-bit": "site a 00000400 replace 00000000 00000000 1 0 65536\n",
+            "overflow-hex": "site a 100000400 before 00000000 00000000 0 0 0\n",
+            "missing-field": "site a 00000400 before 00000000 00000000 0 0\n",
+            "extra-field": good_site + " 7\n",
+            "trailing-space": good_site + " \n",
+            "bad-mode": "site a 00000400 around 00000000 00000000 0 0 0\n".replace("00000400", "00000400"),
+            "duplicate-id": good_site + "\nsite bump-watch 00000440 before 00000000 00000000 0 0 0\n",
+            "duplicate-address": good_site + "\nsite other 00000400 before 00000000 00000000 0 0 0\n",
+            "bad-bool": "site a 00000400 before 00000000 00000000 2 0 0\n",
+            "bad-id": "site Bad_Id 00000400 before 00000000 00000000 0 0 0\n",
+            "oversized-line": "site " + "a" * 300 + " 00000400 before 00000000 00000000 0 0 0\n",
+            "unexpected-record": good_site + "\nhook x\n",
+            "vector-extra": good_site + "\nvector 00000500 1\n",
+            "vector-bad": good_site + "\nvector 5\n",
+            "too-many-vectors": good_site + "\n" + "".join(f"vector {0x500 + 2 * i:08x}\n" for i in range(63)),
+        }
+        for pname, body in plans.items():
+            pf = tmp / f"plan-{pname}.txt"
+            pf.write_text(body)
+            shard = tmp / f"plan-out-{pname}"
+            er = h.run_cli("emit-general-startup-bridge-c", "--rom", rom, "--reset-entry", "--rom-sha256", rom_sha, "--immutable-rom-aot", "--function-hooks", pf, "--generated-c-shard-dir", shard)
+            check(er.returncode == 2 and "function-hook plan rejected" in er.stderr and not shard.exists(), f"plan {pname}: rejected cleanly (rc={er.returncode}) {er.stderr[-160:]}")
+        er = h.run_cli("emit-general-startup-bridge-c", "--rom", rom, "--reset-entry", "--rom-sha256", rom_sha, "--immutable-rom-aot", "--function-hooks", tmp / "no-such-plan.txt", "--generated-c-shard-dir", tmp / "plan-out-missing")
+        check(er.returncode == 2 and "cannot read the plan" in er.stderr and not (tmp / "plan-out-missing").exists(), f"a missing plan is rejected: {er.stderr[-160:]}")
+        okplan = tmp / "plan-ok.txt"
+        okplan.write_text("vector 00000500\n" + good_site + "\n")
+        er = h.run_cli("emit-general-startup-bridge-c", "--rom", rom, "--reset-entry", "--rom-sha256", rom_sha, "--immutable-rom-aot", "--function-hooks", okplan, "--generated-c-shard-dir", tmp / "plan-out-ok")
+        check(er.returncode == 0 and (tmp / "plan-out-ok" / "bridge_generated.units").is_file(), f"the product-generated plan format is accepted: {er.stderr[-200:]}")
+
         # ---- replacement: commit = the original's effects; decline = Vanilla ----
         hooked("replace", REPLACE, mode=1)
         _, rs, rmod = run("replace")
@@ -205,10 +261,16 @@ def main():
             save = tmp / "inflight.state"
             _, ss, smod = run("watch", {"SEGARECOMP_MOD_CHECKPOINT": str(frame), "SEGARECOMP_MOD_SAVE": str(save)})
             check(save.is_file() and smod["roundtrip"]["status"] == "ok", "the in-flight state is saved")
-            # a FRESH program loads the state at its start: the pending exit callback is still delivered (the frame was restored), and the run ends where an uninterrupted one would
-            _, ls, lmod = run("watch", {"SEGARECOMP_MOD_LOAD": str(save)}, frames="64")
+            # a FRESH program loads the state at its start. The container holds the state at the checkpoint's logical frame (`frame`); the fresh program then runs 64 - frame further frames of the same input, so it
+            # must end at the SAME logical endpoint as the uninterrupted 64-frame reference: the in-flight call frame survives only if its pending exit callback is delivered after the load.
+            # (the checkpoint is taken at the first slice boundary at or after `frame`, i.e. at logical frame `frame`; a capture window of N frames after a load ends at logical frame frame + N - 1)
+            _, ls, lmod = run("watch", {"SEGARECOMP_MOD_LOAD": str(save)}, frames=str(65 - frame))
             check(lmod.get("loaded_state_sha256") == smod["roundtrip"]["state_sha256"], "a fresh program restores the container that was saved")
-            check(not lmod["faulted"] and lmod["hooks"]["abandoned"] == 0, f"after the load the in-flight frame is not abandoned: {lmod.get('hooks')}")
+            lh = lmod.get("hooks", {})
+            check(not lmod["faulted"] and lh.get("abandoned") == 0 and lh.get("unproven") == 0 and lh.get("overflowed") == 0, f"after the load nothing is abandoned, skipped or faulted: {lh}")
+            check(ls.get("final_work_ram_sha256") == hs.get("final_work_ram_sha256") and ls.get("digests", [None])[-1] == hs["digests"][-1], "the resumed program ends in the reference's work RAM and final frame")
+            check(lh.get("entry") == hk["entry"] and lh.get("exit") == hk["exit"], f"the pending exit callback of the in-flight call is delivered after the load (totals equal the uninterrupted reference): {lh} vs {hk}")
+            check(lmod["write_digest"] == hmod["write_digest"] and lmod["callbacks"] == hmod["callbacks"] and lmod["committed_writes"] == hmod["committed_writes"], "the resumed program's committed-write digest and callback count equal the reference's")
             corrupt = tmp / "corrupt.state"
             data = bytearray(save.read_bytes())
             data[len(data) // 2] ^= 0xFF
@@ -309,6 +371,7 @@ def main():
             vv = h.build(rom, tmp / "vanilla-v", viewer=True)
             check(vv.returncode == 0, "Vanilla viewer program builds: " + vv.stdout[-300:])
             _, _, vframe, vram = h.play(tmp / "vanilla-v", "vanilla-v", budget=40_000_000)
+            counters = {}
             for name, hooks, mode in (("watch-v", WATCH.format(mode="before-after"), 0), ("replace-v", REPLACE, 1), ("decline-v", REPLACE, 2)):
                 d = project(name, toml(rom_sha, hooks), mode=mode)
                 package, identity = pack(d)
@@ -319,6 +382,21 @@ def main():
                 check(loaded.get("hooks") == 1, f"{name}: the played program reports the linked hook: {loaded}")
                 check(frame.is_file() and ram.is_file() and ram.read_bytes() == vram.read_bytes() and frame.read_bytes() == vframe.read_bytes(),
                       f"{name}: the played program ends in the Vanilla frame and work RAM")
+                summary = (lines.get("MOD_SUMMARY") or [{}])[0]
+                hk_v = summary.get("hooks", {})
+                counters[name] = (hk_v, summary)
+                check(summary and not summary.get("faulted") and hk_v.get("entry", 0) >= 60 and hk_v.get("abandoned") == 0 and hk_v.get("unproven") == 0 and hk_v.get("overflowed") == 0,
+                      f"{name}: the SDL3 executable delivered hook callbacks and skipped none: {summary}")
+            wv, rv_, dv = counters["watch-v"], counters["replace-v"], counters["decline-v"]
+            check(wv[0].get("exit", 0) > 0 and wv[0]["entry"] - wv[0]["exit"] in (0, 1), f"watch-v: entries pair with exits: {wv[0]}")
+            check(rv_[0].get("exit") == 0 and rv_[0].get("entry") == wv[0].get("entry") and rv_[1].get("committed_writes", 0) >= 60, f"replace-v: every call replaced and the replacement's writes committed: {rv_}")
+            check(dv[0].get("exit") == 0 and dv[0].get("entry") == wv[0].get("entry") and dv[1].get("committed_writes") == 0, f"decline-v: every call offered, nothing committed: {dv}")
+            # a deliberately observable effect: the replacement skips the original's RAM increment and writes a marker instead, so an accidentally disconnected dispatch would leave 0x20 at the Vanilla value
+            d = project("marker-v", toml(rom_sha, REPLACE), provider=PROVIDER.replace("res = (v + 1U) & 0xFFFFU;", "res = 0x1234U;"), mode=1)
+            package, identity = pack(d)
+            check(h.build(rom, tmp / "marker-v", package, identity, viewer=True, native=True).returncode == 0, "marker viewer program builds")
+            _, mlines, _, mram = h.play(tmp / "marker-v", "marker-v", budget=40_000_000)
+            check(mram.is_file() and vram.is_file() and mram.read_bytes()[0x20:0x22] == b"\x12\x34" and vram.read_bytes()[0x20:0x22] != b"\x12\x34", "the played program's work RAM shows the replacement's marker (the callback really ran)")
 
         if h.failures:
             print(f"mod_hooks_build_test: {len(h.failures)} failure(s)")
