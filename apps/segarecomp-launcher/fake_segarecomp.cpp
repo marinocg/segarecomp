@@ -164,6 +164,7 @@ int main(int argc, char **argv) {
                  : R"({"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"original_supported","catalog_revision":1,"native_implementation_version":1,"replacement_available":false,"save_states":"supported","audio_status":"supported","structural_alternatives":{"requested":false,"forms":0}})";
       std::ofstream(out / "status.json", std::ios::app) << ",\"audio_implementation\":" << record;
     }
+    if (!option("--luau-package").empty()) std::ofstream(out / "status.json", std::ios::app) << ",\"bytecode_digest\":\"" << std::string(64, 'c') << "\"";   // SEG-143-T008: what the real build records after it compiled a Luau package
     std::ofstream(out / "status.json", std::ios::app) << "}\n";
     if (env("FAKE_BUILD_INTERMEDIATES") == "1") {
       std::ofstream(out / "generated.c") << "/* synthetic */";

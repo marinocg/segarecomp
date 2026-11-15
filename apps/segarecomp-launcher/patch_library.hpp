@@ -19,6 +19,9 @@ struct PatchPreview {
   bool package_valid = false;
   bool fits_game = false;
   bool already_installed = false;
+  // SEG-143-T008: set for a schema 3 mod package ("luau" | "native"); `info` then carries what the approval sheet shows (name, author, license, ABI) and `effective_sha256` is the image the build compiles.
+  bool schema3 = false;
+  std::string mod_trust, effective_sha256;
 };
 
 // Full verification without installing anything: ZIP structure, manifest, payload digest, the exact original bytes, BPS application, patched digest.

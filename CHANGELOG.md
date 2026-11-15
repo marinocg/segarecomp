@@ -7,6 +7,12 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Authored offscreen scenery from a native ABI 2 provider (ADR 0309; combined delivery F29)
+
+* A native ABI 2 provider can now supply the offscreen scenery of a widescreen picture: `SegaGenesisRenderApi::scenery_window` submits a bounded name-table window per plane from `render` (capability `scenery.words`), served through the existing extension producer for exactly the frame it describes. Generic and synthetic-tested; no shipped package uses it yet, and nothing claims any game is covered.
+* The **launcher installs, approves, selects, builds and plays a local schema 3 mod** (Luau or native ABI 2) of a library game through the same install sheet as patches: exact-ROM check, a native-code approval tied to the package identity, an immutable stored copy re-verified at build and launch, one selected mod over the original game, its own build entry and saves, Vanilla untouched, uninstall restores Vanilla. A data-only schema 3 mod installs without a code approval and builds its verified effective image as a distinct variant (`segarecomp build --data-package <p> --data-identity <id>`). Local files only (no catalog browsing).
+* New synthetic example `platforms/genesis/sdk/examples/widescreen-native` (original fixture, one native package: authored scenery, an actor sprite crossing into the margin, HUD, a gameplay change, mod state) with an integrated test at 4:3, 16:9, 21:9 and 32:9.
+
 ### Function hooks in built Genesis programs (ADR 0308)
 
 * A native ABI 2 package's `[[hook]]` declarations are now resolved against the exact source image, classified against the compiled program and linked into headless and played Genesis programs (`segarecomp build --native-package`): `before`, `after`, `before-after` and `replace` callbacks run with the cycle, ordering and transactional-failure rules of ADR 0298. A hook that is a no-op, or a replacement that declines, leaves the program bit-identical to Vanilla; save states taken with a hooked call in flight restore it.

@@ -1,0 +1,52 @@
+# Widescreen + gameplay native example (SEG-149-T001, ADR 0309): ONE schema 3 / native ABI 2 package that authors the offscreen scenery of a scrolling picture, draws a virtual sprite for an actor that crosses the
+# picture edge, shows a small HUD and changes one bounded gameplay variable on an input. The revision is the deterministic FIXTURE image of fixture_rom.py (not a game). Native code is host code: installing it
+# asks for the approval of this exact package identity.
+[mod]
+id = "widescreen-gameplay-example"
+author = "segarecomp examples"
+version = "0.1.0"
+name = "Widescreen + gameplay example (native)"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "1fb263c1826a82207be58fbeafab1c050db6b80f7812d47af765fd18868b5f28"
+
+[[source]]
+kind = "native-c11"
+path = "src/provider.c"
+
+[abi]
+native = 2
+
+[capabilities]
+required = ["input.read", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "overlay.rgba", "scenery.words", "state.mod"]
+
+[state]
+schema = 1
+
+# The camera and the actor's world x (read only) ...
+[[memory]]
+revision = "fixture"
+space = "m68k.work_ram"
+offset = 18
+length = 4
+access = "read"
+
+# ... and the power word, the ONLY guest memory the mod may write.
+[[memory]]
+revision = "fixture"
+space = "m68k.work_ram"
+offset = 22
+length = 2
+access = "read-write"
+
+[geometry]
+aspect_max = "32:9"
+
+[[scene]]
+id = "main"
+components = ["scenery", "hud", "actors"]

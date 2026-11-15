@@ -39,7 +39,15 @@ typedef struct SegaGenesisRenderApi {
    * draws nothing and is reported); GAME_STATE_VERIFIED commands are accepted only when the host established a current verified snapshot, which the scheduled path does not (UNVERIFIED_STATE). A set lives
    * for one frame. `set` must not be NULL (a range fault). Replaces the first reserved slot of the table: its size and the others are unchanged. */
   int (*virtual_sprites)(const GenesisVirtualSpriteSet *set);
-  void *reserved[7];                          /* NULL */
+  /* SEG-140-T011 (ADR 0309): authored offscreen scenery, available only when `scenery.words` was granted (otherwise SEGA_MOD_E_CAPABILITY, a fault of the callback). Submits, for one VDP plane (0 = A, 1 = B), a WINDOW
+   * of name-table words in unwrapped plane-cell coordinates: word (c, r) of `words` (row-major, `cols` x `rows`, 1..128 x 1..64, at most 4096 words) is the cell at plane x = (cell_x0 + c) * 8, plane y = (cell_y0 + r) * 8,
+   * where the host's producer looks a column outside the picture up at plane x = screen x - hscroll, plane y = line + vscroll (the horizontal/vertical scroll the VDP applies to that line, floor-divided by 8).
+   * Words are standard VDP name-table words (priority, palette line, flips, pattern); the host's own VDP code decodes patterns and palettes, so art must already be resident in VRAM. A cell outside the window fails the
+   * frame's authored scenery claim (the host then reports scenery not delivered and presents generically); it never invents a tile. At most one window per plane per render callback (a second is a range fault); the
+   * window is committed with the callback's other output, belongs to exactly that one frame and is never carried to another. `words` is copied; NULL or out-of-bounds arguments are range faults.
+   * Replaces the second reserved slot: size and the other slots are unchanged. */
+  int (*scenery_window)(uint32_t plane, int32_t cell_x0, int32_t cell_y0, uint32_t cols, uint32_t rows, const uint16_t *words);
+  void *reserved[6];                          /* NULL */
 } SegaGenesisRenderApi;
 
 typedef struct SegaGenesisFeatures {

@@ -1,3 +1,4 @@
+#include "segarecomp/luau_api.hpp"
 #include "library_catalog.hpp"
 
 #include "json_lite.hpp"
@@ -91,6 +92,11 @@ json::Value to_json(const LibraryEntry &e) {
         o.set("author", json::Value::make_string(p.author));
         if (!p.license.empty()) o.set("license", json::Value::make_string(p.license));
         o.set("native_approved", json::Value::make_int(p.native_approved ? 1 : 0));
+      }
+      if (p.schema3) {   // absent for schema 1/2 records: those stay byte-identical to what older releases wrote
+        o.set("schema3", json::Value::make_int(1));
+        o.set("mod_trust", json::Value::make_string(p.mod_trust));
+        o.set("effective_sha256", json::Value::make_string(p.effective_sha256));
       }
       o.set("width_max", json::Value::make_int(p.width_max));
       if (!p.widescreen.empty()) o.set("widescreen", json::Value::make_string(p.widescreen));
@@ -270,13 +276,19 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
       ip.version = clamp_text(p.str("version"), 32);
       ip.name = clamp_text(p.str("name"), 64);
       ip.native_source_sha256 = p.str("native_source_sha256");
+      ip.schema3 = p.num("schema3") == 1;
+      if (ip.schema3) {
+        ip.mod_trust = p.str("mod_trust");
+        ip.effective_sha256 = p.str("effective_sha256");
+        if ((ip.mod_trust != "luau" && ip.mod_trust != "native" && ip.mod_trust != "data") || !is_hex_digest(ip.effective_sha256, 64)) continue;   // a damaged mod record is dropped, never degraded into a patch
+      }
       if (!ip.native_source_sha256.empty() || p.get("native_abi") != nullptr) {   // a damaged native record is dropped with the patch: a native package never degrades into a BPS-only one
         ip.native_abi = static_cast<unsigned>(std::clamp(p.num("native_abi"), 0LL, 1000LL));
         ip.native_caps = static_cast<unsigned>(std::clamp(p.num("native_caps"), 0LL, 15LL));
         ip.author = clamp_text(p.str("author"), 64);
         ip.license = clamp_text(p.str("license"), 32);
         ip.native_approved = p.num("native_approved") == 1;
-        if (ip.native_abi == 0 || ip.native_caps == 0 || ip.author.empty() || !is_hex_digest(ip.native_source_sha256, 64)) continue;
+        if (ip.native_abi == 0 || (ip.native_caps == 0 && !ip.schema3) || ip.author.empty() || !is_hex_digest(ip.native_source_sha256, 64)) continue;
       }
       ip.width_max = static_cast<int>(std::clamp(p.num("width_max", -1), -1LL, 100LL));
       ip.installed_at = std::max(0LL, p.num("installed_at"));
@@ -621,7 +633,7 @@ std::size_t Catalog::migrate_cache(const fs::path &cache_root, long long now) {
     if (!read_file(meta_path, text)) continue;
     const auto meta = json::parse(text);
     if (!meta || !meta->is_object()) continue;
-    if (!meta->str("patch_identity").empty()) continue;   // SEG-122: a Patched build is never a game of its own; it is adopted only through its library entry
+    if (!meta->str("patch_identity").empty() || !meta->str("luau_identity").empty()) continue;   // SEG-143-T008: a mod build is likewise adopted only through its library entry
     const std::string platform = meta->str("platform", "genesis");
     const std::string sha = meta->str("rom_sha256");
     if ((platform != "genesis" && platform != "master-system") || !is_hex_digest(sha, 64)) continue;
@@ -658,7 +670,17 @@ std::filesystem::path patch_package_path(const std::string &identity) { return l
 
 RomView view_for_variant(const LibraryEntry &entry, const std::string &identity) {
   RomView view = view_from_entry_vanilla(entry);
-  if (const InstalledPatch *p = entry.find_patch(identity); p != nullptr && entry.platform_id == "genesis") {
+  if (const InstalledPatch *p = entry.find_patch(identity); p != nullptr && p->schema3 && entry.platform_id == "genesis") {
+    // SEG-143-T008: a schema 3 mod is never a patch variant: the build derives its effective image itself (`segarecomp build --luau-package|--native-package`), approval is per package identity.
+    view.luau_identity = p->identity;
+    view.luau_package = patch_package_path(p->identity);
+    view.luau_effective_sha256 = p->effective_sha256;
+    view.luau_native = p->mod_trust == "native";
+    view.luau_data = p->mod_trust == "data";
+    view.luau_approved = !view.luau_native || p->native_approved;
+    view.luau_pin = view.luau_native ? std::string("native-abi") + std::to_string(p->native_abi) : view.luau_data ? std::string("data") : std::string(segarecomp::luau::compiler_pin());
+    view.luau_label = p->name + (p->version.empty() ? std::string() : " " + p->version);
+  } else if (const InstalledPatch *p = entry.find_patch(identity); p != nullptr && entry.platform_id == "genesis") {
     view.patch_identity = p->identity;
     view.patch_package = patch_package_path(p->identity);
     view.patch_target_sha256 = p->target_sha256;

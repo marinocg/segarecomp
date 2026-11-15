@@ -87,6 +87,15 @@ struct Mod {
   // SEG-140-T010: the typed virtual_sprites feature submits a whole GenesisVirtualSpriteSet (the one transport every route ends in); staged during the callback, committed with the overlay when it did not fault
   std::unique_ptr<GenesisVirtualSpriteSet> staged_set, visible_set;
   bool have_staged_set = false, have_visible_set = false;
+  // SEG-140-T011 (ADR 0309): the typed scenery_window feature. One bounded name-table window per plane, staged during the render callback, committed with it, bound to the one frame it was rendered for.
+  struct SceneryWindow {
+    bool present = false;
+    std::int32_t x0 = 0, y0 = 0;
+    std::uint32_t cols = 0, rows = 0;
+    std::vector<std::uint16_t> words;
+  };
+  SceneryWindow staged_scenery[2], visible_scenery[2];
+  std::uint64_t visible_scenery_frame = 0;   // the guest frame whose render callback committed `visible_scenery`
 #endif
   std::unique_ptr<GenesisModScheduler> scheduler;
   GenesisSnapshotModState snapshot{};
@@ -201,18 +210,45 @@ int api_virtual_sprites(const GenesisVirtualSpriteSet *set) {
   g.have_staged_set = true;
   return SEGA_MOD_OK;
 }
-SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr}};
+constexpr std::uint32_t kSceneryColsMax = 128U, kSceneryRowsMax = 64U, kSceneryWordsMax = 4096U;
+int api_scenery_window(std::uint32_t plane, std::int32_t cell_x0, std::int32_t cell_y0, std::uint32_t cols, std::uint32_t rows, const std::uint16_t *words) {
+  if (!in_render()) return refused_phase();
+  if (!sega_mod_is_granted(&g.scheduler->host, SEGA_MOD_CAP_SCENERY_WORDS)) { genesis_mod_fault_current("capability"); return SEGA_MOD_E_CAPABILITY; }
+  if (plane > 1U || words == nullptr || cols == 0U || rows == 0U || cols > kSceneryColsMax || rows > kSceneryRowsMax || cols * rows > kSceneryWordsMax || g.staged_scenery[plane].present ||
+      cell_x0 < -(1 << 20) || cell_x0 > (1 << 20) || cell_y0 < -(1 << 20) || cell_y0 > (1 << 20)) {
+    genesis_mod_fault_current("range");   // one window per plane per callback, inside the declared bounds
+    return SEGA_MOD_E_RANGE;
+  }
+  Mod::SceneryWindow &w = g.staged_scenery[plane];
+  w.present = true;
+  w.x0 = cell_x0;
+  w.y0 = cell_y0;
+  w.cols = cols;
+  w.rows = rows;
+  w.words.assign(words, words + static_cast<std::size_t>(cols) * rows);
+  return SEGA_MOD_OK;
+}
+SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr}};
 
 // The provider's `phase` entry, wrapped: a render callback starts from an empty staging area, and what it staged becomes visible only if the callback finished without a fault (a faulted callback leaves nothing).
 void wrapped_phase(void *state, const SegaModHost *host) {
   const bool render = host->phase == SEGA_MOD_PHASE_RENDER;
-  if (render) { g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; g.have_staged_set = false; g.have_visible_set = false; }
+  if (render) {
+    g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; g.have_staged_set = false; g.have_visible_set = false;
+    for (Mod::SceneryWindow &w : g.staged_scenery) w = Mod::SceneryWindow{};
+    for (Mod::SceneryWindow &w : g.visible_scenery) w = Mod::SceneryWindow{};   // nothing of an earlier frame survives the start of a render callback
+  }
   g.native_phase_entry(state, host);
   if (render && g.scheduler->fault_status == SEGA_MOD_OK && g.scheduler->external_cause == nullptr) {
     g.visible = std::move(g.staged);
     if (g.have_staged_set) { std::swap(g.visible_set, g.staged_set); g.have_visible_set = true; }
+    for (unsigned plane = 0; plane < 2U; ++plane) std::swap(g.visible_scenery[plane], g.staged_scenery[plane]);
+    g.visible_scenery_frame = host->frame;
   }
-  if (render) { g.staged = luau::Output{}; g.have_staged_set = false; }
+  if (render) {
+    g.staged = luau::Output{}; g.have_staged_set = false;
+    for (Mod::SceneryWindow &w : g.staged_scenery) w = Mod::SceneryWindow{};
+  }
 }
 #endif
 
@@ -340,7 +376,7 @@ struct Presented {
   luau::RasterizedLayers layers;
   luau::SpriteSubmission sprites;   // SEG-140-T008: the virtual sprites committed by the last successful render callback
   const GenesisVirtualSpriteSet *set = nullptr;   // SEG-140-T010: the native route's committed set (owned by the adapter, valid until the next render callback)
-  bool fixed = false, have = false, have_sprites = false, have_set = false;
+  bool fixed = false, have = false, have_sprites = false, have_set = false, scenery = false;
 } p;
 
 void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out) {
@@ -349,29 +385,60 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   p.have = false;
   p.have_sprites = false;
   p.have_set = false;
-  if ((frame->requested & GENESIS_COMPAT_HUD) == 0) return;
+  p.scenery = false;
+  if ((frame->requested & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY)) == 0) return;
   if (!g.attached || g.scheduler->fault.faulted != 0U || g.scheduler->disabled != 0U) {   // a faulted mod presents nothing; the guest and the picture go on
     out->reason = GENESIS_COMPAT_FAULT;
     return;
   }
-  const RenderView view = render_view();
-  const std::vector<luau::OverlayOp> &ops = *view.ops;
-  p.have_sprites = view.sprites->total > 0;
-  if (p.have_sprites) p.sprites = *view.sprites;
-  p.set = view.set;
-  p.have_set = view.set != nullptr && view.set->count > 0;
-  if (ops.empty() && !p.have_sprites && !p.have_set) return;
-  p.image = luau::rasterize_overlay(ops);
-  p.fixed = false;
-  for (const luau::OverlayOp &op : ops) p.fixed = p.fixed || op.layer == 0;
-  p.layers.clear();
-  for (const luau::OverlayLayerDecl &d : *view.layers) p.layers.emplace_back(d, luau::rasterize_layer(d, ops));
-  p.have = true;
-  out->accepted = GENESIS_COMPAT_HUD;
-  const std::string &scene = *view.scene;
+  unsigned accepted = 0;
+#ifdef SEGARECOMP_MOD_NATIVE
+  if ((frame->requested & GENESIS_COMPAT_SCENERY) != 0U) {
+    // SEG-140-T011: a window belongs to exactly one produced frame. The render callback of guest frame N runs right after frame N ended; the host produces the frame that callback describes when the runtime counts N + 2
+    // (the producer sees the work-RAM snapshot taken one onset earlier, as for every route). A window committed for any other frame (a rewind, a load, a skipped callback), or none, is never served.
+    const bool current = g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count;
+    p.scenery = current && g.visible_scenery[0].present && g.visible_scenery[1].present;   // the producer asks both planes for every offscreen cell: a frame is served only with a window for each (an empty plane is a window of blank cells)
+    if (p.scenery) accepted |= GENESIS_COMPAT_SCENERY;
+  }
+#endif
+  if ((frame->requested & GENESIS_COMPAT_HUD) != 0U) {
+    const RenderView view = render_view();
+    const std::vector<luau::OverlayOp> &ops = *view.ops;
+    p.have_sprites = view.sprites->total > 0;
+    if (p.have_sprites) p.sprites = *view.sprites;
+    p.set = view.set;
+    p.have_set = view.set != nullptr && view.set->count > 0;
+    if (!ops.empty() || p.have_sprites || p.have_set) {
+      p.image = luau::rasterize_overlay(ops);
+      p.fixed = false;
+      for (const luau::OverlayOp &op : ops) p.fixed = p.fixed || op.layer == 0;
+      p.layers.clear();
+      for (const luau::OverlayLayerDecl &d : *view.layers) p.layers.emplace_back(d, luau::rasterize_layer(d, ops));
+      p.have = true;
+      accepted |= GENESIS_COMPAT_HUD;
+    }
+  }
+  out->accepted = accepted;
+  if (accepted == 0U) return;
+  const std::string &scene = *render_view().scene;
   if (!scene.empty() && scene.size() <= GENESIS_COMPAT_SCENE_MAX) std::memcpy(out->scene, scene.c_str(), scene.size() + 1U);
 }
-int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return 0; }
+// SEG-140-T011: answers only from the committed window of the frame `prepare` accepted; a cell outside it is a failed answer (the host then withdraws the frame's authored-scenery claim), never a guess.
+int scenery_word(void *, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
+#ifdef SEGARECOMP_MOD_NATIVE
+  if (!p.scenery || plane > 1U || word == nullptr) return 0;
+  const Mod::SceneryWindow &w = g.visible_scenery[plane];
+  if (!w.present) return 0;
+  const auto cell = [](long long pixel) { return static_cast<long long>(pixel >= 0 ? pixel / 8 : -((-pixel + 7) / 8)); };   // floor division by 8
+  const long long cx = cell(static_cast<long long>(x) - hscroll) - w.x0, cy = cell(static_cast<long long>(row) + vscroll) - w.y0;
+  if (cx < 0 || cy < 0 || cx >= static_cast<long long>(w.cols) || cy >= static_cast<long long>(w.rows)) return 0;
+  *word = w.words[static_cast<std::size_t>(cy) * w.cols + static_cast<std::size_t>(cx)];
+  return 1;
+#else
+  (void)plane; (void)row; (void)x; (void)hscroll; (void)vscroll; (void)word;
+  return 0;
+#endif
+}
 int hud(void *, GenesisCompatOverlay *out) {
   const int hud_drawn = luau::pack_hud(p.have, p.fixed, p.image, p.layers, out);
   bool sprites = p.have_sprites && luau::pack_sprites(p.sprites, out->vsprites);
@@ -381,7 +448,7 @@ int hud(void *, GenesisCompatOverlay *out) {
   }
   return hud_drawn != 0 || sprites ? 1 : 0;
 }
-const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "scheduled-mod-host", 1, GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES, prepare, scenery_word, hud};
+const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "scheduled-mod-host", 1, GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES | GENESIS_COMPAT_SCENERY, prepare, scenery_word, hud};
 }  // namespace
 
 const GenesisNativeCompat *segarecomp_patch_provider(void **state_out) {
