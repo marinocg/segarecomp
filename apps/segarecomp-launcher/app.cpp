@@ -65,7 +65,7 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     info.compat_known = fs::is_regular_file(layout.runtime / "compat" / (e.sha256 + ".json"), ec);
     info.entry = entry_dir(view, layout);
     info.key = u8s(info.entry.filename());
-    info.variant = view.patch_identity;
+    info.variant = view.variant_id();
     if (e.platform_id == "genesis") {  // SEG-122: every variant's build state, whichever is selected
       info.vanilla_ready = entry_ready_for(entry_dir(view_for_variant(e, std::string()), layout), view_for_variant(e, std::string()), layout);
       for (const auto &p : e.patches) {
@@ -91,14 +91,14 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
       info.status = GameStatus::metadata_only;
     } else if (info.has_failed_dir && !mapper_needed) {
       info.status = GameStatus::failed;
-    } else if (std::any_of(e.builds.begin(), e.builds.end(), [&](const BuildRecord &b) { return b.variant == view.patch_identity; }) || (!view.patched() && !e.current_build_key.empty())) {
+    } else if (std::any_of(e.builds.begin(), e.builds.end(), [&](const BuildRecord &b) { return b.variant == view.variant_id(); }) || (!view.patched() && !view.luau_mod() && !e.current_build_key.empty())) {
       info.status = GameStatus::stale;   // SEG-122: only a build of THIS variant makes it stale; a Patched variant that was never built is simply not built
     } else {
       info.status = GameStatus::not_built;
     }
     // SEG-069-T005: no ready build of the CURRENT identity. An executable an earlier release built may still be playable; this is a separate,
     // fail-closed question (older_build.hpp) and never relaxes the exact identity check above.
-    if (!mapper_needed && !e.archived && info.status != GameStatus::ready && !e.builds.empty()) {
+    if (!mapper_needed && !e.archived && !view.luau_mod() && info.status != GameStatus::ready && !e.builds.empty()) {   // a schema 3 mod is exact-identity only: no earlier-release fallback
       info.older = find_playable_older_build(e, info.key, view.optimized() ? "optimized" : "compatibility", layout, cache_root() / "games", view.patch_identity);
       if (info.older.playable && info.status == GameStatus::stale) info.status = GameStatus::playable_older;
       if (info.older.playable) info.audio = read_audio_report(info.older.dir);   // the build Play will launch is that one
@@ -778,6 +778,13 @@ bool App::start_build(const std::string &id, bool restart_after) {
     view.patch_label = variant.patch_label;
     view.patch_widescreen = variant.patch_widescreen;
     view.patch_side_style = variant.patch_side_style;
+    view.luau_identity = variant.luau_identity;   // SEG-143-T008: a selected schema 3 mod
+    view.luau_package = variant.luau_package;
+    view.luau_effective_sha256 = variant.luau_effective_sha256;
+    view.luau_native = variant.luau_native;
+    view.luau_approved = variant.luau_approved;
+    view.luau_pin = variant.luau_pin;
+    view.luau_label = variant.luau_label;
     if (view.patched()) {
       std::error_code pec;
       if (!fs::is_regular_file(view.patch_package, pec)) { show_message("The patch is missing", {"The installed copy of the selected patch cannot be found in the library, so the patched version cannot be built.", "Select Vanilla, or install the patch package again."}); return false; }
@@ -890,7 +897,7 @@ void App::finish_build() {
     if (entry != nullptr) {
       BuildRecord record;
       record.key = u8s(entry_path.filename());
-      record.variant = job_view_.patch_identity;
+      record.variant = job_view_.variant_id();
       record.built_at = now_seconds();
       record.mode = job_view_.optimized() ? "optimized" : "compatibility";
       record.version = SEGARECOMP_LAUNCHER_VERSION;
@@ -929,7 +936,7 @@ bool App::launch(const std::string &id, bool restarted) {
   if (!entry_ready_for(dir, view, layout_)) {
     // Never start an executable that does not match the entry's current identity (stale, foreign or removed) -- except an earlier release's build that
     // is verified playable RIGHT NOW (not from the possibly outdated status list): it runs exactly as recorded, never relabelled as the current request.
-    const OlderBuild older = find_playable_older_build(*entry, u8s(dir.filename()), view.optimized() ? "optimized" : "compatibility", layout_, cache_root() / "games", view.patch_identity);
+    const OlderBuild older = view.luau_mod() ? OlderBuild{} : find_playable_older_build(*entry, u8s(dir.filename()), view.optimized() ? "optimized" : "compatibility", layout_, cache_root() / "games", view.patch_identity);   // a schema 3 mod has no earlier-release fallback
     if (!older.playable) {
       show_message("This build cannot be played", {"The stored build no longer matches this game's current identity (a different release, option set or a removed build).",
                                                    older.candidate_seen ? "An earlier build cannot be used: " + older.reason + "." : std::string("There is no earlier build to fall back on."), "Recompile the game to play it."});

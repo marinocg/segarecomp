@@ -180,6 +180,25 @@ if(BUILD_TESTING)
   set_property(TEST launcher_mod_variant_test PROPERTY TIMEOUT 1500)
 endif()
 
+# SEG-143-T008 (delivery F29): the local schema 3 flow of the launcher for a NATIVE ABI 2 mod (install, exact-ROM check, approval, select, build, reverification, Vanilla untouched), against the real build driver.
+add_executable(launcher_schema3_flow_test launcher_schema3_flow_test.cpp)
+target_link_libraries(launcher_schema3_flow_test PRIVATE segarecomp_launcher_core)
+target_compile_features(launcher_schema3_flow_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(launcher_schema3_flow_test)
+if(BUILD_TESTING)
+  add_dependencies(launcher_schema3_flow_test segarecomp)
+  add_test(NAME launcher_schema3_flow_test COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/launcher_schema3_flow_test.py $<TARGET_FILE:launcher_schema3_flow_test> $<TARGET_FILE:segarecomp>
+           ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_lmv_sdl_prefix})
+  set_property(TEST launcher_schema3_flow_test APPEND PROPERTY LABELS full)
+  set_property(TEST launcher_schema3_flow_test PROPERTY TIMEOUT 1500)
+  # SEG-149-T001 (delivery F29): the integrated synthetic acceptance: mod check/pack, the launcher flow above, and the SAME package played at 4:3, 16:9, 21:9 and 32:9 against independent goldens.
+  add_test(NAME mod_widescreen_example_test COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/mod_widescreen_example_test.py $<TARGET_FILE:segarecomp> $<TARGET_FILE:launcher_schema3_flow_test>
+           ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_lmv_sdl_prefix})
+  set_property(TEST mod_widescreen_example_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_widescreen_example_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_widescreen_example_test PROPERTY TIMEOUT 1800)
+endif()
+
 add_executable(older_build_test older_build_test.cpp)
 target_link_libraries(older_build_test PRIVATE segarecomp_launcher_core)
 target_compile_features(older_build_test PRIVATE cxx_std_20)
@@ -365,4 +384,11 @@ if(BUILD_TESTING)
   set_property(TEST launcher_patch_gui_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_patch_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_patch_gui_test PROPERTY TIMEOUT 900)
+  # SEG-143-T008 (delivery F29): the local schema 3 native ABI 2 flow through the real window (install, approval, select, build, play, Vanilla untouched, negatives).
+  add_dependencies(segarecomp-launcher segarecomp)
+  add_test(NAME launcher_schema3_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_schema3_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
+  set_property(TEST launcher_schema3_gui_test APPEND PROPERTY LABELS full)
+  set_property(TEST launcher_schema3_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_schema3_gui_test PROPERTY TIMEOUT 900)
 endif()

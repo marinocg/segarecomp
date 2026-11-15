@@ -40,6 +40,10 @@ struct InstalledPatch {
   int width_max = -1;         // the package's stated validated Widescreen Width (0..100), -1 = not stated; informational only (never drives capability)
   long long installed_at = 0;
   std::string build_key;      // the published patched build (entry_dir name), "" = not built
+  // SEG-143-T008: a schema 3 mod package (data-only, Luau or native ABI 2) installed through the same library path. `mod_trust` is its trust class ("luau" | "native"); `effective_sha256` is the
+  // digest of the image the build compiles. The package file and its approval work exactly like a schema 2 native patch (`native_source_sha256` = the native payload digest, `native_approved`).
+  bool schema3 = false;
+  std::string mod_trust, effective_sha256;
 };
 
 struct LibraryEntry {

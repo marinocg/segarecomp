@@ -81,10 +81,10 @@ def main():
         modded = project("modded")
         if h.failures:
             return 1
-        both = "    (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);\n    (void)render->scenery_window(1U, x0, 0, COLS, ROWS, blank);\n"
+        both = "    (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);\n    /* plane B does not scroll in the fixture: its cells are asked for at their own, camera-independent coordinates */\n    (void)render->scenery_window(1U, -40, 0, COLS, ROWS, blank);\n"
         variants = {   # name -> (provider edit, manifest edit, the stable fault cause expected or None)
             "disconnected": (lambda t: t.replace(both, ""), None, None),
-            "plane-b-missing": (lambda t: t.replace("    (void)render->scenery_window(1U, x0, 0, COLS, ROWS, blank);\n", ""), None, None),
+            "plane-b-missing": (lambda t: t.replace("    (void)render->scenery_window(1U, -40, 0, COLS, ROWS, blank);\n", ""), None, None),
             "stale": (lambda t: t.replace("static uint32_t camera;", "static uint32_t camera, submitted;").replace(both, "    if (submitted == 0U) {\n" + both + "      submitted = 1U;\n    }\n"), None, None),
             "ungranted": (None, lambda m: m.replace('"overlay.rgba", "scenery.words"', '"overlay.rgba"'), "capability"),
             "oversized": (lambda t: t.replace("scenery_window(0U, x0, 0, COLS, ROWS, words)", "scenery_window(0U, x0, 0, 129U, ROWS, words)"), None, "range"),
@@ -121,7 +121,7 @@ def main():
             check(side == 0 or not generic_equal, f"{ratio}: the margins differ from the generic wrapped scenery of the Vanilla program")
             scenes = rep["scenes"] if rep else []
             comps = scenes[0]["components"] if scenes else {}
-            check(bool(scenes) and scenes[0].get("id") == "main" and comps.get("scenery", {}).get("covered", 0) > 0 and comps.get("hud", {}).get("covered", 0) >= 0 and comps.get("actors", {}).get("covered", 0) == 0,
+            check(bool(scenes) and scenes[0].get("id") == "main" and comps.get("scenery", {}).get("covered", 0) == comps.get("scenery", {}).get("requested", -1) > 0 and comps.get("hud", {}).get("covered", 0) >= 0 and comps.get("actors", {}).get("covered", 0) == 0,
                   f"{ratio}: coverage credits scenery for presented frames and never actors: {scenes[:1]}")
         # ---- negatives: every one of them presents the GENERIC scenery (never an authored one), faults only the mod where the contract was broken, and never reports scenery it did not present ----
         base, _, _, ram_v = play(tmp / "vanilla", "n-vanilla", "32:9")

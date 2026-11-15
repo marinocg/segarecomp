@@ -32,4 +32,21 @@ std::string select_luau_mod(RomView &rom, const std::filesystem::path &package) 
   return {};
 }
 
+std::string verify_installed_mod(const RomView &rom) {
+  if (!rom.luau_mod()) return {};
+  const segarecomp::mod::Package p = segarecomp::mod::read_package_file(rom.luau_package);
+  if (!p.ok) return "The installed mod package is not valid any more: " + p.rejection.message + ".";
+  if (p.identity != rom.luau_identity) return "The installed mod package is not the one selected (its identity changed).";
+  const std::string trust = segarecomp::mod::trust_class(p.manifest);
+  if (rom.luau_native != (trust == "native")) return "The installed mod package is not of the kind that was selected.";
+  if (rom.luau_native && !rom.luau_approved) return "This mod contains executable code and has not been approved. Install the package again and approve it.";
+  std::ifstream in(rom.path, std::ios::binary);
+  const std::vector<std::uint8_t> original((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  if (original.empty()) return "The original game file cannot be read.";
+  const segarecomp::mod::EffectiveImage effective = segarecomp::mod::effective_image(p, original);
+  if (!effective.ok) return "This game is not one the mod supports: " + effective.rejection.message + ".";
+  if (effective.original_sha256 != rom.sha256 || effective.effective_sha256 != rom.luau_effective_sha256) return "The original game or the effective image does not match the installed mod.";
+  return {};
+}
+
 }  // namespace launcher

@@ -7,6 +7,7 @@
 #include "sega_cd.hpp"
 #include "segarecomp/rom.hpp"
 #include "segarecomp/patch.hpp"
+#include "segarecomp/mod.hpp"
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
@@ -221,6 +222,7 @@ std::string region_note(const std::string &region) {
 
 std::string launch_refusal(const RomView &rom) {
   if (rom.supports_region() && !region_executable(rom.region)) return "Unknown console region: choose USA, Japan or Europe.";
+  if (rom.luau_mod()) return verify_installed_mod(rom);   // SEG-143-T008: a mod (native code above all) runs only while its installed bytes are still the approved package
   return {};
 }
 
@@ -378,7 +380,9 @@ fs::path entry_dir(const RomView &rom, const Layout &layout) {
   // replacement's implementation version and the revision of the verified-driver catalog. A product that ships a changed replacement or catalog never reuses an older program.
   // SEG-137-T007 (ADR 0296): a Luau-only mod adds its package identity (which names every payload digest, the capabilities and the ABI), the digest of the image that is compiled and the pinned compiler (with
   // the fixed compile options it determines the bytecode). Absent for Vanilla and schema 1/2 variants: their keys are what they always were.
-  if (rom.luau_mod()) variant += "|luau=" + rom.luau_identity + ":" + rom.luau_effective_sha256 + ":luau-" + rom.luau_pin;
+  if (rom.luau_mod() && !rom.luau_native) variant += "|luau=" + rom.luau_identity + ":" + rom.luau_effective_sha256 + ":luau-" + rom.luau_pin;
+  // SEG-143-T008: a native ABI 2 mod: package identity (which names every payload digest, the capabilities and the ABI), the effective image and the ABI; the host compiler is part of the product build identity below.
+  if (rom.luau_mod() && rom.luau_native) variant += "|natmod=" + rom.luau_identity + ":" + rom.luau_effective_sha256 + ":" + rom.luau_pin;
   if (rom.platform_id != "master-system") variant += "|audio=" + native_audio_identity(layout);
   const std::string key = rom.sha256 + variant + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|" + platform_key(rom, &layout) + "|" + host_arch() + "|" +
                           SDL_GetPlatform() + "|zig-" SEGARECOMP_ZIG_VERSION "|O2|" + utf8(layout.root);
@@ -784,7 +788,7 @@ bool native_record_matches(const fs::path &entry, const RomView &rom) {
 bool luau_record_matches(const fs::path &entry, const RomView &rom) {
   std::error_code ec;
   const fs::path file = entry / "metadata.json";
-  std::string identity, effective, pin, digest;
+  std::string identity, effective, pin, digest, kind;
   if (fs::is_regular_file(file, ec) && fs::file_size(file, ec) <= 16384U) {
     const auto meta = json::parse(read_all(file));
     if (meta && meta->is_object()) {
@@ -792,9 +796,12 @@ bool luau_record_matches(const fs::path &entry, const RomView &rom) {
       effective = meta->str("luau_effective_sha256");
       pin = meta->str("luau_pin");
       digest = meta->str("luau_bytecode_digest");
+      kind = meta->str("mod_kind");
     }
   }
   if (!rom.luau_mod()) return identity.empty();
+  if (rom.luau_native) return kind == "native" && identity == rom.luau_identity && effective == rom.luau_effective_sha256 && pin == rom.luau_pin;   // native: no bytecode; the program embeds the verified source
+  if (!kind.empty()) return false;
   if (!(identity == rom.luau_identity && effective == rom.luau_effective_sha256 && pin == rom.luau_pin && lowercase_hex_64(digest))) return false;
   // The digest in the metadata must be the one the build itself recorded in status.json (the key already determines it; this catches a record that was altered or mixed up).
   const std::string status = read_all(entry / "status.json");
@@ -1287,6 +1294,10 @@ void BuildJob::run() {
   if (cancel_.load()) { finish_cancelled(partial); return; }  // cancelled before the build tool was started: it never spawns
 
   const bool sms = rom_.platform_id == "master-system";
+  if (rom_.luau_mod()) {   // SEG-143-T008: the selected schema 3 mod is re-verified at build time: the installed bytes must still be the package that was approved (identity, size, payload digests), compatible with this exact game
+    const std::string refusal = verify_installed_mod(rom_);
+    if (!refusal.empty()) { fs::remove_all(partial, ec); set_message(refusal); finish(false); return; }
+  }
   // SEG-122: a Patched variant compiles the verified patched image, materialized from the original file and the installed package inside this attempt's own
   // partial folder (removed again before publishing). The original ROM is only read; the previous published build is never touched.
   fs::path build_rom = rom_.path;
@@ -1329,7 +1340,8 @@ void BuildJob::run() {
   if (rom_.patch_native())   // SEG-124 (ADR 0267): a REFERENCE to the installed package and the identity the user approved; the build re-verifies the package itself and extracts the provider from it
     args.insert(args.end(), {"--patch-package", utf8(rom_.patch_package), "--patch-identity", rom_.patch_identity});
   if (rom_.luau_mod())       // SEG-137-T007: a REFERENCE to the installed package and its identity; the build re-verifies it, derives the effective image and compiles the scripts itself
-    args.insert(args.end(), {"--luau-package", utf8(rom_.luau_package), "--luau-identity", rom_.luau_identity});
+    args.insert(args.end(), rom_.luau_native ? std::initializer_list<std::string>{"--native-package", utf8(rom_.luau_package), "--native-identity", rom_.luau_identity}
+                                             : std::initializer_list<std::string>{"--luau-package", utf8(rom_.luau_package), "--luau-identity", rom_.luau_identity});   // SEG-143-T008: native ABI 2 or Luau
   if (rom_.optimized()) args.insert(args.end(), {"--aot-policy", "optimized"});
   if (rom_.optimized_gen2()) args.insert(args.end(), {"--aot-model", "gen2"});
 #if defined(_WIN32)
@@ -1432,7 +1444,10 @@ void BuildJob::run() {
       meta << "\"patch_identity\":\"" << rom_.patch_identity << "\",\"patch_target_sha256\":\"" << rom_.patch_target_sha256 << "\",\"patch_label\":\"" << json_safe(rom_.patch_label) << "\",";
     if (rom_.patch_native())   // SEG-124: what native capability this program was built with (checked again by entry_ready_for)
       meta << "\"native_source_sha256\":\"" << rom_.patch_native_source_sha256 << "\",\"native_abi\":" << rom_.patch_native_abi << ",\"native_caps\":" << rom_.patch_native_caps << ",";
-    if (rom_.luau_mod()) {   // SEG-137-T007: what this program was built for (checked again by entry_ready_for); the digest is the one the build recorded after it compiled and verified the scripts
+    if (rom_.luau_mod() && rom_.luau_native) {   // SEG-143-T008: what a native ABI 2 program was built for (checked again by entry_ready_for)
+      meta << "\"mod_kind\":\"native\",\"luau_identity\":\"" << rom_.luau_identity << "\",\"luau_effective_sha256\":\"" << rom_.luau_effective_sha256 << "\",\"luau_pin\":\"" << json_safe(rom_.luau_pin)
+           << "\",\"luau_label\":\"" << json_safe(rom_.luau_label) << "\",";
+    } else if (rom_.luau_mod()) {   // SEG-137-T007: what this program was built for (checked again by entry_ready_for); the digest is the one the build recorded after it compiled and verified the scripts
       const std::string status_text = read_all(partial / "status.json");
       const std::string key = "\"bytecode_digest\":\"";
       const std::size_t at = status_text.find(key);

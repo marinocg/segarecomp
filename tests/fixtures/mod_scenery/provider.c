@@ -36,7 +36,8 @@ static void provider_phase(void *state, const SegaModHost *host) {
       }
     (void)render->scene("main", 4U);
     (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);
-    (void)render->scenery_window(1U, x0, 0, COLS, ROWS, blank);
+    /* plane B does not scroll in the fixture: its cells are asked for at their own, camera-independent coordinates */
+    (void)render->scenery_window(1U, -40, 0, COLS, ROWS, blank);
     (void)blank;   /* referenced even by the variants that drop the plane B window */
     (void)render->overlay_rect(0, 0, 24, 8, 0x000000C0U);
   }

@@ -1,5 +1,7 @@
 #include "patch_library.hpp"
 
+#include "segarecomp/luau_api.hpp"
+#include "segarecomp/mod.hpp"
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
@@ -25,6 +27,48 @@ bool read_bounded(const fs::path &path, std::size_t limit, std::vector<std::uint
 
 std::string refusal_for(const std::string &error) { return "This patch cannot be installed: " + error + "."; }
 
+// SEG-143-T008: the schema 3 branch of the one verification routine (Luau and native ABI 2 packages; a data-only package has nothing the played program runs and is refused plainly).
+PatchPreview verify_mod(const LibraryEntry &entry, const segarecomp::mod::Package &mp, const fs::path &original_rom, std::vector<std::uint8_t> bytes, std::vector<std::uint8_t> *package_bytes) {
+  PatchPreview out;
+  const segarecomp::mod::Manifest &m = mp.manifest;
+  out.schema3 = true;
+  out.package_valid = true;
+  out.info.schema_version = 3;
+  out.info.id = m.id; out.info.version = m.version; out.info.name = m.name; out.info.platform = m.platform; out.info.author = m.author; out.info.license = m.license; out.info.identity = mp.identity; out.info.purpose = m.purpose; out.info.requires_capabilities = m.capabilities;
+  out.mod_trust = segarecomp::mod::trust_class(m);
+  if (entry.platform_id != m.platform) { out.error = refusal_for("it is for a different platform than this game"); return out; }
+  bool names_revision = false;
+  for (const auto &revision : m.revisions) names_revision = names_revision || revision.sha256 == entry.sha256;
+  if (!names_revision) {
+    out.error = "This mod was made for a different game or revision. It is only applied to the exact original image it was made for, never to a similar one.";
+    return out;
+  }
+  out.fits_game = true;
+  if (out.mod_trust == "data") { out.error = refusal_for("a data-only mod has nothing to run in a played program; the launcher plays Luau and native mods"); return out; }
+  const std::optional<segarecomp::mod::Rejection> unsupported = out.mod_trust == "native" ? segarecomp::luau::native_scheduled_support(mp) : (segarecomp::luau::live_support(mp) ? segarecomp::luau::scheduled_support(mp) : std::nullopt);
+  if (unsupported) { out.error = refusal_for(unsupported->message); return out; }
+  std::vector<std::uint8_t> rom;
+  std::string error;
+  if (original_rom.empty() || !read_bounded(original_rom, segarecomp::patch::kMaxImageBytes, rom, error)) {
+    out.error = "The original game file is needed to verify the mod, and it cannot be read" + (error.empty() ? std::string(".") : " (" + error + ").");
+    return out;
+  }
+  const segarecomp::mod::EffectiveImage effective = segarecomp::mod::effective_image(mp, rom);
+  if (!effective.ok) { out.error = refusal_for(effective.rejection.message); return out; }
+  if (effective.original_sha256 != entry.sha256) { out.error = "The game file at its recorded location is no longer the original game in the library; the mod was not verified."; return out; }
+  out.effective_sha256 = effective.effective_sha256;
+  if (out.mod_trust == "native") {
+    out.info.has_native = true;
+    out.info.native_abi = m.abi_native;
+    for (const auto &payload : m.payloads) if (payload.kind == "native-c11") { out.info.native_file = payload.path; out.info.native_sha256 = payload.sha256; break; }   // the first provider source names the executable code on the sheet
+    if (out.info.native_sha256.empty()) { out.error = refusal_for("the package has no native source"); return out; }
+  }
+  out.already_installed = entry.find_patch(mp.identity) != nullptr;
+  out.ok = true;
+  if (package_bytes != nullptr) *package_bytes = std::move(bytes);
+  return out;
+}
+
 // The single verification routine; `package_bytes` are kept so the published copy is byte-for-byte what was verified.
 PatchPreview verify(const LibraryEntry &entry, const fs::path &package, const fs::path &original_rom, std::vector<std::uint8_t> *package_bytes) {
   PatchPreview out;
@@ -32,7 +76,12 @@ PatchPreview verify(const LibraryEntry &entry, const fs::path &package, const fs
   std::string error;
   if (!read_bounded(package, segarecomp::patch::kMaxPackageBytes, bytes, error)) { out.error = refusal_for("the package " + error); return out; }
   segarecomp::patch::Package pkg = segarecomp::patch::read_package(bytes);
-  if (!pkg.ok) { out.error = refusal_for(pkg.error); return out; }
+  if (!pkg.ok) {   // SEG-143-T008: not a schema 1/2 package: a schema 3 mod package goes through the shared libs/media validation, never a launcher rule
+    const segarecomp::mod::Package mp = segarecomp::mod::read_package(bytes);
+    if (mp.ok) { return verify_mod(entry, mp, original_rom, std::move(bytes), package_bytes); }
+    out.error = refusal_for(mp.rejection.code == "E_SCHEMA_VERSION" ? pkg.error : mp.rejection.message);
+    return out;
+  }
   out.info = pkg.info;
   out.package_valid = true;
   if (entry.platform_id != pkg.info.platform) { out.error = refusal_for("it is for a different platform than this game"); return out; }
@@ -98,7 +147,10 @@ PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const f
   p.id = checked.info.id;
   p.version = checked.info.version;
   p.name = checked.info.name;
-  p.target_sha256 = checked.info.has_rom ? checked.info.target_sha256 : entry.sha256;   // a native-only package compiles the unchanged original image
+  p.target_sha256 = checked.schema3 ? checked.effective_sha256 : checked.info.has_rom ? checked.info.target_sha256 : entry.sha256;   // a native-only package compiles the unchanged original image
+  p.schema3 = checked.schema3;
+  p.mod_trust = checked.mod_trust;
+  p.effective_sha256 = checked.effective_sha256;
   if (checked.info.has_native) {
     p.native_source_sha256 = checked.info.native_sha256;
     p.native_abi = checked.info.native_abi;

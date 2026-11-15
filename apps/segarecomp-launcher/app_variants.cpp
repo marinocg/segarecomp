@@ -49,9 +49,13 @@ void App::patch_chosen(const std::string &id, const std::string &path) {
                           {segarecomp::patch::kCapSceneryWords, "scenery"}, {segarecomp::patch::kCapOverlayRgba, "overlay"}})
       if ((preview.info.native_caps & c.first) != 0U) caps += (caps.empty() ? "" : ", ") + std::string(c.second);
     modal_.code_bearing = true;
+    if (preview.schema3) {   // SEG-143-T008: a schema 3 mod names the capabilities it requires; the sheet lists exactly those
+      caps.clear();
+      for (const std::string &name : preview.info.requires_capabilities) caps += (caps.empty() ? "" : ", ") + name;
+    }
     modal_.lines.push_back("WARNING: this patch contains executable C source code by " + preview.info.author + (preview.info.license.empty() ? std::string() : " (" + preview.info.license + ")") +
                            ". Segarecomp will compile it into the separate Patched program and it runs with that program's full permissions. It is NOT sandboxed. Install it only if you trust its source.");
-    modal_.lines.push_back("Source SHA-256 " + short_hash(preview.info.native_sha256) + ". Package identity " + short_hash(preview.info.identity) + ". Reads: " + caps + ". Native patch ABI " + std::to_string(preview.info.native_abi) + ".");
+    modal_.lines.push_back("Source SHA-256 " + short_hash(preview.info.native_sha256) + ". Package identity " + short_hash(preview.info.identity) + ". Reads: " + caps + ". Native patch ABI " + std::to_string(preview.info.native_abi) + (preview.schema3 ? " (schema 3 mod: it plays as its own modded program, never combined with another mod)." : "."));
     modal_.lines.push_back("Approving applies to this exact package only; a changed package must be approved again. Vanilla is never affected.");
   }
   trace("patch=preview_ok");

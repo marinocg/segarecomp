@@ -97,7 +97,11 @@ struct RomView {
   std::string luau_effective_sha256;           // digest of the image that is compiled and run
   std::string luau_pin;                        // the pinned Luau compiler (it determines the bytecode, so it is part of the executable identity)
   std::string luau_label;                      // "<name> <version>" (UI and logs only)
+  // SEG-143-T008: the same single-mod slot also holds a NATIVE ABI 2 package (`luau_native`; `luau_pin` then names the ABI). Native code runs only with the user's approval of this exact identity.
+  bool luau_native = false, luau_approved = true;
   [[nodiscard]] bool luau_mod() const { return !luau_identity.empty(); }
+  // The identity of the selected variant of the original game: a schema 1/2 patch or a schema 3 mod ("" = Vanilla). Recorded on the build so no build can pass for another variant.
+  [[nodiscard]] const std::string &variant_id() const { return patched() ? patch_identity : luau_identity; }
   // The digest of the image that is actually compiled and run: the verified patched image for a Patched variant, else the original.
   [[nodiscard]] const std::string &effective_sha256() const { return patched() ? patch_target_sha256 : luau_mod() ? luau_effective_sha256 : sha256; }
   bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
@@ -233,6 +237,9 @@ void reset_policy_identity_memo_for_tests();
 // here first so the user gets a plain-language refusal instead of a failed build: a valid schema 3 package, Luau-only, Genesis, only the capabilities the live path grants, no native ABI 2 provider,
 // and an original image the package declares. Returns "" on success (fields filled) or the refusal (`rom` untouched). A package never replaces a selected schema 1/2 patch: that is refused too.
 [[nodiscard]] std::string select_luau_mod(RomView &rom, const std::filesystem::path &package);
+// SEG-143-T008: the build-time reverification of the selected schema 3 mod (`rom.luau_*`): the installed copy parses as a valid package whose identity is the selected one, its effective image for the
+// ORIGINAL game file is the recorded one, and native code is approved for exactly this identity. Returns "" or the plain-language refusal; nothing is modified.
+[[nodiscard]] std::string verify_installed_mod(const RomView &rom);
 // SEG-122: the package identity a finished build recorded in metadata.json ("" for a Vanilla build).
 [[nodiscard]] std::string read_variant_identity(const std::filesystem::path &entry);
 // ---- SEG-057-T002 (ADR 0119): the Optimized -> Compatibility restart contract (shared by the window and the headless `--run`) ----
