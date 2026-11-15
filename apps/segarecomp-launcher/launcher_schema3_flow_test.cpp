@@ -29,7 +29,13 @@ void expect(bool condition, const std::string &message) {
     std::cerr << "FAIL: " << message << '\n';
   }
 }
-void set_env(const char *name, const std::string &value) { setenv(name, value.c_str(), 1); }
+void set_env(const char *name, const std::string &value) {
+#if defined(_WIN32)
+  _putenv_s(name, value.c_str());
+#else
+  setenv(name, value.c_str(), 1);
+#endif
+}
 std::string slurp(const fs::path &path) {
   std::ifstream in(path, std::ios::binary);
   std::ostringstream text;
