@@ -1509,6 +1509,12 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY LABELS full)   # multi-minute generated-native viewer test: CI full tier and --focus, not the local fast preset
   set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_vsprite_abi2_test PROPERTY TIMEOUT 1800)
+  # W04 gap B: game-art virtual sprites follow the frame's own animated pattern and palette and are never served stale (live, replay, restore by a new process, rewind)
+  add_test(NAME mod_vsprite_state_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_vsprite_state_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_vsprite_state_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_vsprite_state_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_vsprite_state_test PROPERTY TIMEOUT 1500)
   # F28 (SEG-138-T010/T011, SEG-140-T008/T009/T010): the integrated acceptance: scheduled gameplay + HUD + 32:9 side-column sprites through the Luau and the native ABI 2 route, state/replay/rewind, negatives.
   add_test(NAME mod_f28_integration_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_f28_integration_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
