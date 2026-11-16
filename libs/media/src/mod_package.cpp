@@ -384,11 +384,12 @@ Manifest parse_manifest(const Value &root) {
     if (h->items.size() > kMaxHooks) fail("E_HOOK_COUNT", "a package declares at most 64 hooks");
     for (const Value &e : h->items) {
       object(e, "a hook");
-      only(e, {"id", "symbol", "revision", "cpu", "mode", "reads", "replace"}, "a hook");
+      only(e, {"id", "symbol", "revision", "cpu", "mode", "reads", "replace", "anchor"}, "a hook");
       Hook hk;
       hk.id = str(e, "id"); hk.symbol = str(e, "symbol"); hk.mode = str(e, "mode");
       hk.cpu = e.find("cpu") != nullptr ? str(e, "cpu") : "m68k";
       if (e.find("revision") != nullptr) hk.revision = str(e, "revision");
+      if (e.find("anchor") != nullptr) hk.anchor = str(e, "anchor");
       if (e.find("reads") != nullptr) hk.reads = string_list(e.at("reads"), "reads");
       if (const Value *rv = e.find("replace"); rv != nullptr) {
         object(*rv, "a hook replace contract");
@@ -651,6 +652,7 @@ std::string serialize_manifest(const Manifest &m) {
       o += '{'; kv(o, "id", h.id, true); kv(o, "symbol", h.symbol);
       if (!h.revision.empty()) kv(o, "revision", h.revision);
       kv(o, "cpu", h.cpu.empty() ? "m68k" : h.cpu); kv(o, "mode", h.mode);
+      if (!h.anchor.empty()) kv(o, "anchor", h.anchor);
       if (!h.reads.empty()) { o += ','; key(o, "reads"); string_array(o, h.reads); }
       if (h.has_replace) { o += ','; key(o, "replace"); o += '{'; key(o, "writes"); string_array(o, h.writes); o += ','; key(o, "cost"); o += std::to_string(h.cost); o += '}'; }
       o += '}';
@@ -732,7 +734,9 @@ std::string content_digest(const Manifest &m) {
     for (const std::string &n : h.reads) text += " " + n;
     text += " writes";
     for (const std::string &n : h.writes) text += " " + n;
-    text += " cost " + std::to_string(h.cost) + "\n";
+    text += " cost " + std::to_string(h.cost);
+    if (!h.anchor.empty()) text += " anchor " + h.anchor;   // only a hook that declares one differs from the previous identity text
+    text += "\n";
   }
   for (const MemoryRange &r : m.memory) text += "memory " + r.revision + " " + r.space + " " + std::to_string(r.offset) + " " + std::to_string(r.length) + " " + r.access + "\n";   // ranges decide what a scheduled mod may touch
   for (const Symbol &y : m.symbols) text += "symbol " + y.name + " " + y.revision + " " + std::to_string(y.address) + " " + y.provenance + "\n";   // symbols decide where edits land

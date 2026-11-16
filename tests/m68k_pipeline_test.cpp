@@ -10287,6 +10287,7 @@ int emit_synthetic_hooked_bridge(const char *hook_text, const char *vector_text,
       if (f.size() > 6U) site.flags_written = f[6] == "1";
       site.replace_declared = site.mode == M68kHookMode::replace && !(f.size() > 7U && f[7] == "0");
       if (f.size() > 8U) site.cpu = f[8];
+      if (f.size() > 9U) { site.has_anchor = true; site.anchor = static_cast<std::uint32_t>(std::stoul(f[9], nullptr, 16)); }   // W04 (ADR 0311)
       plan.sites.push_back(std::move(site));
     }
   FrontendProgram program{};

@@ -23,7 +23,9 @@ HW_SPRITES, HW_Y, HW_X_STEP = 24, 96, 8
 PALETTE = (0x0420, 0x00E0, 0x000E, 0x0E00)
 
 
-def make_rom() -> bytes:
+def make_rom(animate: bool = False) -> bytes:
+    """`animate`: W04: during every vertical blank the game rewrites pattern 2 and CRAM colour 2 from the parity of its frame counter (checker/solid, red/cyan), and hardware sprite 0 (picture 0..7, rows 96..103) shows pattern 2: so the
+    frame's own native picture states which art the frame has, and any game-art sprite of pattern 2 must show exactly the same pixels in the same frame."""
     c = _base.Code()
     c.w(0x41F9); c.l(0x00C00004)                     # lea 0xC00004,a0   (VDP control)
     c.w(0x43F9); c.l(0x00C00000)                     # lea 0xC00000,a1   (VDP data)
@@ -52,7 +54,7 @@ def make_rom() -> bytes:
         link = n + 1 if n + 1 < HW_SPRITES else 0
         c.w(0x32BC, 128 + HW_Y)                      # y + 128
         c.w(0x32BC, link)                            # size 1x1 cell, link
-        c.w(0x32BC, 0x0003)                          # low priority, palette 0, pattern 3
+        c.w(0x32BC, 0x0002 if animate and n == 0 else 0x0003)   # low priority, palette 0, pattern 3 (animate: sprite 0 shows pattern 2)
         c.w(0x32BC, 128 + HW_X_STEP * n)             # x + 128
     c.w(0x3E3C, FRAMES - 1)                          # move.w #FRAMES-1,d7
     c.label("turn")
@@ -60,6 +62,22 @@ def make_rom() -> bytes:
     c.w(0x3010)                                      # move.w (a0),d0   (VDP status)
     c.w(0x0800, 3)                                   # btst #3,d0       (vertical blank)
     c.branch_s(0x67, "wait_blank")                   # beq.s wait_blank
+    if animate:
+        c.w(0x0807, 0)                               # btst #0,d7
+        c.branch_s(0x67, "even")                     # beq.s even
+        c.w(0x20BC); c.l(0x40400000)                 # VRAM write 0x0040: pattern 2 = checker of colours 1 and 2
+        for row in range(8):
+            c.w(0x22BC); c.l(0x12121212 if row % 2 == 0 else 0x21212121)
+        c.w(0x20BC); c.l(0xC0040000)                 # CRAM entry 2 = red
+        c.w(0x32BC, 0x000E)
+        c.branch_s(0x60, "animated")
+        c.label("even")
+        c.w(0x20BC); c.l(0x40400000)                 # pattern 2 = solid colour 2
+        for _ in range(8):
+            c.w(0x22BC); c.l(0x22222222)
+        c.w(0x20BC); c.l(0xC0040000)                 # CRAM entry 2 = cyan
+        c.w(0x32BC, 0x0EE0)
+        c.label("animated")
     c.label("wait_active")
     c.w(0x3010)                                      # move.w (a0),d0
     c.w(0x0800, 3)                                   # btst #3,d0

@@ -215,7 +215,7 @@ int api_virtual_sprites(const GenesisVirtualSpriteSet *set) {
   return SEGA_MOD_OK;
 }
 std::uint64_t fnv1a64(const std::uint8_t *data, std::size_t n) {
-  std::uint64_t h = 1469598103934665603ULL;
+  std::uint64_t h = 14695981039346656037ULL;
   for (std::size_t i = 0; i < n; ++i) { h ^= data[i]; h *= 1099511628211ULL; }
   return h;
 }

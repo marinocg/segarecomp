@@ -124,6 +124,13 @@ std::string parse_function_hook_plan(const std::string &path, segarecomp::M68kFu
       if (f.size() != 2U || !hex8(f[1], target)) return where + "a vector line is `vector <hex8>`";
       if (vectors.size() >= kMaxVectors || !vectors.insert(target).second) return where + "too many or duplicate vectors";
       plan.vectors.push_back(target);
+    } else if (f[0] == "anchor") {   // W04 (ADR 0311): `anchor <site id> <hex8>`, after the site it belongs to
+      std::uint32_t anchor_address = 0;
+      if (f.size() != 3U || !hex8(f[2], anchor_address)) return where + "an anchor line is `anchor <site id> <hex8>`";
+      const auto owner = std::find_if(plan.sites.begin(), plan.sites.end(), [&](const segarecomp::M68kHookSite &s) { return s.id == f[1]; });
+      if (owner == plan.sites.end() || owner->has_anchor) return where + "an anchor names an earlier site without one";
+      owner->has_anchor = true;
+      owner->anchor = anchor_address;
     } else if (f[0] == "site") {
       if (f.size() != 9U) return where + "a site line has exactly 9 fields";
       segarecomp::M68kHookSite site;

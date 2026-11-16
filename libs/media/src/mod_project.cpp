@@ -308,12 +308,13 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       if (!symbol_name_ok(y.name)) fail("E_FIELD_VALUE", "a symbol name must be a token of 1 to 64 characters");
       m.symbols.push_back(std::move(y));
     } else if (s.name == "hook") {   // ADR 0298: one [[hook]] per declaration; `writes` and `cost` form the replacement contract of a replace hook
-      only(s, {"id", "symbol", "revision", "cpu", "mode", "reads", "writes", "cost"});
+      only(s, {"id", "symbol", "revision", "cpu", "mode", "reads", "writes", "cost", "anchor"});
       if (m.hooks.size() >= kMaxHooks) fail("E_HOOK_COUNT", "a project declares too many hooks");
       Hook h;
       h.id = text_of(s, "id"); h.symbol = text_of(s, "symbol"); h.mode = text_of(s, "mode");
       h.cpu = s.find("cpu") != nullptr ? text_of(s, "cpu") : "m68k";
       h.revision = text_of(s, "revision", false);
+      h.anchor = text_of(s, "anchor", false);
       if (s.find("reads") != nullptr) h.reads = list_of(s, "reads");
       if (s.find("writes") != nullptr || s.find("cost") != nullptr) {
         h.has_replace = true;

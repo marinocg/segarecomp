@@ -49,7 +49,7 @@ static int side_for(int num, int den) { SvGeomPlan p; SvDisplayRatio r; r.num = 
 
 static uint64_t out_hash(SvHost *h) {
   SDL_Surface *s = sv_host_capture_output(h);
-  uint64_t x = 1469598103934665603ull;
+  uint64_t x = 14695981039346656037ull;
   int y;
   if (s == NULL) return 0;   /* a missing capture is 0: the callers refuse it, it can never equal a native reference */
   for (y = s->h / 2; y < s->h; ++y) { const uint8_t *row = (const uint8_t *)s->pixels + (size_t)y * (size_t)s->pitch; int i; for (i = 0; i < s->w * 2; ++i) x = (x ^ row[i]) * 1099511628211ull; }   /* the lower-left quadrant: the host's once-per-change notice sits at the top right and is not what is compared */
@@ -89,6 +89,37 @@ static uint64_t run(const Case *c, int with_signal, char *json_out, size_t cap) 
   if (json_out != NULL) snprintf(json_out, cap, "%s", json_of(h));
   sv_host_close(h);
   return hash;
+}
+
+/* W04: the side treatment decides what survives. Under Comfort a GENERIC surface keeps the provider's pixels only on its authored rows, and the compositor reports margin pixels per frame, not per row; the host therefore never credits
+ * margin pixels under Comfort (it under-claims rather than assert a pixel survived), while Raw credits them and the picture region is credited either way. */
+static void partial_rows_counters(void) {
+  static const SvSideStyle styles[3] = {SV_SIDE_RAW, SV_SIDE_COMFORT, SV_SIDE_BORDERS};
+  size_t k;
+  for (k = 0; k < 3; ++k) {
+    SvHost *h = open_host("max=32:9;scene=a:actors+hud");
+    SvSettings st;
+    SvExtendedSurface e;
+    uint8_t rows[(H + 7) / 8];
+    const int side = side_for(32, 9);
+    char what[160];
+    size_t y;
+    memset(rows, 0, sizeof rows);
+    for (y = 0; y < 192; ++y) rows[y >> 3] |= (uint8_t)(1u << (y & 7));
+    st = *sv_host_settings(h);
+    st.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY; st.video.widescreen_side_style = styles[k]; st.video.widescreen_width = 100;
+    st.video.widescreen_ratio.num = 32; st.video.widescreen_ratio.den = 9; st.video.aspect = SV_ASPECT_ORIGINAL; st.video.scale = SV_SCALE_INTEGER;
+    sv_host_apply_settings(h, &st);
+    sv_host_set_scene(h, "a");
+    memset(&e, 0, sizeof e);
+    e.rgb24 = g_ext; e.size = sizeof g_ext; e.width = W + 2 * side; e.height = H; e.pitch = (W + 2 * side) * 3; e.side = side; e.sequence = 9; e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL;
+    e.source = SV_EXTSRC_GENERIC; e.authored_rows = rows; e.authored_row_count = 192;
+    e.actor_stage = SV_ACT_COMPOSED; e.actor_provenance = 1; e.actor_state_verified = 1; e.actor_pixels_verified = 64; e.actor_left_verified = 16; e.actor_right_verified = 16; e.actor_picture = g_comp;
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 9, &e) == 0, "partial rows: presented");
+    snprintf(what, sizeof what, "style %d: margin pixels are credited only where the whole margin is shown (Raw), the picture part always", (int)k);
+    CHECK(vsn(json_of(h), "pixels_left") == (k == 0 ? 16 : 0) && vsn(json_of(h), "pixels_right") == (k == 0 ? 16 : 0) && vsn(json_of(h), "pixels_picture") == 32, what);
+    sv_host_close(h);
+  }
 }
 
 int main(void) {
@@ -137,6 +168,7 @@ int main(void) {
       CHECK(actors(with, "presented") == 0 && actors(with, "covered") == 0 && vsn(with, "presented") == 0 && vsn(with, "pixels_authored") == 0 && vsn(with, "pixels_picture") == 0, what);
     }
   }
+  partial_rows_counters();
   if (failures != 0) { printf("%d failure(s)\n", failures); return 1; }
   printf("sv_vsprite_admission_test: ok\n");
   return 0;

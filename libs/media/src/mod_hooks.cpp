@@ -89,7 +89,14 @@ ResolvedHooks resolve_hooks(const Manifest &m, std::string_view revision) {
     Rejection why;
     const std::optional<std::uint32_t> address = verified_symbol(m, h.symbol, std::string(revision), why);
     if (!address) { out.rejection = why; return out; }
-    out.hooks.push_back(resolve_one(h, *address));
+    ResolvedHook resolved_hook = resolve_one(h, *address);
+    if (!h.anchor.empty()) {   // the anchor is a verified symbol of the same revision, exactly like the site
+      const std::optional<std::uint32_t> anchor = verified_symbol(m, h.anchor, std::string(revision), why);
+      if (!anchor) { out.rejection = why; return out; }
+      resolved_hook.anchor = *anchor;
+      resolved_hook.has_anchor = true;
+    }
+    out.hooks.push_back(std::move(resolved_hook));
   }
   out.ok = true;
   return out;
@@ -132,7 +139,7 @@ std::string hook_table_text(const ResolvedHooks &r) {
   if (!r.ok || r.hooks.empty()) return {};
   std::string text = "segarecomp.mod.hooks.v1\nrevision " + r.revision + "\n";
   for (const ResolvedHook &h : r.hooks)
-    text += "hook " + h.id + " " + h.cpu + " " + h.mode + " entry " + std::to_string(h.entry) + " reads " + std::to_string(h.reads) + " writes " + std::to_string(h.writes) + " cost " + std::to_string(h.cost) + "\n";
+    text += "hook " + h.id + " " + h.cpu + " " + h.mode + " entry " + std::to_string(h.entry) + " reads " + std::to_string(h.reads) + " writes " + std::to_string(h.writes) + " cost " + std::to_string(h.cost) + (h.has_anchor ? " anchor " + std::to_string(h.anchor) : std::string()) + "\n";
   return text;
 }
 

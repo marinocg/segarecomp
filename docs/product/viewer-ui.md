@@ -160,8 +160,8 @@ Video & Display has **Side Presentation** beside Widescreen Mode, a presentation
 - **Borders** shows plain neutral side panels around the unchanged picture.
 - **Raw Extension** shows the extension exactly as produced (useful for debugging and for judging the extension itself).
 
-The native picture is never changed, and the choice applies immediately without a reset. A frame accepted by a verified native game patch provider (see widescreen-and-patches.md) is shown in full under Comfort and Raw Rows of a frame the provider served completely but that cannot be declared authored as a whole (for example a game whose status bar is the window plane) keep the provider's pixels under Comfort and only the remaining rows receive the fill (ADR 0310); Borders and Raw are unaffected.
-(only Borders, which you explicitly choose, replaces it).
+The native picture is never changed, and the choice applies immediately without a reset. A frame accepted by a verified native game patch provider (see widescreen-and-patches.md) is shown in full under Comfort and Raw
+(only Borders, which you explicitly choose, replaces it). Rows of a frame the provider served completely but that cannot be declared authored as a whole (for example a game whose status bar is the window plane) keep the provider's pixels under Comfort and only the remaining rows receive the fill (ADR 0310); Borders and Raw are unaffected.
 
 **Widescreen Width** (SEG-123) sits under Widescreen Mode: a slider for the target aspect from 4:3 to 16:9 (shown as, for example, `1.50:1 (37%)`). It is applied at once to the picture
 
