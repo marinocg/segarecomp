@@ -315,6 +315,28 @@ void generic_hook() {
     const Out o = produce(w, ext);
     check(o.rc == 0 && o.res.status == GENESIS_EXT_PARTIAL && (o.res.flags & GENESIS_EXT_FLAG_WINDOW_EDGE) && o.res.authored == 0, "a window-covered edge degrades the frame: not authored");
   }
+  // W04: a window plane covering the picture's lower rows (a game status bar): every row ABOVE it is still fully provider-served and says so row by row, while the frame stays strictly not-authored;
+  // the rows the window plane owns, unanswered cells, a stale snapshot and a frame without a provider carry no row provenance; the native picture is untouched
+  {
+    Scene w; build_scene(w, 11);
+    for (auto &line : w.raster->lines) { line.registers[17] = 0; line.registers[18] = 0x80 | 24; }   // window plane: vertical, from cell row 24 down, the whole width
+    GenesisFrameExtension e0{}, ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = w.vram.data();
+    const Out base0 = produce(w, e0);
+    const Out o = produce(w, ext);
+    bool rows_ok = o.rc == 0 && o.res.authored == 0 && (o.res.flags & GENESIS_EXT_FLAG_WINDOW_EDGE) && o.res.compat_reason == 0 && o.res.authored_row_count == 192;
+    for (unsigned r = 0; rows_ok && r < 224; ++r) rows_ok = (((o.res.authored_rows[r >> 3] >> (r & 7)) & 1u) != 0u) == (r < 192u);
+    check(rows_ok, "a window-plane status bar: rows 0..191 are provider-served row by row, the frame is still not authored, the window rows carry no provenance");
+    bool centre_ok = base0.rc == 0;
+    for (unsigned r = 0; centre_ok && r < o.res.native_h; ++r) centre_ok = std::memcmp(&base0.surface[r * base0.res.pitch + base0.res.side * 3], &o.surface[r * o.res.pitch + o.res.side * 3], 320 * 3) == 0;
+    check(centre_ok, "the native picture is the generic one's");
+    GenesisFrameExtension ef{}; attach(ef); g_mock = Mock{}; g_mock.vram = w.vram.data(); g_mock.word_mode = 1;
+    const Out of = produce(w, ef);
+    check(of.rc == 0 && of.res.authored_row_count == 0 && of.res.compat_reason == GENESIS_COMPAT_FAULT, "unanswered cells earn no row credit");
+    GenesisFrameExtension es{}; attach(es, false); g_mock = Mock{}; g_mock.vram = w.vram.data();
+    const Out os = produce(w, es);
+    check(os.rc == 0 && os.res.authored_row_count == 0, "a stale snapshot earns no row credit");
+    check(base0.rc == 0 && base0.res.authored_row_count == 0, "no provider: no row credit");
+  }
   // determinism
   {
     GenesisFrameExtension ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = sc.vram.data();

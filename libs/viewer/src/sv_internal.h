@@ -72,6 +72,9 @@ struct SvHost {
    * applied at once and Raw is exact), the two treated side strips and the pure helper's scratch. */
   uint8_t *ext_raw;            /* (max_w + 2*SV_EXT_MAX_SIDE) x max_h RGB24, tightly packed at (last_w + 2*ext_side) * 3 */
   uint8_t *side_buf;           /* left strip then right strip, each ext_side x last_h RGB24 */
+  uint8_t ext_rows[(SV_SIDE_MAX_ROWS + 7) / 8]; /* W04: row provenance of the retained generic surface (bit y), valid when ext_row_count > 0 */
+  int ext_row_count;           /* rows set in ext_rows; 0 = none */
+  int side_rows_applied;       /* authored rows left untouched by the latest Comfort fill */
   void *side_scratch;
   size_t side_buf_cap;
   SvExtSource ext_source;      /* provenance of the retained surface */

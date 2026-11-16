@@ -1362,6 +1362,8 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   char compat_scene[GENESIS_COMPAT_SCENE_MAX + 1] = {0};
   uint8_t compat_reason = 0U;
   uint32_t compat_faults = 0U;
+  uint8_t authored_rows[(GENESIS_FRAME_MAX_HEIGHT + 7U) / 8U] = {0};
+  uint16_t authored_row_count = 0U;
   uint16_t compat_overlay_w = 0U, compat_overlay_h = 0U, compat_overlay_fx = 0U, compat_overlay_fy = 0U;
   uint32_t compat_layer_count = 0U, compat_layer_bad = 0U;
   GenesisCompatLayer compat_layers[GENESIS_COMPAT_LAYERS_MAX] = {{0}};
@@ -1455,6 +1457,8 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     uint8_t *dst = target->pixels + (size_t)row * pitch;
     GenesisVdpRowPlane plane_a, plane_b;
     unsigned backdrop = 0U;
+    const uint32_t faults_before = compat_faults;
+    int row_window_edge = 0;
     if (journaled) {
       while (applied < raster->vram_write_count && (unsigned)raster->vram_writes[applied].line < field_line) {
         work_vram[raster->vram_writes[applied].address] = raster->vram_writes[applied].value;
@@ -1477,7 +1481,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
       const unsigned edge_x = left ? 0U : width - 1U;
       const int window_edge = genesis_vdp_window_covers(line->registers, &geometry, edge_x, row);
       const unsigned group = left ? 0U : (groups != 0U ? groups - 1U : 0U);
-      if (window_edge) flags |= GENESIS_EXT_FLAG_WINDOW_EDGE;
+      if (window_edge) { flags |= GENESIS_EXT_FLAG_WINDOW_EDGE; row_window_edge = 1; }
       for (unsigned i = 0U; i < side; ++i) {
         const int64_t x = left ? (int64_t)i - (int64_t)side : (int64_t)width + (int64_t)i;
         GenesisVdpCandidatePixel a, b, none;
@@ -1522,6 +1526,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         }
       }
     }
+    if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && compat_faults == faults_before && !row_window_edge && row < GENESIS_FRAME_MAX_HEIGHT) { authored_rows[row >> 3U] |= (uint8_t)(1U << (row & 7U)); ++authored_row_count; }
   }
   if (sprites) flags |= GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT;
   /* SEG-124: the provider's HUD overlay (a separate layer the host draws after side treatment; it never enters the extension surface). SEG-140-T004: plus its positioned layers. */
@@ -1588,6 +1593,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   out->compat_reason = compat_faults != 0U ? (uint8_t)GENESIS_COMPAT_FAULT : compat_reason;
   /* Authored provenance: scenery came from the provider on every off-screen cell AND nothing degraded the frame. The sprite layer is whatever the game submitted (Level 3 stays Partial). */
   out->authored = (uint8_t)((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && compat_faults == 0U && (flags & (GENESIS_EXT_FLAG_WINDOW_EDGE | GENESIS_EXT_FLAG_COLUMN_VSCROLL | GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)) == 0U);
+  if ((flags & (GENESIS_EXT_FLAG_COLUMN_VSCROLL | GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)) == 0U) { memcpy(out->authored_rows, authored_rows, sizeof out->authored_rows); out->authored_row_count = authored_row_count; }
   out->overlay_w = compat_overlay_w;
   out->overlay_h = compat_overlay_h;
   out->overlay_fx = compat_overlay_fx;

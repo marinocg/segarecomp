@@ -243,6 +243,74 @@ static void geometry_matrix(const char *settings_file) {
   }
 }
 
+
+/* ---- W04: a partially provider-served frame (the picture's lower rows are a window plane): Comfort keeps the provider's pixels on the rows it served and fills only the rest ---- */
+static int rows_equal(SDL_Surface *a, SDL_Surface *b, SvRect rc, int y0, int y1) {   /* output rows y0..y1-1 of both surfaces inside rc */
+  int x, y, r0, g0, b0, r1, g1, b1;
+  for (y = y0; y < y1; ++y)
+    for (x = rc.x; x < rc.x + rc.w; ++x) { px(a, x, y, &r0, &g0, &b0); px(b, x, y, &r1, &g1, &b1); if (r0 != r1 || g0 != g1 || b0 != b1) return 0; }
+  return 1;
+}
+static void partial_rows_tests(const char *settings_file) {
+  const int W = 320, H = 224, AUTH = 192;
+  SvHost *host = open_host(SV_SYSTEM_GENESIS, settings_file, 320, 480, W, H);
+  const int side = sv_layout_extension_side(W, H, SV_ASPECT_ORIGINAL), pitch = (W + 2 * side) * 3 + 6;
+  uint8_t *native = (uint8_t *)malloc((size_t)(W * H) * 3u), *ext = (uint8_t *)malloc((size_t)(pitch * H));
+  uint8_t rows[(480 + 7) / 8], bad[(480 + 7) / 8], beyond[(480 + 7) / 8];
+  SDL_Surface *raw = NULL, *cg = NULL, *cp = NULL, *bg = NULL, *bp = NULL, *cb = NULL, *ca = NULL, *rp = NULL;
+  SvExtendedLayout lay;
+  SvRect left, right, nat;
+  SvExtendedSurface e;
+  uint64_t seq = 5000;
+  int y, scale;
+  CHECK(host != NULL && native != NULL && ext != NULL && side > 0, "partial rows: fixture");
+  if (host == NULL || native == NULL || ext == NULL || side <= 0) goto out;
+  make_native(native, W, H, 3);
+  make_ext(ext, W, side, H, pitch);
+  memset(rows, 0, sizeof rows); memset(bad, 0, sizeof bad); memset(beyond, 0, sizeof beyond);
+  for (y = 0; y < AUTH; ++y) { rows[y >> 3] |= (uint8_t)(1u << (y & 7)); bad[y >> 3] |= (uint8_t)(1u << (y & 7)); beyond[y >> 3] |= (uint8_t)(1u << (y & 7)); }
+  beyond[(H + 3) >> 3] |= (uint8_t)(1u << ((H + 3) & 7));   /* a bit below the picture */
+  SDL_SetWindowSize(host->window, 1280, 720);
+#define SHOT(variable, st, src, bitmap, count) do { style(host, st, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER); ++seq; \
+    e = describe(ext, W, side, H, pitch, seq, SV_WIDESCREEN_ENHANCED_GAMEPLAY, src); e.authored_rows = bitmap; e.authored_row_count = count; \
+    CHECK(sv_host_present_extended(host, native, W, H, W * 3, seq, &e) == 0, "partial rows: frame accepted"); variable = shoot(host); } while (0)
+  SHOT(raw, SV_SIDE_RAW, SV_EXTSRC_GENERIC, NULL, 0);
+  SHOT(cg, SV_SIDE_COMFORT, SV_EXTSRC_GENERIC, NULL, 0);
+  CHECK(sv_host_authored_rows(host) == 0, "Comfort without row provenance: no authored rows");
+  SHOT(cp, SV_SIDE_COMFORT, SV_EXTSRC_GENERIC, rows, AUTH);
+  CHECK(sv_host_side_treatment(host) == SV_TREAT_COMFORT && sv_host_extension_source(host) == SV_EXTSRC_GENERIC && sv_host_authored_rows(host) == AUTH,
+        "a partial frame stays GENERIC (strict accounting) and reports the rows it kept");
+  SHOT(bg, SV_SIDE_BORDERS, SV_EXTSRC_GENERIC, NULL, 0);
+  SHOT(bp, SV_SIDE_BORDERS, SV_EXTSRC_GENERIC, rows, AUTH);
+  CHECK(sv_host_authored_rows(host) == 0, "Borders keeps no provider rows");
+  SHOT(rp, SV_SIDE_RAW, SV_EXTSRC_GENERIC, rows, AUTH);
+  SHOT(cb, SV_SIDE_COMFORT, SV_EXTSRC_GENERIC, bad, AUTH + 5);        /* count disagrees with the bitmap */
+  CHECK(sv_host_authored_rows(host) == 0, "a row count that disagrees with the bitmap is ignored whole");
+  { SDL_Surface *cz = NULL; SHOT(cz, SV_SIDE_COMFORT, SV_EXTSRC_GENERIC, beyond, AUTH + 1);   /* a bit beyond the picture */
+    CHECK(sv_host_authored_rows(host) == 0 && cz != NULL && cg != NULL && full_hash(cz) == full_hash(cg), "a bit beyond the picture is ignored whole");
+    if (cz != NULL) SDL_DestroySurface(cz); }
+  SHOT(ca, SV_SIDE_COMFORT, SV_EXTSRC_AUTHORED, rows, AUTH);
+  if (raw == NULL || cg == NULL || cp == NULL || bg == NULL || bp == NULL || rp == NULL || cb == NULL || ca == NULL) { CHECK(0, "partial rows: captures"); goto out; }
+  if (sv_layout_extended_dest(raw->w, raw->h, W, H, side, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, &lay) != 0) { CHECK(0, "partial rows: layout"); goto out; }
+  nat = lay.native;
+  scale = nat.h / H;
+  left.x = lay.surface.x + 1; left.y = nat.y; left.w = nat.x - lay.surface.x - 3; left.h = nat.h;
+  right.x = nat.x + nat.w + 2; right.y = nat.y; right.w = lay.surface.x + lay.surface.w - right.x - 1; right.h = nat.h;
+  CHECK(scale >= 1 && left.w > 0 && right.w > 0, "partial rows: geometry");
+  CHECK(rows_equal(cp, raw, left, nat.y, nat.y + AUTH * scale) && rows_equal(cp, raw, right, nat.y, nat.y + AUTH * scale), "Comfort: the provider's rows are shown exactly as delivered on both sides");
+  CHECK(rows_equal(cp, cg, left, nat.y + AUTH * scale, nat.y + H * scale) && rows_equal(cp, cg, right, nat.y + AUTH * scale, nat.y + H * scale), "Comfort: the other rows still receive the Comfort fill");
+  CHECK(!rows_equal(cp, raw, left, nat.y + AUTH * scale, nat.y + H * scale), "Comfort: the fill is not the raw extension (scene sanity)");
+  CHECK(region_hash(cp, nat) == region_hash(raw, nat) && region_hash(cp, nat) == region_hash(cg, nat) && region_hash(cp, nat) == region_hash(bp, nat), "the native picture is identical in every treatment");
+  CHECK(full_hash(bp) == full_hash(bg), "Borders replaces both margins entirely, rows or not");
+  CHECK(full_hash(rp) == full_hash(raw), "Raw is unchanged by row provenance");
+  CHECK(full_hash(cb) == full_hash(cg), "an inconsistent bitmap leaves the frame exactly as a generic Comfort frame");
+  CHECK(full_hash(ca) == full_hash(raw), "an authored surface ignores row provenance and is shown as delivered");
+out:
+  { SDL_Surface *all[] = {raw, cg, cp, bg, bp, cb, ca, rp}; size_t i; for (i = 0; i < sizeof all / sizeof all[0]; ++i) if (all[i] != NULL) SDL_DestroySurface(all[i]); }
+  free(native); free(ext);
+  if (host != NULL) sv_host_close(host);
+}
+
 /* ---- the pause page: Side Presentation next to Widescreen Mode, immediate application, content vs presentation wording ---- */
 static void key_event(int scancode, int down) {
   SDL_Event e;
@@ -563,6 +631,8 @@ int main(void) {
   menu_tests(settings_file);
   remove(settings_file);
   geometry_matrix(settings_file);
+  remove(settings_file);
+  partial_rows_tests(settings_file);
   remove(settings_file);
   if (failures != 0) { printf("sv_side_style_test: %d failure(s)\n", failures); return 1; }
   printf("sv_side_style_test: OK\n");
