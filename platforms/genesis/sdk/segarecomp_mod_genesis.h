@@ -36,8 +36,10 @@ typedef struct SegaGenesisRenderApi {
   int (*scene)(const char *id, uint32_t len); /* the frame's scene token [a-z0-9_-], at most 32 characters (a claim; grants nothing) */
   /* SEG-140-T010 (ADR 0306): submits this frame's virtual sprites (authored pattern pool included) as ONE GenesisVirtualSpriteSet, at most once per render callback (a second call is a range fault); the host copies
    * it. It needs only overlay.rgba (output only: it grants no read access). The host validates the whole set against the frame with the same rules and stable reasons as every other route (a rejected set
-   * draws nothing and is reported); GAME_STATE_VERIFIED commands are accepted only when the host established a current verified snapshot, which the scheduled path does not (UNVERIFIED_STATE). A set lives
-   * for one frame. `set` must not be NULL (a range fault). Replaces the first reserved slot of the table: its size and the others are unchanged. */
+   * draws nothing and is reported); GAME_STATE_VERIFIED commands (the host decodes the art from the frame's own VRAM/CRAM) are accepted only when the host holds a current verified snapshot. A scheduled provider granted
+   * `frame.work_ram` has one: its set is bound to the guest frame whose end-of-frame work-RAM copy the render callback ran against, and is served only for the frame produced two guest frames later whose snapshot is
+   * byte-identical to that copy (a stale submission, restore, rewind or skipped callback never draws game art; the whole set is then dropped). Without `frame.work_ram` there is no snapshot and a verified
+   * command rejects the whole set (UNVERIFIED_STATE); MOD_AUTHORED commands need none. A set lives for one frame. `set` must not be NULL (a range fault). Replaces the first reserved slot of the table: its size and the others are unchanged. */
   int (*virtual_sprites)(const GenesisVirtualSpriteSet *set);
   /* SEG-140-T011 (ADR 0309): authored offscreen scenery, available only when `scenery.words` was granted (otherwise SEGA_MOD_E_CAPABILITY, a fault of the callback). Submits, for one VDP plane (0 = A, 1 = B), a WINDOW
    * of name-table words in unwrapped plane-cell coordinates: word (c, r) of `words` (row-major, `cols` x `rows`, 1..128 x 1..64, at most 4096 words) is the cell at plane x = (cell_x0 + c) * 8, plane y = (cell_y0 + r) * 8,

@@ -128,15 +128,21 @@ M68kHookResolution classify_m68k_function_hooks(const std::vector<M68kHookCodeIn
   }
 
   // W04 (ADR 0311): a game's main loop is usually entered through computed dispatch, so most of its code is not statically reachable from reset. A site may name an anchor function (a verified symbol the author
-  // asserts is executed); the anchors are extra roots. Soundness is unchanged: the runtime still proves every call by the pushed return address (unproven callers are skipped, never altered).
-  std::vector<std::uint32_t> all_roots = roots;
+  // asserts is executed); the anchor is an extra root of THAT site's admission evidence only (its direct callers, its call-entry test and the computed-transfer judgement). Another site never borrows it.
+  // Soundness is unchanged: the runtime still proves every call by the pushed return address (unproven callers are skipped, never altered).
+  const std::set<std::uint32_t> from_roots = reachable(nodes, roots);
+  const auto has_dynamic_transfer = [&](const std::set<std::uint32_t> &reach) {
+    return std::any_of(reach.begin(), reach.end(), [&](std::uint32_t a) { return is_dynamic_transfer(nodes.at(a).flow.dynamic); });
+  };
+  const bool roots_dynamic = has_dynamic_transfer(from_roots);
+  // Global integrity evidence: every anchor that is compiled code is asserted executed, so the union of all of them is what "reachable code" means for a cross-site safety judgement (an instruction span that
+  // would contain a site). It can only turn an accepted site into a rejected one, never authorize a site.
+  std::vector<std::uint32_t> global_roots = roots;
   for (const auto &s : sites)
-    if (s.has_anchor && nodes.count(s.anchor) != 0U) all_roots.push_back(s.anchor);
-  const std::set<std::uint32_t> from_reset = reachable(nodes, all_roots);
+    if (s.has_anchor && nodes.count(s.anchor) != 0U) global_roots.push_back(s.anchor);
+  const std::set<std::uint32_t> from_global = global_roots.size() == roots.size() ? from_roots : reachable(nodes, global_roots);
   const std::set<std::uint32_t> from_vectors = reachable(nodes, vectors);
   const std::set<std::uint32_t> vector_set(vectors.begin(), vectors.end());
-  bool dynamic_transfer = false;
-  for (const std::uint32_t a : from_reset) dynamic_transfer = dynamic_transfer || is_dynamic_transfer(nodes.at(a).flow.dynamic);
 
   out.sites.resize(sites.size());
   std::vector<std::set<std::uint32_t>> bodies(sites.size());
@@ -147,15 +153,22 @@ M68kHookResolution classify_m68k_function_hooks(const std::vector<M68kHookCodeIn
     if (at != nodes.end() && at->second.alias) return reject("E_HOOK_MUTABLE_CODE", i, "the site executes from work RAM");
     // The build compiles an independent identity at every decodable address of the image; "inside an instruction" is therefore judged against the instructions the program actually reaches.
     const bool inside = std::any_of(spans.begin(), spans.end(), [&](const auto &s) {
-      return entry > s.first && entry < s.first + s.second && (from_reset.count(s.first) != 0U || from_vectors.count(s.first) != 0U);
+      return entry > s.first && entry < s.first + s.second && (from_global.count(s.first) != 0U || from_vectors.count(s.first) != 0U);
     });
     if (inside) return reject("E_HOOK_MID_INSTRUCTION", i, "the site is inside a reachable compiled instruction, not at its start");
     if (at == nodes.end()) return reject("E_HOOK_NOT_COMPILED", i, "the site is in code the build did not compile");
     if (vector_set.count(entry) != 0U || from_vectors.count(entry) != 0U) return reject("E_HOOK_INTERRUPT_CONTEXT", i, "the site is a vector target or reachable from an exception/interrupt handler");
 
+    // Per-site admission evidence: the original reset roots plus only THIS site's own anchor (when it is compiled code).
+    std::vector<std::uint32_t> site_roots = roots;
+    const bool own_anchor = sites[i].has_anchor && nodes.count(sites[i].anchor) != 0U;
+    if (own_anchor) site_roots.push_back(sites[i].anchor);
+    const std::set<std::uint32_t> own_reach = own_anchor ? reachable(nodes, site_roots) : from_roots;
+    const bool dynamic_transfer = own_anchor ? has_dynamic_transfer(own_reach) : roots_dynamic;
+
     std::vector<std::uint32_t> continuations;
     bool incoming_other = false;
-    for (const std::uint32_t a : from_reset) {
+    for (const std::uint32_t a : own_reach) {
       const Node &n = nodes.at(a);
       for (const auto &s : n.flow.successors) {
         if (s.target != entry) continue;
@@ -164,7 +177,7 @@ M68kHookResolution classify_m68k_function_hooks(const std::vector<M68kHookCodeIn
       }
       if (n.flow.stacked == M68kStackedContinuationKind::call_continuation && n.flow.stacked_address == entry) incoming_other = true;  // entered by a callee's return
     }
-    for (const std::uint32_t r : all_roots) incoming_other = incoming_other || r == entry;
+    for (const std::uint32_t r : site_roots) incoming_other = incoming_other || r == entry;
     if (continuations.empty()) {
       if (incoming_other) return reject("E_HOOK_NOT_FUNCTION_ENTRY", i, "the site is reached by a branch, fallthrough or the reset entry but by no direct call");
       if (dynamic_transfer) return reject("E_HOOK_COMPUTED_TARGET", i, "no direct call reaches the site and the program has computed transfers; the site is not statically resolved");

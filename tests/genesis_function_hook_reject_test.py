@@ -41,6 +41,10 @@ PUSH = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "487A0004" + "4E75" + "4E75")]
 STACK = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "2E7C00FF8000" + "4E75")]                            # A replaces the stack pointer (MOVEA.L #imm,A7)
 COMPUTED = [(0x200, JSR_A + "2050" + "4E90" + "4E70"), (0x220, "5280" + "4E75"), (0x260, "5281" + "4E75")]   # $260 is never called directly; the program has JSR (A0)
 COMPUTED_VIA = [(0x200, JSR_A + "2050" + "4E90" + "4E70"), (0x220, "5280" + "4E75"), (0x260, "5281" + "4E75"), (0x280, "4EB900000260" + "4E75")]   # $260 is called directly, but only by $280, which only JSR (A0) reaches
+# Two sites ($260 and $2A0) whose only direct caller is $280, a function only JSR (A0) could reach (not statically reachable from reset): a shared unreachable caller.
+SHARED = [(0x200, JSR_A + "2050" + "4E90" + "4E70"), (0x220, "5280" + "4E75"), (0x260, "5281" + "4E75"), (0x280, "4EB900000260" + "4EB9000002A0" + "4E75"), (0x2A0, "5282" + "4E75")]
+# $2C0 contains a JSR whose extension word is at $2C2; $2C0 is the second function's unreachable caller (for the mid-instruction case)
+SHARED_MID = SHARED + [(0x2C0, "4EB900000260" + "4E75")]
 IRQ = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "5280" + "4E75"), (0x280, JSR_A + "4E73")]            # the level-6 handler ($280) also calls A
 BRANCH = [(0x200, JSR_A + "6600" + "0018" + "4E70"), (0x220, "5280" + "4E75")]                          # A is also the target of a conditional branch
 SELF = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "4E71" + "60FE")]                                            # A is BRA.S to itself
@@ -72,6 +76,23 @@ CASES = [
     ("W04 anchor: the caller is declared as an analysis root, the site becomes classifiable", COMPUTED_VIA, "c:260:before:0:0:0:0:1:m68k:280", "-", "OK", None),
     ("W04 anchor: an anchor that does not reach the site changes nothing", COMPUTED_VIA, "c:260:before:0:0:0:0:1:m68k:220", "-", "E_HOOK_COMPUTED_TARGET", 0),
     ("W04 anchor: an anchor that is not compiled code changes nothing", COMPUTED_VIA, "c:260:before:0:0:0:0:1:m68k:2000", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    # ADR 0311, per-site admission evidence: an anchor authorizes ONLY the site that declares it (sites are listed B first where the first rejected site is the observable)
+    ("per-site anchor: only A is anchored, A passes and B stays computed", SHARED, "a:260:before:0:0:0:0:1:m68k:280;b:2a0:before", "-", "E_HOOK_COMPUTED_TARGET", 1),
+    ("per-site anchor: B first, only A anchored: B is rejected, not authorized by A", SHARED, "b:2a0:before;a:260:before:0:0:0:0:1:m68k:280", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("per-site anchor: B alone without an anchor (baseline)", SHARED, "b:2a0:before", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("per-site anchor: both sites carry their own valid anchor", SHARED, "a:260:before:0:0:0:0:1:m68k:280;b:2a0:before:0:0:0:0:1:m68k:280", "-", "OK", None),
+    ("per-site anchor: only B anchored: B passes, A (unanchored) stays computed", SHARED, "b:2a0:before:0:0:0:0:1:m68k:280;a:260:before", "-", "E_HOOK_COMPUTED_TARGET", 1),
+    ("per-site anchor: removing A's anchor leaves B's own classification unchanged", SHARED, "b:2a0:before:0:0:0:0:1:m68k:280;a:260:before", "-", "E_HOOK_COMPUTED_TARGET", 1),
+    ("per-site anchor: a wrong anchor on A (does not reach B) does not authorize B", SHARED, "b:2a0:before;a:260:before:0:0:0:0:1:m68k:220", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("per-site anchor: an uncompiled anchor on A does not authorize B", SHARED, "b:2a0:before;a:260:before:0:0:0:0:1:m68k:2000", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("per-site anchor: B's own wrong anchor does not borrow A's valid one", SHARED, "a:260:before:0:0:0:0:1:m68k:280;b:2a0:before:0:0:0:0:1:m68k:2000", "-", "E_HOOK_COMPUTED_TARGET", 1),
+    ("per-site anchor: A's anchor equal to B's entry does not make B 'not a call entry' (B stays computed)", SHARED, "b:2a0:before;a:260:before:0:0:0:0:1:m68k:2a0", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("per-site anchor: a site's own anchor equal to its entry is a root, so it is not a call entry", SHARED, "b:2a0:before:0:0:0:0:1:m68k:2a0", "-", "E_HOOK_NOT_FUNCTION_ENTRY", 0),
+    ("global safety: a site inside an instruction of code asserted executed by another site's anchor is refused", SHARED_MID, "b:2c2:before;a:260:before:0:0:0:0:1:m68k:2c0", "-", "E_HOOK_MID_INSTRUCTION", 0),
+    ("global safety: the same site without that anchor is judged only by its own evidence (computed)", SHARED_MID, "b:2c2:before", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("direct-call hooks need no anchor (and an unrelated anchor elsewhere changes nothing)", MAIN, "a:220:before;b:240:after:3", "-", "OK", None),
+    ("an unrelated site's anchor does not change a direct-call site", SHARED, "x:220:before;a:260:before:0:0:0:0:1:m68k:280", "-", "OK", None),
+    ("anchored site still refuses an interrupt-context caller", IRQ, "a:220:before:0:0:0:0:1:m68k:200", "78:280", "E_HOOK_INTERRUPT_CONTEXT", 0),
     ("work RAM is mutable code", MAIN, "a:ff0400:before", "-", "E_HOOK_MUTABLE_CODE", 0),
     ("a function called from an interrupt handler", IRQ, "a:220:before", "78:280", "E_HOOK_INTERRUPT_CONTEXT", 0),
     ("an interrupt vector target", IRQ, "h:280:before", "78:280", "E_HOOK_INTERRUPT_CONTEXT", 0),
