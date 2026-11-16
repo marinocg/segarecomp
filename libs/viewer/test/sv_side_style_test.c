@@ -256,7 +256,7 @@ static void partial_rows_tests(const char *settings_file) {
   SvHost *host = open_host(SV_SYSTEM_GENESIS, settings_file, 320, 480, W, H);
   const int side = sv_layout_extension_side(W, H, SV_ASPECT_ORIGINAL), pitch = (W + 2 * side) * 3 + 6;
   uint8_t *native = (uint8_t *)malloc((size_t)(W * H) * 3u), *ext = (uint8_t *)malloc((size_t)(pitch * H));
-  uint8_t rows[(480 + 7) / 8], bad[(480 + 7) / 8], beyond[(480 + 7) / 8];
+  uint8_t rows[(224 + 7) / 8], bad[(224 + 7) / 8];   /* exactly the bytes a 224-row surface owns: the host must not read further */
   SDL_Surface *raw = NULL, *cg = NULL, *cp = NULL, *bg = NULL, *bp = NULL, *cb = NULL, *ca = NULL, *rp = NULL;
   SvExtendedLayout lay;
   SvRect left, right, nat;
@@ -267,9 +267,8 @@ static void partial_rows_tests(const char *settings_file) {
   if (host == NULL || native == NULL || ext == NULL || side <= 0) goto out;
   make_native(native, W, H, 3);
   make_ext(ext, W, side, H, pitch);
-  memset(rows, 0, sizeof rows); memset(bad, 0, sizeof bad); memset(beyond, 0, sizeof beyond);
-  for (y = 0; y < AUTH; ++y) { rows[y >> 3] |= (uint8_t)(1u << (y & 7)); bad[y >> 3] |= (uint8_t)(1u << (y & 7)); beyond[y >> 3] |= (uint8_t)(1u << (y & 7)); }
-  beyond[(H + 3) >> 3] |= (uint8_t)(1u << ((H + 3) & 7));   /* a bit below the picture */
+  memset(rows, 0, sizeof rows); memset(bad, 0, sizeof bad);
+  for (y = 0; y < AUTH; ++y) { rows[y >> 3] |= (uint8_t)(1u << (y & 7)); bad[y >> 3] |= (uint8_t)(1u << (y & 7)); }
   SDL_SetWindowSize(host->window, 1280, 720);
 #define SHOT(variable, st, src, bitmap, count) do { style(host, st, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER); ++seq; \
     e = describe(ext, W, side, H, pitch, seq, SV_WIDESCREEN_ENHANCED_GAMEPLAY, src); e.authored_rows = bitmap; e.authored_row_count = count; \
@@ -286,9 +285,6 @@ static void partial_rows_tests(const char *settings_file) {
   SHOT(rp, SV_SIDE_RAW, SV_EXTSRC_GENERIC, rows, AUTH);
   SHOT(cb, SV_SIDE_COMFORT, SV_EXTSRC_GENERIC, bad, AUTH + 5);        /* count disagrees with the bitmap */
   CHECK(sv_host_authored_rows(host) == 0, "a row count that disagrees with the bitmap is ignored whole");
-  { SDL_Surface *cz = NULL; SHOT(cz, SV_SIDE_COMFORT, SV_EXTSRC_GENERIC, beyond, AUTH + 1);   /* a bit beyond the picture */
-    CHECK(sv_host_authored_rows(host) == 0 && cz != NULL && cg != NULL && full_hash(cz) == full_hash(cg), "a bit beyond the picture is ignored whole");
-    if (cz != NULL) SDL_DestroySurface(cz); }
   SHOT(ca, SV_SIDE_COMFORT, SV_EXTSRC_AUTHORED, rows, AUTH);
   if (raw == NULL || cg == NULL || cp == NULL || bg == NULL || bp == NULL || rp == NULL || cb == NULL || ca == NULL) { CHECK(0, "partial rows: captures"); goto out; }
   if (sv_layout_extended_dest(raw->w, raw->h, W, H, side, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, &lay) != 0) { CHECK(0, "partial rows: layout"); goto out; }

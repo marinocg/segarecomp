@@ -1302,8 +1302,8 @@ static int present_frame_impl(SvHost *h, const uint8_t *rgb, int w, int hgt, int
     h->ext_row_count = 0;
     memset(h->ext_rows, 0, sizeof h->ext_rows);
     if (ext->source != SV_EXTSRC_AUTHORED && ext->authored_rows != NULL && ext->authored_row_count > 0 && ext->authored_row_count <= hgt && hgt <= SV_SIDE_MAX_ROWS) {
-      int n = 0;   /* recount from the bits: a count that disagrees with the bitmap, or a bit beyond the picture, is ignored whole */
-      for (y = 0; y < SV_SIDE_MAX_ROWS; ++y)
+      int n = 0;   /* recount from the bits (only the (hgt + 7) / 8 bytes the surface owns are read): a count that disagrees with the bitmap, or a bit past the last row in the last byte, is ignored whole */
+      for (y = 0; y < ((hgt + 7) / 8) * 8; ++y)
         if ((ext->authored_rows[y >> 3] >> (y & 7)) & 1u) { if (y >= hgt) { n = -1; break; } ++n; }
       if (n == ext->authored_row_count) { memcpy(h->ext_rows, ext->authored_rows, (size_t)((hgt + 7) / 8)); h->ext_row_count = n; }
     }
