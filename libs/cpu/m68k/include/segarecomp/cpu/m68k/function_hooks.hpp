@@ -41,6 +41,8 @@ struct M68kHookSite {
   bool replace_declared{false};    // a replacement contract is present
   bool flags_written{false};       // the contract says CCR is an output
   std::uint32_t cost{};            // guest cycles charged for a replaced function (replace only)
+  bool has_anchor{false};          // W04 (ADR 0311): the author asserts that the function at `anchor` is executed by the program; it is an extra reachability root of THIS site's classification only
+  std::uint32_t anchor{};
 };
 
 struct M68kHookCodeInsn {

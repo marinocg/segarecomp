@@ -40,6 +40,20 @@ int main() {
   const auto rejected = check_hooks(hint);
   check(rejected && rejected->code == "E_SYMBOL_NOT_VERIFIED", "an imported hint never resolves");
 
+  // W04 (ADR 0311): an optional anchor is a verified symbol of the same revision, in the table text and the identity text only when declared
+  Manifest anchored = m;
+  anchored.symbols.push_back({"loop", "rev-a", "verified", 0x260});
+  anchored.symbols.push_back({"loop", "rev-b", "verified", 0x360});
+  anchored.hooks[0].mode = "before"; anchored.hooks[0].has_replace = false; anchored.hooks[0].writes.clear(); anchored.hooks[0].cost = 0;
+  anchored.hooks[0].anchor = "loop";
+  const ResolvedHooks aa = resolve_hooks_for_image(anchored, image_a);
+  check(aa.ok && aa.hooks[0].has_anchor && aa.hooks[0].anchor == 0x260 && resolve_hooks_for_image(anchored, image_b).hooks[0].anchor == 0x360, "an anchor resolves per revision");
+  check(hook_table_text(aa) != hook_table_text(resolve_hooks_for_image(m, image_a)) && hook_table_text(resolve_hooks_for_image(m, image_a)).find("anchor") == std::string::npos, "the anchor is part of the table text only when declared");
+  anchored.hooks[0].anchor = "hint";
+  check(!resolve_hooks_for_image(anchored, image_a).ok && resolve_hooks_for_image(anchored, image_a).rejection.code == "E_SYMBOL_NOT_VERIFIED", "an imported hint never serves as an anchor");
+  anchored.hooks[0].anchor = "missing";
+  check(!resolve_hooks_for_image(anchored, image_a).ok, "an unknown anchor symbol is refused");
+
   // register names: readable vs writable
   check(hook_register_bit("d0", true) == 0U && hook_register_bit("a6", true) == 14U && !hook_register_bit("a7", true) && hook_register_bit("a7", false) == 15U, "A7 is readable, never writable");
   check(hook_register_bit("ccr", true) == 16U && hook_register_bit("cycles", false) == 17U && !hook_register_bit("cycles", true) && hook_register_bit("stack7", false) == 31U && !hook_register_bit("stack0", true), "ccr/cycles/stack slots");

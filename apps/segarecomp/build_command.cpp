@@ -1801,6 +1801,7 @@ int run_build(Options options) {
             std::snprintf(text, sizeof text, "site %s %08x %s %08x %08x %d %d %u\n", site->id.c_str(), static_cast<unsigned>(site->entry), site->mode.c_str(), static_cast<unsigned>(site->reads), static_cast<unsigned>(site->writes),
                           site->replace_declared ? 1 : 0, site->flags_written ? 1 : 0, static_cast<unsigned>(site->cost));
             plan << text;
+            if (site->has_anchor) { char atext[96]; std::snprintf(atext, sizeof atext, "anchor %s %08x\n", site->id.c_str(), static_cast<unsigned>(site->anchor)); plan << atext; }
             bindings.emplace_back(site->id, index);
             phases |= (site->mode == "after" ? 0U : 1U << 5U) | (site->mode == "after" || site->mode == "before-after" ? 1U << 6U : 0U);   // SEGA_MOD_PHASE_HOOK_ENTRY (5) serves before/replace, HOOK_EXIT (6) serves after
           }
