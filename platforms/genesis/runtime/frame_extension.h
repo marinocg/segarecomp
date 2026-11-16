@@ -91,6 +91,10 @@ typedef struct GenesisExtensionResult {
   uint8_t compat_reason;   /* GenesisCompatReason when a provider was attached but declined (or partially failed) the frame */
   uint8_t authored;        /* 1 = both sides' scenery came from the provider AND nothing else degraded the frame: the only case presented as authored */
   uint8_t reserved2;
+  /* Row-level provenance (W04): bit y is set when output row y's off-picture cells ALL came from the provider (no unanswered cell, no window plane on either picture edge in that row) and the frame as a whole
+   * has no per-column vertical scroll and a VRAM journal. It never replaces `authored`, which stays the strict whole-frame verdict: a frame with some authored rows is still Partial. Zero without a provider. */
+  uint16_t authored_row_count;
+  uint8_t authored_rows[(GENESIS_FRAME_MAX_HEIGHT + 7U) / 8U];
   uint16_t overlay_w, overlay_h; /* HUD overlay in the adapter's overlay buffer (0 = none) */
   uint16_t overlay_fx, overlay_fy; /* where the host draws it inside the native picture when the visible side cannot hold it */
   uint8_t layer_count;             /* SEG-140-T004: positioned/layered overlays the provider SUBMITTED for THIS frame (saturating at 255; only the first GENESIS_COMPAT_LAYERS_MAX descriptors are kept; images are in the adapter's `layer_rgba`; 0 = none) */

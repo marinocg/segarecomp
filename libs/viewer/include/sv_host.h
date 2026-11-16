@@ -100,6 +100,8 @@ const char *sv_host_profile_path(const SvHost *host);
 /* SEG-122: 1 when a verified patch's presentation defaults are active for this run (the Video menu says so). */
 int sv_host_patch_defaults_active(const SvHost *host);
 SvExtSource sv_host_extension_source(const SvHost *host);
+/* W04: rows of the shown frame whose Comfort fill was replaced by verified provider pixels (0 for an authored frame, Raw, Borders and every frame without row provenance). */
+int sv_host_authored_rows(const SvHost *host);
 /* SEG-139-T004: names the scene the following frames belong to (a declared scene id; NULL or "" = unscoped). Bounded copy; a scene the package did not declare is accounted
  * in the unscoped bucket. Provider/adapter-supplied, never inferred by the host. */
 void sv_host_set_scene(SvHost *host, const char *scene);

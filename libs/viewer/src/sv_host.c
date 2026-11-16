@@ -1135,6 +1135,17 @@ static int upload_picture(SvHost *h) {
     if (!SDL_UpdateTexture(h->frame_tex, NULL, h->ext_raw, (w + 2 * side) * 3)) return 0;
   } else if (vis > 0) {
     /* only the visible columns are treated: the filler is built for the CURRENT visible width and sits next to the native picture; the produced columns beyond it are never sampled */
+    h->side_rows_applied = 0;
+    if (t == SV_TREAT_COMFORT && h->ext_row_count > 0) {   /* W04: rows whose cells all came from the provider keep them; the fill stays only where the surface is generic */
+      int y;
+      for (y = 0; y < hgt; ++y)
+        if ((h->ext_rows[y >> 3] >> (y & 7)) & 1u) {
+          const uint8_t *src = h->ext_raw + ((size_t)y * (size_t)(w + 2 * side) + (size_t)(side - vis)) * 3u;
+          memcpy(h->side_buf + (size_t)y * (size_t)vis * 3u, src, (size_t)vis * 3u);
+          memcpy(h->side_buf + (size_t)vis * (size_t)hgt * 3u + (size_t)y * (size_t)vis * 3u, h->ext_raw + ((size_t)y * (size_t)(w + 2 * side) + (size_t)(side + w)) * 3u, (size_t)vis * 3u);
+          ++h->side_rows_applied;
+        }
+    }
     l.x = side - vis; l.y = 0; l.w = vis; l.h = hgt;
     r.x = side + w; r.y = 0; r.w = vis; r.h = hgt;
     if (!SDL_UpdateTexture(h->frame_tex, &l, h->side_buf, vis * 3)) return 0;
@@ -1162,6 +1173,7 @@ int sv_host_patch_defaults_active(const SvHost *h) { return h != NULL && h->patc
 int sv_host_profile_active(const SvHost *h) { return h != NULL && h->profile_path[0] != '\0'; }
 const char *sv_host_profile_path(const SvHost *h) { return h != NULL && h->profile_path[0] != '\0' ? h->profile_path : NULL; }
 SvSideTreatment sv_host_side_treatment(const SvHost *h) { return h != NULL ? h->side_applied : SV_TREAT_PASSTHROUGH; }
+int sv_host_authored_rows(const SvHost *h) { return h != NULL && h->ext_side > 0 && h->side_applied == SV_TREAT_COMFORT ? h->side_rows_applied : 0; }
 SvExtSource sv_host_extension_source(const SvHost *h) { return h != NULL && h->ext_side > 0 ? h->ext_source : SV_EXTSRC_GENERIC; }
 
 /* Automation seam (SEG-123): SEGARECOMP_VIEWER_CAPTURE_DIR + SEGARECOMP_VIEWER_CAPTURE_FRAMES="n,n,..." save the composed window output (picture, side style,
@@ -1287,6 +1299,14 @@ static int present_frame_impl(SvHost *h, const uint8_t *rgb, int w, int hgt, int
     for (y = 0; y < hgt; ++y) memcpy(h->ext_raw + (size_t)y * row, ext->rgb24 + (size_t)y * (size_t)ext->pitch, row);
     h->ext_source = ext->source == SV_EXTSRC_AUTHORED ? SV_EXTSRC_AUTHORED : SV_EXTSRC_GENERIC;
     h->ext_prod_mode = ext->mode;
+    h->ext_row_count = 0;
+    memset(h->ext_rows, 0, sizeof h->ext_rows);
+    if (ext->source != SV_EXTSRC_AUTHORED && ext->authored_rows != NULL && ext->authored_row_count > 0 && ext->authored_row_count <= hgt && hgt <= SV_SIDE_MAX_ROWS) {
+      int n = 0;   /* recount from the bits (only the (hgt + 7) / 8 bytes the surface owns are read): a count that disagrees with the bitmap, or a bit past the last row in the last byte, is ignored whole */
+      for (y = 0; y < ((hgt + 7) / 8) * 8; ++y)
+        if ((ext->authored_rows[y >> 3] >> (y & 7)) & 1u) { if (y >= hgt) { n = -1; break; } ++n; }
+      if (n == ext->authored_row_count) { memcpy(h->ext_rows, ext->authored_rows, (size_t)((hgt + 7) / 8)); h->ext_row_count = n; }
+    }
   }
   {
     const uint64_t t_upload = sv_perf_span_begin(h->perf);

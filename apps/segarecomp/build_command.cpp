@@ -149,6 +149,7 @@ struct Options {
   // resolved by the verification step
   bool luau = false;
   bool native_mod = false;           // SEG-138-T011: the scheduled mod is a native ABI 2 provider (no Luau VM)
+  bool native_frame_state = false;   // W04 gap B: the provider was granted frame.work_ram (the producer then verifies the frame's state epoch and may admit game-art virtual sprites)
   bool native_scenery = false;       // SEG-140-T011: the provider was granted scenery.words (the played program's producer then also serves the SCENERY component)
   std::vector<std::pair<fs::path, std::string>> native_mod_units;   // the staged native-c11 files (path, sha256 of the verified package payload); every .c is a compile unit
   fs::path native_mod_dir;           // <output>/native-mod: staged sources and the constant artifact
@@ -1336,7 +1337,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       // SEG-138-T011 (ADR 0305): the played program drives a native ABI 2 provider through the SAME scheduler and presenter seam; no Luau VM is linked, only the overlay rasterizer and rules it shares.
       const std::vector<std::string> flags = native_mod_cxx_flags();
       add_native_mod_common(flags, "-DSEGARECOMP_MOD_VIEWER=1");
-      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::string(options.native_scenery ? "12U" : "8U"), "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::string(options.native_scenery ? (options.native_frame_state ? "13U" : "12U") : (options.native_frame_state ? "9U" : "8U")), "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
     } else if (options.luau && options.luau_scheduled) {
       // SEG-138-T010 (ADR 0305): the played program runs the ONE mod scheduler (the headless program's adapter, compiled for the viewer) and presents its render output through the existing provider seam.
       const std::vector<std::string> flags = add_luau_runtime();
@@ -1345,7 +1346,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       add(final_only, build.viewer / "mod_capture.cpp", "mod-viewer", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_VIEWER=1", "-I", build.runtime.string(), "-I", build.viewer.string(), "-I", (options.runtime_dir / "sdk").string()}); return f; }(), true);
       add(final_only, build.runtime / "mod_scheduler.c", "mod-scheduler", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
       add(final_only, options.luau_artifact_source, "luau-artifact");
-      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::string(options.native_scenery ? "12U" : "8U"), "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::string(options.native_scenery ? (options.native_frame_state ? "13U" : "12U") : (options.native_frame_state ? "9U" : "8U")), "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
     } else if (options.luau) {
       // The viewer's existing provider seam (ADR 0267) calls the provider; only the HUD overlay component is requested.
       const std::vector<std::string> flags = add_luau_runtime();
@@ -1822,6 +1823,7 @@ int run_build(Options options) {
         return fail(options, log, original_sha, "analyze", 1, "The package declares a memory capability but no memory range with that access for this revision.", "E_RANGE_DECLARATION");
       options.native_mod = true;
       options.native_scenery = granted("scenery.words");
+      options.native_frame_state = granted("frame.work_ram");
       options.luau_identity = options.native_identity;
       options.luau_original_sha256 = original_sha;
       options.luau_effective_sha256 = effective.effective_sha256;

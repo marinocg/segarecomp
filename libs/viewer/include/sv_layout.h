@@ -92,6 +92,11 @@ typedef struct SvExtendedSurface {
   uint32_t actor_pixels_verified, actor_pixels_authored;
   uint32_t actor_left_verified, actor_left_authored, actor_right_verified, actor_right_authored;   /* the part of those drawn in the left / right extension columns; the rest is in the picture */
   const uint8_t *actor_picture;
+  /* W04: optional row-level provenance of a GENERIC surface. Bit y (little-endian within bytes) of `authored_rows` is set when output row y's extension cells all came from a verified provider while the frame as
+   * a whole could not be declared AUTHORED (for example the picture's lower rows are a window plane). Comfort then leaves those rows' provider pixels untouched and fills only the other rows; Borders and Raw
+   * ignore it; `source` and every coverage counter keep their strict whole-frame meaning (a frame with authored rows is still not an authored frame). NULL / 0 = none; ignored for an AUTHORED surface. */
+  const uint8_t *authored_rows;
+  int authored_row_count;
 } SvExtendedSurface;
 typedef enum SvActorStage {
   SV_ACT_NONE = 0,       /* no virtual-sprite contribution */

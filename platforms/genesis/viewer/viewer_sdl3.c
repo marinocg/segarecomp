@@ -253,6 +253,7 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
         v->compat_stats.frames += 1U;
         if (r->compat_accepted != 0U && r->compat_reason == 0U) {
           if (r->authored) { surface.source = SV_EXTSRC_AUTHORED; v->compat_stats.authored += 1U; }
+          else if (r->authored_row_count > 0U) { surface.authored_rows = r->authored_rows; surface.authored_row_count = (int)r->authored_row_count; }   /* W04: row provenance of a partial frame */
           if (r->overlay_w > 0U && r->overlay_h > 0U && r->overlay_w <= GENESIS_COMPAT_OVERLAY_MAX_W && r->overlay_h <= GENESIS_COMPAT_OVERLAY_MAX_H) {
             surface.overlay_rgba = v->ext.overlay_rgba;
             surface.overlay_w = (int)r->overlay_w;
