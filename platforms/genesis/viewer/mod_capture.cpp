@@ -87,6 +87,10 @@ struct Mod {
   // SEG-140-T010: the typed virtual_sprites feature submits a whole GenesisVirtualSpriteSet (the one transport every route ends in); staged during the callback, committed with the overlay when it did not fault
   std::unique_ptr<GenesisVirtualSpriteSet> staged_set, visible_set;
   bool have_staged_set = false, have_visible_set = false;
+  // W04 gap B: the epoch of the committed virtual-sprite set. A set that depicts the game's own art (GAME_STATE_VERIFIED) is bound to the guest frame whose end-of-frame work-RAM copy the render callback ran against: it is
+  // served only for the frame the runtime produces two guest frames later, and only when the snapshot that frame's producer sees is byte-identical (FNV-1a 64) to that copy.
+  std::uint64_t visible_set_frame = 0, visible_set_digest = 0;
+  bool visible_set_digest_valid = false;
   // SEG-140-T011 (ADR 0309): the typed scenery_window feature. One bounded name-table window per plane, staged during the render callback, committed with it, bound to the one frame it was rendered for.
   struct SceneryWindow {
     bool present = false;
@@ -210,6 +214,11 @@ int api_virtual_sprites(const GenesisVirtualSpriteSet *set) {
   g.have_staged_set = true;
   return SEGA_MOD_OK;
 }
+std::uint64_t fnv1a64(const std::uint8_t *data, std::size_t n) {
+  std::uint64_t h = 1469598103934665603ULL;
+  for (std::size_t i = 0; i < n; ++i) { h ^= data[i]; h *= 1099511628211ULL; }
+  return h;
+}
 constexpr std::uint32_t kSceneryColsMax = 128U, kSceneryRowsMax = 64U, kSceneryWordsMax = 4096U;
 int api_scenery_window(std::uint32_t plane, std::int32_t cell_x0, std::int32_t cell_y0, std::uint32_t cols, std::uint32_t rows, const std::uint16_t *words) {
   if (!in_render()) return refused_phase();
@@ -241,7 +250,12 @@ void wrapped_phase(void *state, const SegaModHost *host) {
   g.native_phase_entry(state, host);
   if (render && g.scheduler->fault_status == SEGA_MOD_OK && g.scheduler->external_cause == nullptr) {
     g.visible = std::move(g.staged);
-    if (g.have_staged_set) { std::swap(g.visible_set, g.staged_set); g.have_visible_set = true; }
+    if (g.have_staged_set) {
+      std::swap(g.visible_set, g.staged_set); g.have_visible_set = true;
+      g.visible_set_frame = host->frame;
+      g.visible_set_digest_valid = g.scheduler->render_copy_valid != 0U;
+      g.visible_set_digest = g.visible_set_digest_valid ? fnv1a64(g.scheduler->render_copy, GENESIS_MOD_WORK_RAM_BYTES) : 0U;
+    }
     for (unsigned plane = 0; plane < 2U; ++plane) std::swap(g.visible_scenery[plane], g.staged_scenery[plane]);
     g.visible_scenery_frame = host->frame;
   }
@@ -408,6 +422,15 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     if (p.have_sprites) p.sprites = *view.sprites;
     p.set = view.set;
     p.have_set = view.set != nullptr && view.set->count > 0;
+#ifdef SEGARECOMP_MOD_NATIVE
+    if (p.have_set && frame->work_ram != nullptr) {   // W04 gap B (a provider without frame.work_ram has no snapshot: the compositor then rejects game art as UNVERIFIED_STATE, as before): a set naming the game's own art must belong to THIS frame's epoch; otherwise the whole set is dropped (a stale submission, a restore, a rewind or a skipped callback never draws game art)
+      bool verified = false;
+      for (std::uint32_t i = 0; i < view.set->count && i < GENESIS_VSPRITE_MAX; ++i) verified = verified || view.set->sprites[i].provenance == GENESIS_VSPRITE_GAME_STATE_VERIFIED;
+      const bool epoch = g.scheduler->runtime != nullptr && g.visible_set_frame + 2U == g.scheduler->runtime->virtual_frame_count && g.visible_set_digest_valid && frame->work_ram != nullptr &&
+                         fnv1a64(frame->work_ram, GENESIS_MOD_WORK_RAM_BYTES) == g.visible_set_digest;
+      if (verified && !epoch) p.have_set = false;
+    }
+#endif
     if (!ops.empty() || p.have_sprites || p.have_set) {
       p.image = luau::rasterize_overlay(ops);
       p.fixed = false;

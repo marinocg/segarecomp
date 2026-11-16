@@ -88,7 +88,7 @@ std::optional<mod::Rejection> native_scheduled_support(const mod::Package &packa
   const std::vector<std::string> live = native_scheduled_capabilities();
   for (const std::string &c : m.capabilities)
     if (std::find(live.begin(), live.end(), c) == live.end())
-      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, scenery.words, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod, hook.function)"};
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, scenery.words, frame.work_ram, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod, hook.function)"};
   if (m.has_hooks && std::find(m.capabilities.begin(), m.capabilities.end(), "hook.function") == m.capabilities.end())
     return mod::Rejection{"E_LIVE_CAPABILITY", "a package with function hooks must require hook.function"};
   return std::nullopt;
@@ -98,6 +98,7 @@ std::optional<mod::Rejection> native_scheduled_support(const mod::Package &packa
 std::vector<std::string> native_scheduled_capabilities() {
   std::vector<std::string> caps = scheduled_capabilities();
   caps.push_back("hook.function");
+  caps.push_back("frame.work_ram");   // W04 gap B: the render-phase copy of end-of-frame work RAM; it is what binds a game-art virtual-sprite set to its frame epoch (mod_capture.cpp)
   caps.push_back("scenery.words");   // SEG-140-T011: authored offscreen scenery through the typed render feature
   return caps;
 }

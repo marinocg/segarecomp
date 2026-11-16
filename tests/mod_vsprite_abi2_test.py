@@ -65,6 +65,38 @@ def c_source(sprites, budget="limit", space="picture", count=None, parity=False,
     return "\n".join(lines)
 
 
+def scroller_source():
+    """W04 gap B: a strict-C11 ABI 2 provider whose game-art actor scrolls across BOTH hardware sprite-coordinate limits (x from -200 to 444 in presentation space), changes tile and flip every frame, and a second
+    command that changes layer and clip, as pure functions of the guest frame the render callback ran for. The test mirrors exactly this function."""
+    return """#include <segarecomp_mod_genesis.h>
+static GenesisVirtualSpriteSet set;
+static int provider_init(void *state, const SegaModHost *host) { (void)state; return host->platform == SEGA_MOD_PLATFORM && host->platform_features != NULL ? 0 : 1; }
+static void provider_phase(void *state, const SegaModHost *host) {
+  const SegaGenesisFeatures *f = (const SegaGenesisFeatures *)host->platform_features;
+  const uint32_t n = (uint32_t)host->frame;
+  GenesisVirtualSprite *a, *b;
+  (void)state;
+  if (host->phase != SEGA_MOD_PHASE_RENDER || f == NULL || f->size < sizeof(SegaGenesisFeatures) || f->render == NULL) return;
+  set.space = 1U;
+  set.count = 2U;
+  a = &set.sprites[0];
+  a->provenance = 1U; a->layer = 2U; a->width_cells = 1U; a->height_cells = 1U; a->tile_index = (uint16_t)(1U + n % 3U); a->h_flip = (uint8_t)(n & 1U);
+  a->x = (int16_t)(-200 + 14 * (int)(n % 47U)); a->y = 150;
+  b = &set.sprites[1];
+  b->provenance = 1U; b->layer = (uint8_t)((n % 2U) != 0U ? 1U : 0U); b->width_cells = 1U; b->height_cells = 1U; b->tile_index = 2U; b->x = 100; b->y = 4;
+  if (n % 5U == 0U) { b->has_clip = 1U; b->clip_x = 100; b->clip_y = 4; b->clip_w = 4U; b->clip_h = 8U; } else b->has_clip = 0U;
+  (void)f->render->virtual_sprites(&set);
+}
+static const SegaModProvider provider = {sizeof(SegaModProvider), SEGA_MOD_ABI_MAJOR, 0U, SEGA_MOD_PLATFORM, "vsprite-scroller", 1U, provider_init, provider_phase, NULL, NULL, NULL, {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL}};
+const SegaModProvider *segarecomp_mod_provider(void **state_out) { static int storage; if (state_out != NULL) *state_out = &storage; return &provider; }
+"""
+
+
+def scroller_sprites(n):
+    return [sp("verified", layer=ABOVE, x=-200 + 14 * (n % 47), y=150, tile=1 + n % 3, hflip=bool(n & 1)),
+            sp("verified", layer=BETWEEN if n % 2 else BEHIND, x=100, y=4, tile=2, clip=(100, 4, 4, 8) if n % 5 == 0 else None)]
+
+
 def cfg_text(ratio=None, style="raw"):
     if ratio is None:
         return "video.widescreen=original\nvideo.scale=1\nvideo.aspect=0\n"
@@ -205,6 +237,62 @@ required = [{", ".join('"%s"' % c for c in caps)}]
             else:
                 block = results["abi2"][1]["virtual_sprites"]
                 check(block["pixels_left"] == 0 and block["pixels_right"] == 0 and block["pixels_picture"] > 0, f"{name}: the replaced columns count for nothing: {block}")
+
+
+        # ---- W04 gap B: a provider granted frame.work_ram may submit GAME_STATE_VERIFIED commands (the game's own art from the frame's VRAM/CRAM). The host binds the set to its frame epoch (stamp + 2 and a digest of the
+        # end-of-frame work-RAM copy equal to the snapshot the producer sees); without the capability the set is still rejected UNVERIFIED_STATE (the case above). Same compositor, same golden model, same accounting as ABI 1. ----
+        abi1_state = abi1_program("abi1-state", ["overlay.rgba", "frame.work_ram"])
+        gated = [
+            ("state_picture", [sp(x=200, y=150, tile=2), sp("verified", x=216, y=150, tile=2)], "limit", "picture", None, "raw", "verified_gated"),
+            ("state_wide", [sp("verified", x=330, y=150, tile=2), sp(x=-24, y=150, tile=1)], "limit", "presentation", "32:9", "raw", "wide_verified"),
+        ]
+        for name, sprites, budget, space, ratio, style, abi1_case in gated:
+            native = abi2_program("abi2-" + name, c_source(sprites, budget, space), caps=("overlay.rgba", "frame.work_ram"))
+            r1 = play(abi1_state, f"abi1-{name}", ratio, style, abi1_case, side if ratio else 0)
+            r2 = play(native, f"abi2-{name}", ratio, style, None, side if ratio else 0)
+            check(r1[0] == r2[0] and account(r1[1]) == account(r2[1]), f"{name}: the gated ABI 2 route is pixel-identical to the ABI 1 verified route with identical accounting (frames equal {r1[0] == r2[0]}; abi1 {account(r1[1])}; abi2 {account(r2[1])})")
+            check(r2[1]["last_vsprite_reason"] == 0 and r2[1]["virtual_sprites"]["composed"] > 0 and r2[1]["virtual_sprites"]["pixels_verified"] > 0 and r2[1]["virtual_sprites"]["rejected"] == 0,
+                  f"{name}: the verified set is composed, never rejected: {r2[1]['virtual_sprites']}")
+            if ratio is None:
+                want, d_auth, d_ver = model(base_picture, sprites, budget)
+                got = picture(r2[0])
+                bad = sum(1 for y in range(H) for x in range(W) if got[y][x] != want[y][x] and not (y < 40 and x >= 200))
+                check(bad == 0 and d_ver > 0, f"{name}: the frame equals the independent golden with the game's own art ({bad} pixels differ)")
+            else:
+                want, counts, rej = model_wide(base_wide, side, sprites, budget, space)
+                check(rej is None and surface_from_bmp(r2[0], side) == want and counts["verified"]["right"] > 0, f"{name}: the 32:9 surface equals the golden: game art drawn beyond the hardware's right limit (rejection {rej})")
+
+        # the scrolling game-art actor: every captured frame equals the golden for the guest frame its render callback ran for, at ONE constant offset (the contract: produced two guest frames later), across both
+        # hardware coordinate limits, with tile, flip, layer and clip changing; the same run twice is byte-identical. (The fixture has one palette line and static art: palette/art streaming changes need a richer fixture.)
+        scroll = abi2_program("abi2-scroller", scroller_source(), caps=("overlay.rgba", "frame.work_ram"))
+        shots = {}
+        for run_name in ("a", "b"):
+            capdir = tmp / ("scroll-" + run_name)
+            capdir.mkdir()
+            play(scroll, "abi2-scroll-" + run_name, "32:9", "raw", None, side, {"SEGARECOMP_VIEWER_CAPTURE_DIR": str(capdir), "SEGARECOMP_VIEWER_CAPTURE_FRAMES": ",".join(str(i) for i in range(30, 70, 3))})
+            shots[run_name] = {int(q.stem.split("-")[1]): q.read_bytes() for q in capdir.glob("frame-*.bmp")}
+        check(len(shots["a"]) >= 10 and shots["a"] == shots["b"], f"the scrolling actor: a replay is byte-identical ({len(shots['a'])} frames)")
+        offsets = []
+        for k in range(0, 6):
+            ok = True
+            for ordinal, data in shots["a"].items():
+                f = tmp / "scroll-frame.bmp"
+                f.write_bytes(data)
+                want, _, rej = model_wide(base_wide, side, scroller_sprites(ordinal - k), "limit", "presentation")
+                ok = ok and rej is None and surface_from_bmp(read_bmp(f), side) == want
+                if not ok:
+                    break
+            if ok:
+                offsets.append(k)
+        check(offsets == [1], f"the scrolling actor: every frame matches the golden of ONE guest frame and no other offset: presented frame P shows the set rendered for guest frame P - 1, i.e. the runtime frame count minus 2 of ADR 0309 (matching offsets {offsets})")
+        xs = [-200 + 14 * (n % 47) for n in range(28, 68)]
+        check(min(xs) < -128 and max(xs) > 383, f"the captured trajectory crosses both hardware coordinate limits ({min(xs)}..{max(xs)})")
+
+        # a restore keeps the epoch honest: save, then a NEW process loads it and runs on; the verified set is never served from before the restore and nothing faults
+        stdir = tmp / "state-save"
+        native_state = tmp / "abi2-state_picture"
+        _, _, ls = play(native_state, "abi2-state-save", None, "raw", None, 0, {"SEGARECOMP_SAVE_DIR": str(stdir), "SEGARECOMP_ROM_SHA256": image_sha, "SEGARECOMP_REWIND": "on"})
+        check(ls["MOD_SUMMARY"][0]["faulted"] is False, "the gated provider runs under save/rewind without a fault")
 
         # ---- the feature's own contract: one set per callback, a set is required, render phase only; each is a scheduler fault of only this provider ----
         cap = tmp / "capture"
