@@ -124,6 +124,7 @@ inline constexpr std::string_view kSymbolProvenance[] = {"manual", "verified", "
 // `writes` (d0..d7, a0..a6, ccr) and the guest `cost` in cycles charged for the replaced function. Names are sorted ascending without duplicates (a canonical manifest).
 struct Hook {
   std::string id, symbol, revision, cpu, mode;
+  std::string anchor;   // W04: optional verified symbol of a function the author asserts the program executes; the build adds it to the reachability roots of THIS site's classification (see ADR 0311)
   std::vector<std::string> reads, writes;
   bool has_replace = false;
   std::uint32_t cost = 0;
@@ -274,8 +275,8 @@ struct EditRanges {
 // One hook resolved for one revision: symbol -> image address through a VERIFIED symbol, masks from the names.
 struct ResolvedHook {
   std::string id, cpu, mode;
-  std::uint32_t entry = 0, reads = 0, writes = 0, cost = 0;
-  bool replace_declared = false, flags_written = false;
+  std::uint32_t entry = 0, reads = 0, writes = 0, cost = 0, anchor = 0;
+  bool replace_declared = false, flags_written = false, has_anchor = false;
 };
 struct ResolvedHooks {
   bool ok = false;

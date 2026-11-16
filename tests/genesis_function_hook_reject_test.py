@@ -40,6 +40,7 @@ TABLE = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "5280" + "4EFB0002" + "4E75")
 PUSH = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "487A0004" + "4E75" + "4E75")]                        # A pushes a code address (PEA d16(PC)) then RTS: a computed return
 STACK = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "2E7C00FF8000" + "4E75")]                            # A replaces the stack pointer (MOVEA.L #imm,A7)
 COMPUTED = [(0x200, JSR_A + "2050" + "4E90" + "4E70"), (0x220, "5280" + "4E75"), (0x260, "5281" + "4E75")]   # $260 is never called directly; the program has JSR (A0)
+COMPUTED_VIA = [(0x200, JSR_A + "2050" + "4E90" + "4E70"), (0x220, "5280" + "4E75"), (0x260, "5281" + "4E75"), (0x280, "4EB900000260" + "4E75")]   # $260 is called directly, but only by $280, which only JSR (A0) reaches
 IRQ = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "5280" + "4E75"), (0x280, JSR_A + "4E73")]            # the level-6 handler ($280) also calls A
 BRANCH = [(0x200, JSR_A + "6600" + "0018" + "4E70"), (0x220, "5280" + "4E75")]                          # A is also the target of a conditional branch
 SELF = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "4E71" + "60FE")]                                            # A is BRA.S to itself
@@ -67,6 +68,10 @@ CASES = [
     ("function pushing a code address (computed return)", PUSH, "a:220:before", "-", "E_HOOK_UNCLASSIFIED_RETURN", 0),
     ("function replacing the stack pointer", STACK, "a:220:before", "-", "E_HOOK_UNCLASSIFIED_RETURN", 0),
     ("computed target: only reachable through JSR (An)", COMPUTED, "c:260:before", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("computed target: the only direct caller is itself unreachable", COMPUTED_VIA, "c:260:before", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("W04 anchor: the caller is declared as an analysis root, the site becomes classifiable", COMPUTED_VIA, "c:260:before:0:0:0:0:1:m68k:280", "-", "OK", None),
+    ("W04 anchor: an anchor that does not reach the site changes nothing", COMPUTED_VIA, "c:260:before:0:0:0:0:1:m68k:220", "-", "E_HOOK_COMPUTED_TARGET", 0),
+    ("W04 anchor: an anchor that is not compiled code changes nothing", COMPUTED_VIA, "c:260:before:0:0:0:0:1:m68k:2000", "-", "E_HOOK_COMPUTED_TARGET", 0),
     ("work RAM is mutable code", MAIN, "a:ff0400:before", "-", "E_HOOK_MUTABLE_CODE", 0),
     ("a function called from an interrupt handler", IRQ, "a:220:before", "78:280", "E_HOOK_INTERRUPT_CONTEXT", 0),
     ("an interrupt vector target", IRQ, "h:280:before", "78:280", "E_HOOK_INTERRUPT_CONTEXT", 0),

@@ -127,7 +127,12 @@ M68kHookResolution classify_m68k_function_hooks(const std::vector<M68kHookCodeIn
     nodes.emplace(n.address, std::move(n));
   }
 
-  const std::set<std::uint32_t> from_reset = reachable(nodes, roots);
+  // W04 (ADR 0311): a game's main loop is usually entered through computed dispatch, so most of its code is not statically reachable from reset. A site may name an anchor function (a verified symbol the author
+  // asserts is executed); the anchors are extra roots. Soundness is unchanged: the runtime still proves every call by the pushed return address (unproven callers are skipped, never altered).
+  std::vector<std::uint32_t> all_roots = roots;
+  for (const auto &s : sites)
+    if (s.has_anchor && nodes.count(s.anchor) != 0U) all_roots.push_back(s.anchor);
+  const std::set<std::uint32_t> from_reset = reachable(nodes, all_roots);
   const std::set<std::uint32_t> from_vectors = reachable(nodes, vectors);
   const std::set<std::uint32_t> vector_set(vectors.begin(), vectors.end());
   bool dynamic_transfer = false;
@@ -159,7 +164,7 @@ M68kHookResolution classify_m68k_function_hooks(const std::vector<M68kHookCodeIn
       }
       if (n.flow.stacked == M68kStackedContinuationKind::call_continuation && n.flow.stacked_address == entry) incoming_other = true;  // entered by a callee's return
     }
-    for (const std::uint32_t r : roots) incoming_other = incoming_other || r == entry;
+    for (const std::uint32_t r : all_roots) incoming_other = incoming_other || r == entry;
     if (continuations.empty()) {
       if (incoming_other) return reject("E_HOOK_NOT_FUNCTION_ENTRY", i, "the site is reached by a branch, fallthrough or the reset entry but by no direct call");
       if (dynamic_transfer) return reject("E_HOOK_COMPUTED_TARGET", i, "no direct call reaches the site and the program has computed transfers; the site is not statically resolved");
