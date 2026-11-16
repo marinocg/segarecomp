@@ -209,7 +209,9 @@ required = [{", ".join('"%s"' % c for c in caps)}]
             ("wide_straddle", [sp(x=-4, y=150, tile=1), sp(x=316, y=170, tile=2)], "limit", "presentation", "32:9", "raw", "wide_straddle", None),
             ("wide_outer", [sp(x=-side, y=150, tile=1), sp(x=320 + side - 8, y=150, tile=2), sp(x=-side - 4, y=180, tile=1), sp(x=320 + side - 4, y=180, tile=2)], "limit", "presentation", "32:9", "raw", "wide_outer", None),
             ("wide_budget", [sp(x=-24, y=96, tile=1), sp(x=336, y=150, tile=1)], "extended", "presentation", "32:9", "raw", "wide_budget_extended", None),
-            ("wide_priority", [sp(x=100, y=150, tile=1), sp(layer=BETWEEN, x=-4, y=150, tile=1)], "limit", "presentation", "32:9", "raw", "wide_layers_between", SIDE_PRIORITY),
+            ("wide_priority", [sp(x=100, y=150, tile=1), sp(layer=BETWEEN, x=-4, y=150, tile=1)], "limit", "presentation", "32:9", "raw", "wide_layers_between", None),   # ADR 0312: composes (was SIDE_PRIORITY)
+            ("wide_classes", [sp(layer=BETWEEN, x=-24, y=4, tile=1), sp(layer=BETWEEN, x=336, y=6, tile=1), sp(layer=BEHIND, x=-40, y=4, tile=1), sp(layer=BEHIND, x=330, y=12, tile=1), sp(layer=ABOVE, x=348, y=6, tile=1)],
+             "limit", "presentation", "32:9", "raw", "wide_layers_classes", None),
             ("wide_comfort", [sp(x=-4, y=150, tile=1), sp(x=316, y=170, tile=2)], "limit", "presentation", "32:9", "comfort", "wide_straddle", None),
         ]
         for name, sprites, budget, space, ratio, style, abi1_case, rejection in matrix:

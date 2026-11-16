@@ -119,6 +119,13 @@ static int hud(void *state, GenesisCompatOverlay *out) {
     } else if (strcmp(kase, "wide_layers_above") == 0) { add(s, AUTH, ABOVE, -4, 150, 1, 1, 1U, 0); }
     else if (strcmp(kase, "wide_layers_between") == 0) { add(s, AUTH, ABOVE, 100, 150, 1, 1, 1U, 0); add(s, AUTH, BETWEEN, -4, 150, 1, 1, 1U, 0); }
     else if (strcmp(kase, "wide_layers_behind") == 0) { add(s, AUTH, BEHIND, 316, 150, 1, 1, 1U, 0); }
+    else if (strcmp(kase, "wide_layers_classes") == 0) {   /* ADR 0312: margin sprites against the three priority classes of the plane A rows (0-7 low, 8-15 high, the rest backdrop) */
+      add(s, AUTH, BETWEEN, -24, 4, 1, 1, 1U, 0);       /* left margin, rows 4..11: drawn on the low rows 4..7, hidden by the high rows 8..11 */
+      add(s, AUTH, BETWEEN, 336, 6, 1, 1, 1U, 0);       /* right margin, rows 6..13 */
+      add(s, AUTH, BEHIND, -40, 4, 1, 1, 1U, 0);        /* left margin, rows 4..11: behind the planes everywhere here, so never visible */
+      add(s, AUTH, BEHIND, 330, 12, 1, 1, 1U, 0);       /* right margin, rows 12..19: hidden on the high rows 12..15, drawn on the backdrop rows 16..19 */
+      add(s, AUTH, ABOVE, 348, 6, 1, 1, 1U, 0);         /* right margin, above everything */
+    }
     else if (strcmp(kase, "wide_layers_inside") == 0) { add(s, AUTH, BEHIND, 20, 150, 1, 1, 1U, 0); add(s, AUTH, BETWEEN, 60, 150, 1, 1, 2U, 0); add(s, AUTH, ABOVE, -8, 150, 1, 1, 1U, 0); }
     else if (strcmp(kase, "wide_picture_space") == 0) { s->space = (uint8_t)GENESIS_VSPRITE_SPACE_PICTURE; add(s, AUTH, ABOVE, -4, 150, 1, 1, 1U, 0); add(s, AUTH, ABOVE, 316, 170, 1, 1, 2U, 0); }
     else if (strcmp(kase, "wide_budget_limit") == 0 || strcmp(kase, "wide_budget_extended") == 0) {

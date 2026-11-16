@@ -11,6 +11,8 @@ For a 320 x 224 picture with square pixels the planner gives `side = (floor(224 
 
 ## Decision 2: the ONE side priority policy
 
+> Superseded in part by [ADR 0312](0312-virtual-sprite-priority-in-extension-columns.md): the producer now records the priority class of every extension pixel, so `BETWEEN` and `BEHIND_PLANES` are ordered against a margin like against the picture. The rejection below remains the fail-closed rule when no valid class data exists for the frame.
+
 Native VDP priority classes (backdrop / low / high) exist only for native-picture pixels. The margins are the provider's authored or generic scenery, so **no class is invented for them**:
 
 | Layer | In the native picture | In a presented margin |

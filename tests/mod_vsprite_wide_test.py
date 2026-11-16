@@ -5,7 +5,7 @@ source pixels, derived here by hand from the planner rule), compared pixel for p
 
 Proves: the coordinate space (same origin as the picture; x < 0 left, x >= 320 right; the PICTURE space stays clipped to the picture, so every T008 golden is unchanged); sprites in each margin, straddling the
 native boundary, touching and crossing the outer boundary of the presented surface (clipped, never moved); the side priority policy (ABOVE_ALL draws, a BEHIND_PLANES/BETWEEN command that reaches a margin rejects the
-whole set with SIDE_PRIORITY, inside-picture layers are unchanged); LIMIT and EXTENDED budgets count a margin sprite's rows like any other; verified and authored provenance; per-region coverage (picture, left, right
+whole set with SIDE_PRIORITY only without class data; ADR 0312: with the producer's recorded classes they compose against the margins, inside-picture layers are unchanged); LIMIT and EXTENDED budgets count a margin sprite's rows like any other; verified and authored provenance; per-region coverage (picture, left, right
 pixels that reached the presented frame); a side treatment that replaces the columns (Comfort, Borders), Original (no columns) and an aspect outside the declaration present nothing in a margin and credit nothing;
 a set never outlives its frame. Two demonstrations draw a sprite in a 32:9 side column, one per authoring route.
 usage: mod_vsprite_wide_test.py <segarecomp-cli> <C compiler> <source root> <SDL3 prefix>"""
@@ -39,6 +39,7 @@ def sprites_for(case, side):
         "wide_layers_above": ([sp(x=-4, y=150, tile=1)], "limit", "presentation"),
         "wide_layers_between": ([sp(x=100, y=150, tile=1), sp(layer=BETWEEN, x=-4, y=150, tile=1)], "limit", "presentation"),
         "wide_layers_behind": ([sp(layer=BEHIND, x=316, y=150, tile=1)], "limit", "presentation"),
+        "wide_layers_classes": ([sp(layer=BETWEEN, x=-24, y=4, tile=1), sp(layer=BETWEEN, x=336, y=6, tile=1), sp(layer=BEHIND, x=-40, y=4, tile=1), sp(layer=BEHIND, x=330, y=12, tile=1), sp(layer=ABOVE, x=348, y=6, tile=1)], "limit", "presentation"),
         "wide_layers_inside": ([sp(layer=BEHIND, x=20, y=150, tile=1), sp(layer=BETWEEN, x=60, y=150, tile=2), sp(x=-8, y=150, tile=1)], "limit", "presentation"),
         "wide_picture_space": ([sp(x=-4, y=150, tile=1), sp(x=316, y=170, tile=2)], "limit", "picture"),
         "wide_budget_limit": ([sp(x=-24, y=96, tile=1), sp(x=336, y=150, tile=1)], "limit", "presentation"),
@@ -135,14 +136,23 @@ def main():
             check(img[154][side - 24 + 3] == rgb(AUTHORED_PALETTE[1]) and img[154][side - 25] == bases[ratio][154][side - 25] and img[154][side - 16] == bases[ratio][154][side - 16],
                   f"{ratio}: x = -24 is surface column {side - 24}: the sprite starts exactly there")
 
-        # ---- the side priority policy (ADR 0307): a layer that must be ordered against a native class cannot reach a column ----
+        # ---- priority in the margins (ADR 0312; the rule it replaces, ADR 0307's whole-set rejection, now applies only when the producer recorded no class data): the viewer records the winner class of every
+        # margin pixel, so BEHIND_PLANES and BETWEEN are ordered against the margins exactly like against the picture ----
         side = 238
-        for case in ("wide_layers_between", "wide_layers_behind"):
+        for case in ("wide_layers_between", "wide_layers_behind", "wide_layers_classes"):
             sprites, budget, space = sprites_for(case, side)
             img, rep = play(plain, f"abi1-32x9-{case}", case, "32:9", side=side)
-            want, _, rej = model_wide(bases["32:9"], side, sprites, budget, space)
-            check(rej == SIDE_PRIORITY and img == bases["32:9"] and rep["last_vsprite_reason"] == SIDE_PRIORITY and vs(rep).get("rejected") == rep["frames"] and vs(rep).get("presented") == 0 and actors(rep)["presented"] == 0,
-                  f"{case}: a BEHIND_PLANES/BETWEEN command that reaches a margin rejects the WHOLE set (reason {SIDE_PRIORITY}); even the valid above-all sprite beside it is not drawn: {vs(rep)}")
+            want, counts, rej = model_wide(bases["32:9"], side, sprites, budget, space)
+            wrong = sum(1 for y in range(H) for x in range(320 + 2 * side) if img[y][x] != want[y][x])
+            reg = region(counts)
+            check(rej is None and wrong == 0 and vs(rep).get("rejected") == 0 and vs(rep).get("presented") == rep["frames"] and rep["last_vsprite_reason"] == 0,
+                  f"{case}: BEHIND_PLANES/BETWEEN commands that reach a margin compose and equal the independent golden ({wrong} pixels differ): {vs(rep)}")
+            check(vs(rep).get("pixels_left") == reg["left"] * rep["frames"] and vs(rep).get("pixels_right") == reg["right"] * rep["frames"],
+                  f"{case}: margin pixels by region are the model's {reg}: {vs(rep)}")
+        sprites, budget, space = sprites_for("wide_layers_classes", side)
+        _, counts, _ = model_wide(bases["32:9"], side, sprites, budget, space)
+        check(counts["authored"]["left"] == 8 * 4 and counts["authored"]["right"] == 8 * 2 + 8 * 4 + 8 * 8,
+              f"wide_layers_classes: the class contrast is real (left BETWEEN shows its 4 low rows only, right BETWEEN 2 low rows, right BEHIND its 4 backdrop rows, ABOVE all 8): {counts}")
         img, rep = play(plain, "abi1-32x9-bad-space", "wide_bad_space", "32:9", side=side)
         check(img == bases["32:9"] and rep["last_vsprite_reason"] == RESERVED, f"an unknown coordinate space is rejected as a reserved value: {rep['last_vsprite_reason']}")
         # verified and authored provenance, side by side, with the host's snapshot gate

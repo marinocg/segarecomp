@@ -40,6 +40,7 @@ struct GenesisSdl3Viewer {
 typedef char genesis_ext_side_bound_matches_layout[(GENESIS_EXT_MAX_SIDE == (unsigned)SV_EXT_MAX_SIDE) ? 1 : -1];
 
 static uint8_t g_extension_surface[GENESIS_EXT_SURFACE_BYTES];
+static uint8_t g_extension_classes[GENESIS_EXT_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT];   /* ADR 0312: the producer's winner class of every extension pixel of the frame being produced (one byte per surface pixel) */
 static uint8_t g_compat_ram[GENESIS_COMPAT_RAM_BYTES];          /* SEG-124: work-RAM snapshot for the verified provider (written by the runtime at each publication) */
 static uint8_t g_compat_overlay[GENESIS_COMPAT_OVERLAY_BYTES];  /* SEG-124: the provider's HUD overlay for the frame being presented */
 static uint8_t g_compat_layers[GENESIS_COMPAT_LAYER_BYTES];     /* SEG-140-T004: the provider's positioned overlay images for the frame being presented */
@@ -56,7 +57,7 @@ static uint8_t g_vsprite_wide_valid;                                            
 /* SEG-140-T008 (ADR 0306): the adapter's compositor, called by the producer for a frame whose provider submitted at least one command, while the frame's raster state and VRAM are valid. It runs the VDP's
  * own auxiliary render (identical artifact, plus per-pixel layer classes and per-row sprite demand) and the F14 compositor, and keeps the composed picture in a static buffer the presenter reads. */
 static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
-                                  const GenesisFrameArtifact *native, const uint8_t *surface, unsigned side, GenesisVirtualSpriteOutcome *out) {
+                                  const GenesisFrameArtifact *native, const uint8_t *surface, const uint8_t *classes, unsigned side, GenesisVirtualSpriteOutcome *out) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   GenesisVirtualSpriteReport report;
   GenesisVirtualSpriteSurface target;
@@ -72,6 +73,7 @@ static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set,
   target.rgb = surface;
   target.side = side;
   target.visible = visible;
+  target.layer = classes;   /* ADR 0312: NULL unless the producer recorded this frame's classes */
   if (genesis_vdp_produce_frame_raster_aux(vram, raster, &g_vsprite_scratch, &g_vsprite_aux) != 0) return -1;
   if (side > 0U && surface != NULL) {   /* the composition keeps the extension's layout; the native picture is its centre */
     if (genesis_virtual_sprites_compose_wide(set, host_flags, vram, native, &g_vsprite_aux, &target, g_vsprite_wide, sizeof g_vsprite_wide, &report) != 0) return -1;
@@ -334,6 +336,8 @@ GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *v, const
   v->ext.vsprite_compose = viewer_vsprite_compose;
   v->ext.vsprite_ctx = v;
   v->ext.capacity = sizeof g_extension_surface;
+  v->ext.classes = g_extension_classes;   /* ADR 0312 */
+  v->ext.classes_capacity = sizeof g_extension_classes;
   v->frame_sequence = frame_sequence;
   v->ext_attached = 1;
   v->l2_support = SV_WS_AVAILABLE; /* capable until a produced frame says otherwise */

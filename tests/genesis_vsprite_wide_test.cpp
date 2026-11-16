@@ -41,7 +41,7 @@ const uint8_t *at(const std::vector<uint8_t> &out, const Rig &g, int picture_x, 
 bool is(const uint8_t *p, const uint8_t c[3]) { return std::memcmp(p, c, 3) == 0; }
 
 GenesisVirtualSpriteReport compose(Rig &g, const GenesisVirtualSpriteSet *set, unsigned visible, std::vector<uint8_t> &out, int *rc = nullptr) {
-  GenesisVirtualSpriteSurface s = {g.surface.data(), g.side, visible};
+  GenesisVirtualSpriteSurface s = {g.surface.data(), g.side, visible, nullptr};   // ADR 0312: no class data (the fail-closed policy cases below)
   GenesisVirtualSpriteReport rep;
   out.assign(g.surface.size(), 0);
   const int result = genesis_virtual_sprites_compose_wide(set, GENESIS_VSPRITE_HOST_STATE_VERIFIED, g.scene.vram, &g.r.frame, &g.r.aux, &s, out.data(), out.size(), &rep);

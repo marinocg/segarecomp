@@ -94,7 +94,8 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
       rep->status = GENESIS_VSPRITE_STATUS_COMPOSED;
       rep->commands = set->count;
       compose = 1;
-      if (extended) {   /* ADR 0307: no native priority class exists in an extension column, so a command that must be ordered against one cannot reach it */
+      if (extended) {   /* ADR 0307/0312: a command that must be ordered against a native priority class can reach an extension column only when the producer recorded the classes of THIS frame's surface */
+        int classes_ok = -1; /* -1 = not yet checked: only a command that actually reaches an extension column needs it */
         for (uint32_t i = 0U; i < set->count; ++i) {
           const GenesisVirtualSprite *s = &set->sprites[i];
           int lo = s->x, hi = (int)s->x + (int)s->width_cells * (int)GENESIS_VDP_TILE_WIDTH;
@@ -110,7 +111,15 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
           if (hi > (int)width + (int)visible) hi = (int)width + (int)visible;
           if (cy0 < 0) cy0 = 0;
           if (cy1 > (int)height) cy1 = (int)height;
-          if (lo < hi && cy0 < cy1 && (lo < 0 || hi > (int)width)) {
+          if (lo < hi && cy0 < cy1 && (lo < 0 || hi > (int)width) && classes_ok < 0) {
+            classes_ok = surface->layer != NULL;
+            for (unsigned r = 0U; classes_ok && r < height; ++r) {   /* inconsistent data is as unusable as none: every visible extension pixel must hold a class */
+              const uint8_t *lrow = surface->layer + (size_t)r * (width + 2U * side);
+              for (unsigned k = 0U; k < visible; ++k)
+                if (lrow[side - 1U - k] > GENESIS_VDP_LAYER_HIGH || lrow[side + width + k] > GENESIS_VDP_LAYER_HIGH) { classes_ok = 0; break; }
+            }
+          }
+          if (classes_ok == 0 && lo < hi && cy0 < cy1 && (lo < 0 || hi > (int)width)) {
             memset(rep, 0, sizeof(*rep));
             rep->sprite_limit = aux->sprite_limit;
             rep->cell_budget = aux->cell_budget;
@@ -197,7 +206,9 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
           if ((int)a->layer != layer) continue;
           for (int x = a->clip_x0; x < a->clip_x1; ++x) {
             const int picture_x = x - (int)side;   /* the native picture's own coordinate; an extension column has none */
-            const uint8_t native_class = picture_x >= 0 && picture_x < (int)width ? aux->layer[(size_t)row * width + (unsigned)picture_x] : (uint8_t)GENESIS_VDP_LAYER_BACKDROP;
+            /* the native picture's own class inside the picture; in an extension column the producer's recorded class of this very pixel (ADR 0312). Without a record only ABOVE_ALL reaches an extension column (rejected above otherwise). */
+            const uint8_t native_class = picture_x >= 0 && picture_x < (int)width ? aux->layer[(size_t)row * width + (unsigned)picture_x]
+                                         : (side > 0U && surface != NULL && surface->layer != NULL ? surface->layer[(size_t)row * (width + 2U * side) + (unsigned)x] : (uint8_t)GENESIS_VDP_LAYER_BACKDROP);
             uint8_t *px = out + (size_t)x * 3U;
             uint8_t index = 0U;
             GenesisRgb888 color;

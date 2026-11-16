@@ -93,13 +93,17 @@ int genesis_virtual_sprites_compose(const GenesisVirtualSpriteSet *set, unsigned
                                     const GenesisFrameArtifact *native, const GenesisVdpFrameAux *aux, uint8_t *rgb_out, size_t rgb_capacity,
                                     GenesisVirtualSpriteReport *report);
 
-/* SEG-140-T009 (ADR 0307): the presented extension surface a set in the PRESENTATION space is composed onto. `rgb` is the produced surface ((width + 2 * side) x height RGB24, its centre the native picture), `side` the
+/* SEG-140-T009 (ADR 0307, ADR 0312): the presented extension surface a set in the PRESENTATION space is composed onto. `rgb` is the produced surface ((width + 2 * side) x height RGB24, its centre the native picture), `side` the
  * produced columns per side and `visible` how many of them (per side, <= side) the host actually presents: the only extension pixels that are ever drawn. The output is a surface of the SAME layout (the base is
- * `rgb`, the centre re-derived from the native artifact), so the host can present it unchanged. BEHIND_PLANES and BETWEEN commands cannot reach an extension column (no native priority class exists there): such a
- * set is rejected as a whole with GENESIS_VSPRITE_REJ_SIDE_PRIORITY. A NULL surface, `side` 0 or the PICTURE space is exactly genesis_virtual_sprites_compose (picture-sized output). */
+ * `rgb`, the centre re-derived from the native artifact), so the host can present it unchanged.
+ * `layer` (ADR 0312) is the producer's own record, for the SAME frame and the same surface layout ((width + 2 * side) x height bytes, one GENESIS_VDP_LAYER_* per pixel), of which class of content won each extension
+ * pixel under the VDP's six-layer order (backdrop, low or high priority). With it, BEHIND_PLANES and BETWEEN commands are ordered against the extension columns exactly as against the native picture. Without it (NULL), or when
+ * a visible extension pixel holds a value that is not a class, no priority information exists for the frame and such a command that reaches an extension column rejects the whole set (GENESIS_VSPRITE_REJ_SIDE_PRIORITY);
+ * priority is never inferred from colour or neighbouring pixels. ABOVE_ALL needs none. A NULL surface, `side` 0 or the PICTURE space is exactly genesis_virtual_sprites_compose (picture-sized output). */
 typedef struct GenesisVirtualSpriteSurface {
   const uint8_t *rgb;
   unsigned side, visible;
+  const uint8_t *layer; /* ADR 0312: per-pixel winner class of the produced surface, or NULL when the producer recorded none */
 } GenesisVirtualSpriteSurface;
 int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisFrameArtifact *native,
                                          const GenesisVdpFrameAux *aux, const GenesisVirtualSpriteSurface *surface, uint8_t *rgb_out, size_t rgb_capacity, GenesisVirtualSpriteReport *report);
