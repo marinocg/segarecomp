@@ -123,7 +123,7 @@ int hud(void *, GenesisCompatOverlay *o) { if (o->vsprites != nullptr) *o->vspri
 const GenesisNativeCompat kProvider = {GENESIS_NATIVE_COMPAT_ABI, "priority-test", 1, GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES, prep, nullptr, hud};
 
 int compose_cb(void *, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster, const GenesisFrameArtifact *native,
-               const uint8_t *surface, const uint8_t *classes, unsigned side, GenesisVirtualSpriteOutcome *out) {
+               const uint8_t *surface, const uint8_t *classes, unsigned side, int shift, GenesisVirtualSpriteOutcome *out) {
   Wire &w = *g_wire;
   w.called = true;
   w.classes_passed = classes != nullptr;
@@ -131,7 +131,7 @@ int compose_cb(void *, const GenesisVirtualSpriteSet *set, unsigned host_flags, 
   auto aux = std::make_unique<GenesisVdpFrameAux>();
   auto scratch = std::make_unique<GenesisFrameArtifact>();
   if (genesis_vdp_produce_frame_raster_aux(vram, raster, scratch.get(), aux.get()) != 0) return -1;
-  GenesisVirtualSpriteSurface t = {surface, side, w.visible, classes};
+  GenesisVirtualSpriteSurface t = {surface, side, w.visible, classes, shift};
   w.composed.assign(static_cast<size_t>(kPitchPx) * kH * 3, 0);
   if (genesis_virtual_sprites_compose_wide(set, host_flags, vram, native, aux.get(), &t, w.composed.data(), w.composed.size(), &w.rep) != 0) return -1;
   out->status = w.rep.status;

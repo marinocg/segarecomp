@@ -17,31 +17,36 @@ struct Rig {
   Scene scene;
   Rendered r;
   std::vector<uint8_t> surface;   // the produced extension: (w + 2 * side) x h RGB24, margins filled with kMargin, the centre the native picture
-  unsigned side = 0;
+  unsigned side = 0, left = 0;   // `left` = the picture's column in the surface (ADR 0315; == side when centred)
+  int shift = 0;
   Rig() {
     scene.set_color(3, 1, 1, 1);
     scene.set_color(9, 7, 0, 0);
     for (unsigned t = 0; t < 16; ++t) scene.fill_tile(kArtTile + t, 9);
     check(r.render(scene), "the scene renders");
   }
-  void widen(unsigned s) {
+  void widen(unsigned s) { widen_at(s, s); }
+  // ADR 0315: a surface of total width r.w + 2 * s whose picture starts at column `at_left` (0 .. 2 * s)
+  void widen_at(unsigned s, unsigned at_left) {
     side = s;
+    left = at_left;
+    shift = (int)at_left - (int)s;
     surface.assign((size_t)(r.w + 2 * s) * r.h * 3, 0);
     for (unsigned y = 0; y < r.h; ++y)
       for (unsigned x = 0; x < r.w + 2 * s; ++x) {
         uint8_t *p = &surface[((size_t)y * (r.w + 2 * s) + x) * 3];
-        if (x < s || x >= s + r.w) std::memcpy(p, kMargin, 3);
-        else std::memcpy(p, &r.rgb[((size_t)y * r.w + (x - s)) * 3], 3);
+        if (x < at_left || x >= at_left + r.w) std::memcpy(p, kMargin, 3);
+        else std::memcpy(p, &r.rgb[((size_t)y * r.w + (x - at_left)) * 3], 3);
       }
   }
   unsigned pitch() const { return r.w + 2 * side; }
 };
 
-const uint8_t *at(const std::vector<uint8_t> &out, const Rig &g, int picture_x, unsigned y) { return &out[((size_t)y * g.pitch() + (unsigned)(picture_x + (int)g.side)) * 3]; }
+const uint8_t *at(const std::vector<uint8_t> &out, const Rig &g, int picture_x, unsigned y) { return &out[((size_t)y * g.pitch() + (unsigned)(picture_x + (int)g.left)) * 3]; }
 bool is(const uint8_t *p, const uint8_t c[3]) { return std::memcmp(p, c, 3) == 0; }
 
 GenesisVirtualSpriteReport compose(Rig &g, const GenesisVirtualSpriteSet *set, unsigned visible, std::vector<uint8_t> &out, int *rc = nullptr) {
-  GenesisVirtualSpriteSurface s = {g.surface.data(), g.side, visible, nullptr};   // ADR 0312: no class data (the fail-closed policy cases below)
+  GenesisVirtualSpriteSurface s = {g.surface.data(), g.side, visible, nullptr, g.shift};   // ADR 0312: no class data (the fail-closed policy cases below)
   GenesisVirtualSpriteReport rep;
   out.assign(g.surface.size(), 0);
   const int result = genesis_virtual_sprites_compose_wide(set, GENESIS_VSPRITE_HOST_STATE_VERIFIED, g.scene.vram, &g.r.frame, &g.r.aux, &s, out.data(), out.size(), &rep);
@@ -245,8 +250,74 @@ void bounded_cost() {
 
 }  // namespace
 
+// ADR 0315: the compositor on an asymmetric surface. The reference is independent of the shift arithmetic: the same sprites composed on a SYMMETRIC surface big enough for either margin, cropped.
+void asymmetric_surface() {
+  constexpr unsigned kSide = 39, kBig = 2 * kSide;
+  const int xs[] = {-60, -30, -16, 0, 100, (int)320 - 16, 330, 340};   // wholly beyond / in the left margin / straddling left / inside / straddling right / in the right margin / flush
+  Rig ref;
+  ref.widen(kBig);
+  auto set = make_set();
+  set->count = 0;
+  for (int x : xs) set->sprites[set->count++] = vsprite(x, 20 + 14 * (int)set->count, 2, 2, kArtTile, 0);
+  std::vector<uint8_t> ref_out;
+  const GenesisVirtualSpriteReport ref_rep = compose(ref, set.get(), kBig, ref_out);
+  check(ref_rep.status == GENESIS_VSPRITE_STATUS_COMPOSED, "asymmetric: the symmetric reference composes");
+  for (unsigned left : {0u, 1u, 7u, 38u, 39u, 40u, 70u, 77u, 78u}) {
+    Rig g;
+    g.widen_at(kSide, left);
+    std::vector<uint8_t> out;
+    int rc = -1;
+    const GenesisVirtualSpriteReport rep = compose(g, set.get(), kSide, out, &rc);   // visible == side: shown whole
+    char what[200];
+    std::snprintf(what, sizeof what, "asymmetric %u/%u: composed", left, 78 - left);
+    check(rc == 0 && rep.status == GENESIS_VSPRITE_STATUS_COMPOSED, what);
+    bool equal = out.size() == g.surface.size();
+    for (unsigned y = 0; y < g.r.h && equal; ++y)
+      equal = std::memcmp(&out[(size_t)y * g.pitch() * 3], &ref_out[((size_t)y * ref.pitch() + (kBig - left)) * 3], (size_t)g.pitch() * 3) == 0;
+    std::snprintf(what, sizeof what, "asymmetric %u/%u: equals the crop of the symmetric composition (sprites crossing either edge, clipped at the surface boundary)", left, 78 - left);
+    check(equal, what);
+    // the region accounting follows what is on this surface: pixels in the left columns count as left, in the right columns as right
+    uint32_t want_left = 0, want_right = 0;
+    for (unsigned y = 0; y < g.r.h; ++y)
+      for (unsigned x = 0; x < g.pitch(); ++x) {
+        const bool drawn = std::memcmp(&out[((size_t)y * g.pitch() + x) * 3], &g.surface[((size_t)y * g.pitch() + x) * 3], 3) != 0;
+        if (drawn && x < left) ++want_left;
+        if (drawn && x >= left + g.r.w) ++want_right;
+      }
+    std::snprintf(what, sizeof what, "asymmetric %u/%u: left/right pixel counts are the drawn pixels in each extension region", left, 78 - left);
+    check(rep.pixels_left_verified == want_left && rep.pixels_right_verified == want_right, what);
+  }
+  {   // the exact arithmetic for one split: a 32 x 32 sprite at x -16 on a surface with 7 columns left of the picture: 7 columns in the margin, 16 in the picture
+    Rig g;
+    g.widen_at(kSide, 7);
+    std::vector<uint8_t> out;
+    auto one = make_set();
+    one->count = 1;
+    one->sprites[0] = vsprite(-16, 40, 4, 4, kArtTile, 0);
+    const GenesisVirtualSpriteReport rep = compose(g, one.get(), kSide, out);
+    check(rep.pixels_left_verified == 7 * 32 && rep.pixels_drawn_verified == 7 * 32 + 16 * 32 && is(at(out, g, -7, 40), kRed) && is(at(out, g, -1, 71), kRed), "split 7/71: seven margin columns drawn, the one beyond the surface clipped");
+  }
+  {   // an asymmetric surface is composed whole or not at all: a partial crop would reinterpret columns the producer did not make for that view
+    Rig g;
+    g.widen_at(kSide, 20);
+    std::vector<uint8_t> out;
+    int rc = 0;
+    (void)compose(g, set.get(), 10, out, &rc);
+    check(rc != 0, "an asymmetric surface with a partial visible width is refused");
+    rc = 0;
+    const GenesisVirtualSpriteReport none = compose(g, set.get(), 0, out, &rc);
+    check(rc == 0 && none.pixels_left_verified == 0 && none.pixels_right_verified == 0, "no visible column: the extension is untouched, the picture is still composed at its own position");
+    GenesisVirtualSpriteSurface bad = {g.surface.data(), g.side, kSide, nullptr, 40};
+    GenesisVirtualSpriteReport rep;
+    check(genesis_virtual_sprites_compose_wide(set.get(), GENESIS_VSPRITE_HOST_STATE_VERIFIED, g.scene.vram, &g.r.frame, &g.r.aux, &bad, out.data(), out.size(), &rep) != 0, "a shift beyond the planned total is refused");
+    bad.shift = -40;
+    check(genesis_virtual_sprites_compose_wide(set.get(), GENESIS_VSPRITE_HOST_STATE_VERIFIED, g.scene.vram, &g.r.frame, &g.r.aux, &bad, out.data(), out.size(), &rep) != 0, "a negative shift beyond the planned total is refused");
+  }
+}
+
 int main() {
   coordinates_and_regions();
+  asymmetric_surface();
   outer_boundary_and_visibility();
   priority_policy();
   validation();

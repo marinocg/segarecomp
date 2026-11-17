@@ -97,6 +97,9 @@ typedef struct SvExtendedSurface {
    * ignore it; `source` and every coverage counter keep their strict whole-frame meaning (a frame with authored rows is still not an authored frame). NULL / 0 = none; ignored for an AUTHORED surface. */
   const uint8_t *authored_rows;
   int authored_row_count;
+  /* ADR 0315: the native picture starts at surface column `side + shift` (zero-initialised = centred): `side + shift` produced columns lie left of it, `side - shift` right of it; |shift| <= side. The total
+   * width stays native + 2 * side. A non-zero shift is presented whole (a view narrower than the surface would reinterpret columns the producer did not make for it) or not at all. */
+  int shift;
 } SvExtendedSurface;
 typedef enum SvActorStage {
   SV_ACT_NONE = 0,       /* no virtual-sprite contribution */
@@ -136,6 +139,8 @@ size_t sv_side_scratch_bytes(int h);
 /* Fills `left` and `right` (each `side` x `h` RGB24 pixels, tightly packed, pitch side*3) for the COMFORT or BORDERS treatment from the native picture.
  * `scratch` must hold sv_side_scratch_bytes(h) bytes (suitably aligned for int32). Returns 0, or -1 for invalid input or SV_TREAT_PASSTHROUGH. */
 int sv_side_fill(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int side, uint8_t *left, uint8_t *right, void *scratch);
+/* ADR 0315: the same with an independent width per side (`left` is left_w x h, `right` is right_w x h, either width may be 0 but not both); equal widths are exactly sv_side_fill. */
+int sv_side_fill2(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int left_w, int right_w, uint8_t *left, uint8_t *right, void *scratch);
 
 /* ---- SEG-139: the checked widescreen surface planner (pure, SDL-free, no platform knowledge, no allocation) ----
  * One function turns the native picture, its pixel-aspect policy and a requested rational display aspect into the number of extra source pixels per side and
@@ -318,6 +323,8 @@ int sv_ovl_budget_ok(int used, int w, int h);
 /* Plans `count` layers (a negative or NULL input plans nothing) for a native picture of pic_w x pic_h with `visible_side` columns of surface on each side (0 at 4:3 / Original).
  * Pure; never reads image pixels. */
 void sv_overlay_plan(const SvOverlayLayer *layers, int count, int pic_w, int pic_h, int visible_side, SvOverlayPlan *out);
+/* ADR 0315: independent visible columns left and right of the picture (equal values are exactly sv_overlay_plan). The surface width is visible_left + pic_w + visible_right. */
+void sv_overlay_plan2(const SvOverlayLayer *layers, int count, int pic_w, int pic_h, int visible_left, int visible_right, SvOverlayPlan *out);
 /* Blends the planned layers, in plan order, over the RGB24 presentation surface `rgb` (width x height, row pitch `pitch` bytes) whose width is pic_w + 2 * visible_side. Source-over with
  * the same rounding as the fixed overlay; fully transparent pixels leave the surface unchanged. */
 void sv_overlay_compose(uint8_t *rgb, int width, int height, int pitch, const SvOverlayLayer *layers, const SvOverlayPlan *plan);

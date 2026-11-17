@@ -57,7 +57,7 @@ static uint8_t g_vsprite_wide_valid;                                            
 /* SEG-140-T008 (ADR 0306): the adapter's compositor, called by the producer for a frame whose provider submitted at least one command, while the frame's raster state and VRAM are valid. It runs the VDP's
  * own auxiliary render (identical artifact, plus per-pixel layer classes and per-row sprite demand) and the F14 compositor, and keeps the composed picture in a static buffer the presenter reads. */
 static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
-                                  const GenesisFrameArtifact *native, const uint8_t *surface, const uint8_t *classes, unsigned side, GenesisVirtualSpriteOutcome *out) {
+                                  const GenesisFrameArtifact *native, const uint8_t *surface, const uint8_t *classes, unsigned side, int shift, GenesisVirtualSpriteOutcome *out) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   GenesisVirtualSpriteReport report;
   GenesisVirtualSpriteSurface target;
@@ -69,7 +69,9 @@ static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set,
   if (surface != NULL && side > 0U && settings->video.widescreen != SV_WIDESCREEN_ORIGINAL) {   /* ADR 0307: only the columns the host will present for the CURRENT aspect are ever drawn */
     const int vis = sv_geom_resolve_visible(&settings->video, (int)width, (int)height, (int)side);
     visible = vis > 0 ? (unsigned)vis : 0U;
+    if (shift != 0 && visible != side) visible = 0U;   /* ADR 0315: an asymmetric surface is presented whole or not at all, and only then are its extension columns composed */
   }
+  target.shift = shift;
   target.rgb = surface;
   target.side = side;
   target.visible = visible;
@@ -77,7 +79,7 @@ static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set,
   if (genesis_vdp_produce_frame_raster_aux(vram, raster, &g_vsprite_scratch, &g_vsprite_aux) != 0) return -1;
   if (side > 0U && surface != NULL) {   /* the composition keeps the extension's layout; the native picture is its centre */
     if (genesis_virtual_sprites_compose_wide(set, host_flags, vram, native, &g_vsprite_aux, &target, g_vsprite_wide, sizeof g_vsprite_wide, &report) != 0) return -1;
-    for (unsigned row = 0U; row < height; ++row) memcpy(&g_vsprite_rgb[(size_t)row * width * 3U], &g_vsprite_wide[((size_t)row * (width + 2U * side) + side) * 3U], (size_t)width * 3U);
+    for (unsigned row = 0U; row < height; ++row) memcpy(&g_vsprite_rgb[(size_t)row * width * 3U], &g_vsprite_wide[((size_t)row * (width + 2U * side) + (size_t)((int)side + shift)) * 3U], (size_t)width * 3U);
     g_vsprite_wide_valid = (uint8_t)(report.pixels_left_verified + report.pixels_left_authored + report.pixels_right_verified + report.pixels_right_authored > 0U);
   } else if (genesis_virtual_sprites_compose(set, host_flags, vram, native, &g_vsprite_aux, g_vsprite_rgb, sizeof g_vsprite_rgb, &report) != 0) {
     return -1;
@@ -246,6 +248,7 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
       surface.height = (int)r->native_h;
       surface.pitch = (int)r->pitch;
       surface.side = (int)r->side;
+      surface.shift = (int)r->shift;   /* ADR 0315: where the picture sits in the planned total; validated again by the host */
       surface.sequence = r->sequence;
       /* the produced frame's own identity, never the saved preference */
       surface.mode = r->mode == GENESIS_EXT_MODE_SPRITES ? SV_WIDESCREEN_ENHANCED_GAMEPLAY

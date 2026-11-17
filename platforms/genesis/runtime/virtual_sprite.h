@@ -105,6 +105,7 @@ typedef struct GenesisVirtualSpriteSurface {
   const uint8_t *rgb;
   unsigned side, visible;
   const uint8_t *layer; /* ADR 0312: per-pixel winner class of the produced surface, or NULL when the producer recorded none */
+  int shift;            /* ADR 0315: the picture starts at surface column `side + shift` (0 = centred); a non-zero shift requires visible == side */
 } GenesisVirtualSpriteSurface;
 int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisFrameArtifact *native,
                                          const GenesisVdpFrameAux *aux, const GenesisVirtualSpriteSurface *surface, uint8_t *rgb_out, size_t rgb_capacity, GenesisVirtualSpriteReport *report);

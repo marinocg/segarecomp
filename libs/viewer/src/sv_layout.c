@@ -111,6 +111,7 @@ SvExtCheck sv_extended_surface_check(const SvExtendedSurface *e, int native_w, i
   if (e->sequence != native_sequence) return SV_EXT_SEQUENCE;
   if (native_w <= 0 || native_h <= 0 || max_w <= 0 || native_w > max_w || native_w > 4096 || native_h > 4096) return SV_EXT_GEOMETRY;
   if (e->side <= 0 || e->side > SV_EXT_MAX_SIDE || e->height != native_h || e->width != native_w + 2 * e->side) return SV_EXT_GEOMETRY;
+  if (e->shift < -e->side || e->shift > e->side) return SV_EXT_GEOMETRY;   /* ADR 0315: the picture must lie inside the planned total */
   row_bytes = (int64_t)e->width * 3;
   if (e->pitch < row_bytes) return SV_EXT_PITCH;
   needed = (int64_t)e->pitch * (int64_t)(e->height - 1) + row_bytes;
@@ -174,25 +175,31 @@ SvSideTreatment sv_side_treatment(SvSideStyle style, SvExtSource source) {
 
 size_t sv_side_scratch_bytes(int h) {
   if (h <= 0 || h > SV_SIDE_MAX_ROWS) return 0;
-  return ((size_t)h * 12u + SV_SIDE_MAX_FADE) * sizeof(int32_t);
+  return ((size_t)h * 12u + 2u * SV_SIDE_MAX_FADE) * sizeof(int32_t);
 }
 
 int sv_side_fill(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int side, uint8_t *left, uint8_t *right, void *scratch) {
+  return side <= 0 ? -1 : sv_side_fill2(treatment, native, w, h, pitch, side, side, left, right, scratch);
+}
+
+/* ADR 0315: each side has its own width (0 = none); a side's fade spans ITS OWN width, so the symmetric case is the historical fill bit for bit. */
+int sv_side_fill2(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int left_w, int right_w, uint8_t *left, uint8_t *right, void *scratch) {
   static const int dark[3] = {6, 6, 8}, panel = 14;
-  int32_t *raw, *smooth, *fade;
+  int32_t *raw, *smooth, *fade_l, *fade_r;
   int y, k, c, e, d;
   if (treatment != SV_TREAT_COMFORT && treatment != SV_TREAT_BORDERS) return -1;
-  if (native == NULL || left == NULL || right == NULL || scratch == NULL || w <= 0 || h <= 0 || h > SV_SIDE_MAX_ROWS || side <= 0 || side > SV_EXT_MAX_SIDE ||
-      pitch < w * 3)
+  if (native == NULL || scratch == NULL || w <= 0 || h <= 0 || h > SV_SIDE_MAX_ROWS || left_w < 0 || right_w < 0 || left_w > SV_EXT_MAX_SIDE || right_w > SV_EXT_MAX_SIDE ||
+      left_w + right_w == 0 || (left_w > 0 && left == NULL) || (right_w > 0 && right == NULL) || pitch < w * 3)
     return -1;
   if (treatment == SV_TREAT_BORDERS) {
-    memset(left, panel, (size_t)side * (size_t)h * 3u);
-    memset(right, panel, (size_t)side * (size_t)h * 3u);
+    if (left_w > 0) memset(left, panel, (size_t)left_w * (size_t)h * 3u);
+    if (right_w > 0) memset(right, panel, (size_t)right_w * (size_t)h * 3u);
     return 0;
   }
   raw = (int32_t *)scratch;          /* [2][h][3]: left edge average, right edge average */
   smooth = raw + (size_t)h * 6u;     /* [2][h][3] */
-  fade = smooth + (size_t)h * 6u;    /* [side]: 0..1024 intensity by distance from the native edge */
+  fade_l = smooth + (size_t)h * 6u;  /* [left_w]: 0..1024 intensity by distance from the native edge */
+  fade_r = fade_l + SV_SIDE_MAX_FADE; /* [right_w] */
   e = w < SV_SIDE_EDGE_COLS ? w : SV_SIDE_EDGE_COLS;
   for (y = 0; y < h; ++y) {
     const uint8_t *row = native + (size_t)y * (size_t)pitch;
@@ -218,21 +225,26 @@ int sv_side_fill(SvSideTreatment treatment, const uint8_t *native, int w, int h,
       }
   }
   /* distance d = 0 at the native edge: quadratic fade from 0.6 of the edge colour down to the dark neutral at the outer boundary */
-  for (d = 0; d < side; ++d) {
-    const int32_t u = 1024 - (int32_t)(((int64_t)(2 * d + 1) * 1024) / (2 * side));
-    fade[d] = (int32_t)(((int64_t)u * u / 1024) * 614 / 1024);
+  for (d = 0; d < left_w; ++d) {
+    const int32_t u = 1024 - (int32_t)(((int64_t)(2 * d + 1) * 1024) / (2 * left_w));
+    fade_l[d] = (int32_t)(((int64_t)u * u / 1024) * 614 / 1024);
   }
-  for (y = 0; y < h; ++y)
-    for (k = 0; k < side; ++k) {
-      uint8_t *lp = left + ((size_t)y * (size_t)side + (size_t)k) * 3u;   /* k = side-1 is next to the native picture */
-      uint8_t *rp = right + ((size_t)y * (size_t)side + (size_t)k) * 3u;  /* k = 0 is next to the native picture */
-      const int32_t fl = fade[side - 1 - k], fr = fade[k];
-      for (c = 0; c < 3; ++c) {
-        const int32_t sl = smooth[(size_t)y * 3u + (size_t)c], sr = smooth[(size_t)h * 3u + (size_t)y * 3u + (size_t)c];
-        lp[c] = (uint8_t)(dark[c] + ((sl - dark[c]) * fl) / 1024);
-        rp[c] = (uint8_t)(dark[c] + ((sr - dark[c]) * fr) / 1024);
-      }
+  for (d = 0; d < right_w; ++d) {
+    const int32_t u = 1024 - (int32_t)(((int64_t)(2 * d + 1) * 1024) / (2 * right_w));
+    fade_r[d] = (int32_t)(((int64_t)u * u / 1024) * 614 / 1024);
+  }
+  for (y = 0; y < h; ++y) {
+    for (k = 0; k < left_w; ++k) {
+      uint8_t *lp = left + ((size_t)y * (size_t)left_w + (size_t)k) * 3u;   /* k = left_w-1 is next to the native picture */
+      const int32_t fl = fade_l[left_w - 1 - k];
+      for (c = 0; c < 3; ++c) lp[c] = (uint8_t)(dark[c] + ((smooth[(size_t)y * 3u + (size_t)c] - dark[c]) * fl) / 1024);
     }
+    for (k = 0; k < right_w; ++k) {
+      uint8_t *rp = right + ((size_t)y * (size_t)right_w + (size_t)k) * 3u;  /* k = 0 is next to the native picture */
+      const int32_t fr = fade_r[k];
+      for (c = 0; c < 3; ++c) rp[c] = (uint8_t)(dark[c] + ((smooth[(size_t)h * 3u + (size_t)y * 3u + (size_t)c] - dark[c]) * fr) / 1024);
+    }
+  }
   return 0;
 }
 
@@ -630,12 +642,17 @@ static void ovl_reject(SvOverlayPlan *plan, int index, SvOvReject reason) {
 }
 
 void sv_overlay_plan(const SvOverlayLayer *layers, int count, int pic_w, int pic_h, int visible_side, SvOverlayPlan *out) {
+  sv_overlay_plan2(layers, count, pic_w, pic_h, visible_side, visible_side, out);
+}
+
+/* ADR 0315: the visible surface is `visible_left` + pic_w + `visible_right` columns wide; a picture-referenced layer anchors to the picture, a presentation-referenced one to the whole visible surface. */
+void sv_overlay_plan2(const SvOverlayLayer *layers, int count, int pic_w, int pic_h, int visible_left, int visible_right, SvOverlayPlan *out) {
   int i, used = 0;
   struct { SvOverlayPlacement p; int z; } tmp[SV_OVL_LAYERS_MAX];
   int n = 0;
   if (out == NULL) return;
   memset(out, 0, sizeof *out);
-  if (layers == NULL || count <= 0 || pic_w <= 0 || pic_h <= 0 || pic_w > 4096 || pic_h > 4096 || visible_side < 0 || visible_side > 4096) return;   /* bounded inputs: no overflow below */
+  if (layers == NULL || count <= 0 || pic_w <= 0 || pic_h <= 0 || pic_w > 4096 || pic_h > 4096 || visible_left < 0 || visible_left > 4096 || visible_right < 0 || visible_right > 4096) return;   /* bounded inputs: no overflow below */
   for (i = 0; i < count; ++i) {
     const SvOverlayLayer *l = &layers[i];
     int rx, ry, rw, rh, x, y, cx0 = 0, cy0 = 0, cx1, cy1;
@@ -648,7 +665,7 @@ void sv_overlay_plan(const SvOverlayLayer *layers, int count, int pic_w, int pic
     if (l->reference < 0 || l->reference >= SV_OVREF_COUNT) { ovl_reject(out, i, SV_OVR_REFERENCE); continue; }
     if (l->z < 0 || l->z >= SV_OVL_LAYERS_MAX) { ovl_reject(out, i, SV_OVR_Z); continue; }
     if (l->dx < -SV_OVL_OFFSET_MAX || l->dx > SV_OVL_OFFSET_MAX || l->dy < -SV_OVL_OFFSET_MAX || l->dy > SV_OVL_OFFSET_MAX) { ovl_reject(out, i, SV_OVR_OFFSET); continue; }
-    if (l->reference == SV_OVREF_PICTURE) { rx = visible_side; rw = pic_w; } else { rx = 0; rw = pic_w + 2 * visible_side; }
+    if (l->reference == SV_OVREF_PICTURE) { rx = visible_left; rw = pic_w; } else { rx = 0; rw = visible_left + pic_w + visible_right; }
     ry = 0; rh = pic_h;
     if (l->w > rw || l->h > rh) { ovl_reject(out, i, SV_OVR_OUT_OF_BOUNDS); continue; }
     switch (l->anchor % 3) { case 0: x = rx; break; case 1: x = rx + (rw - l->w) / 2; break; default: x = rx + rw - l->w; break; }
