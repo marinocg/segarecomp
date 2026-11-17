@@ -56,11 +56,12 @@ BuildOutcome build(const RomView &rom, const Layout &layout, std::string *messag
 }  // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 9) {
-    std::cerr << "usage: launcher_schema3_flow_test <install-root> <rom> <other-rom> <native.segapatch> <wrong-rom.segapatch> <data.segapatch> <luau.segapatch> <native-with-edit.segapatch>\n";
+  if (argc < 8) {
+    std::cerr << "usage: launcher_schema3_flow_test <install-root> <rom> <other-rom> <native.segapatch> <wrong-rom.segapatch> <data.segapatch> <luau.segapatch> [<native-with-edit.segapatch>]\n";
     return 2;
   }
-  const fs::path root = argv[1], rom_path = argv[2], other_path = argv[3], native = argv[4], wrong = argv[5], data = argv[6], luau = argv[7], native_edit = argv[8];
+  const fs::path root = argv[1], rom_path = argv[2], other_path = argv[3], native = argv[4], wrong = argv[5], data = argv[6], luau = argv[7];
+  const fs::path native_edit = argc >= 9 ? fs::path(argv[8]) : fs::path();   // optional: the native + typed-edit case runs when a package for it is given
   const fs::path cache = root.parent_path() / "cache", library = root.parent_path() / "library";
   fs::create_directories(cache);
   fs::create_directories(library);
@@ -180,7 +181,7 @@ int main(int argc, char **argv) {
   }
 
   // ---- a NATIVE package that ALSO carries a typed ROM edit (native-c11 + rom-edit-set, one package): the provider runs over the VERIFIED EDITED image, as a distinct variant ----
-  {
+  if (!native_edit.empty()) {
     const PatchPreview pe = preview_patch(*entry, native_edit, rom_path);
     expect(pe.ok && pe.schema3 && pe.mod_trust == "native" && pe.info.has_native && pe.effective_sha256.size() == 64U && pe.effective_sha256 != vanilla.sha256 && pe.effective_sha256 != preview.effective_sha256,
            "a native package with a typed edit previews with an effective image that is neither the original's nor the plain native package's: " + pe.error);
