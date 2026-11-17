@@ -4,7 +4,7 @@
 The provider (tests/fixtures/mod_scenery/provider.c) submits one name-table window per frame through SegaGenesisRenderApi::scenery_window. The golden is constructed here from the fixture's contract (plane A scrolls by
 -(camera * 8); cells outside the picture alternate tile 2 / tile 3 of palette line 1) and never from the program's output. Proves: (A) the left and right margins at 16:9, 21:9 and 32:9 equal the golden while the native
 picture equals Vanilla's; (B) the coverage report credits `scenery` and `hud` for presented frames and `actors` never; (C) the Vanilla program (and the same mod with the callback disconnected) presents the generic wrapped
-scenery, never the authored one; (D) containment: an ungranted capability, an oversized or duplicated window, a bad plane and a NULL words pointer fault only the mod and present nothing; (E) a stale window is never
+scenery, never the authored one; (D) containment: an ungranted capability, an oversized window, a third window on one plane (two are allowed, ADR 0313), a bad plane and a NULL words pointer fault only the mod and present nothing; (E) a stale window is never
 carried to another frame (a provider that submits only on the first frame leaves the later frames generic).
 usage: mod_scenery_abi2_test.py <segarecomp-cli> <C compiler> <source root> <SDL3 prefix>"""
 import importlib.util
@@ -91,11 +91,13 @@ def main():
             "stale": (lambda t: t.replace("static uint32_t camera;", "static uint32_t camera, submitted;").replace(both, "    if (submitted == 0U) {\n" + both + "      submitted = 1U;\n    }\n"), None, None),
             "ungranted": (None, lambda m: m.replace('"overlay.rgba", "scenery.words"', '"overlay.rgba"'), "capability"),
             "oversized": (lambda t: t.replace("scenery_window(0U, x0, 0, COLS, ROWS, words)", "scenery_window(0U, x0, 0, 129U, ROWS, words)"), None, "range"),
-            "duplicate": (lambda t: t.replace(both, both + "    (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);\n"), None, "range"),
+            "third-window": (lambda t: t.replace(both, both + "    (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);\n    (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);\n"), None, "range"),   # ADR 0313: two windows per plane are allowed, a third is a range fault
             "bad-plane": (lambda t: t.replace("scenery_window(1U,", "scenery_window(2U,"), None, "range"),
             "null-words": (lambda t: t.replace("ROWS, blank)", "ROWS, 0)"), None, "range"),
         }
         programs = {name: project("v-" + name.replace("_", "-"), edit, toml) for name, (edit, toml, _) in variants.items()}
+        split_windows = project("v-split-windows", lambda t: t.replace("    (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);\n",
+                                "    (void)render->scenery_window(0U, x0, 0, COLS, ROWS / 2U, words);\n    (void)render->scenery_window(0U, x0, (int32_t)(ROWS / 2U), COLS, ROWS - ROWS / 2U, words + (ROWS / 2U) * COLS);\n"))   # the same cells as two windows
         if h.failures:
             return 1
 
@@ -137,12 +139,22 @@ def main():
             scenery = scenes[0]["components"]["scenery"] if scenes else {"covered": 0}
             check(margins_generic and ram == ram_v, f"{name}: the margins stay generic and the guest state is untouched")
             check(scenery["covered"] == 0 or name == "stale", f"{name}: coverage credits no scenery: {scenery}")
+            if name == "plane-b-missing":   # ADR 0313: unanswered scenery cells fail only the authored-scenery claim; the provider's independent HUD is still delivered for the very same frames
+                hud = scenes[0]["components"]["hud"] if scenes else {"covered": 0, "requested": -1}
+                check(hud["covered"] > 0 and hud["covered"] == hud["requested"] and scenery["covered"] == 0, f"{name}: the independent HUD stays credited while the scenery is not ({hud})")
             if cause is not None:
                 check(summary.get("faulted") is True and f"cause={cause}" in summary.get("fault", ""), f"{name}: the callback faults with the stable cause `{cause}`, only the mod: {summary.get('fault')}")
             else:
                 check(summary.get("faulted") is False, f"{name}: no fault: {summary.get('fault')}")
             if name == "stale":
                 check(0 < scenery["covered"] < scenery["requested"], f"stale: only the frame the window was rendered for is credited ({scenery})")
+        # ---- ADR 0313: two windows per plane. The same cells submitted as two windows give exactly the frame of the single window (a cell is answered by the first window of its plane that contains it) ----
+        side = side_of(32, 9)
+        surf_one, _, rep_one, ram_one = play(modded, "w-one", "32:9")
+        surf_two, _, rep_two, ram_two = play(split_windows, "w-two", "32:9")
+        c_one = rep_one["scenes"][0]["components"]["scenery"] if rep_one and rep_one["scenes"] else {"covered": 0}
+        c_two = rep_two["scenes"][0]["components"]["scenery"] if rep_two and rep_two["scenes"] else {"covered": 0}
+        check(surf_one == surf_two and ram_one == ram_two and c_two["covered"] == c_one["covered"] > 0, f"two windows holding the same cells present the identical frame and the identical coverage ({c_one} vs {c_two})")
         # ---- ACTIVE scrolling: Right is held until the program ends, so the presented frame is captured WHILE the camera changes on consecutive frames ----
         MOVING = "0 R\n"
         mutant = project("t-shifted-cell", lambda t: t.replace("const int32_t cell = x0 + (int32_t)c;", "const int32_t cell = x0 + (int32_t)c + 1;"))   # a window whose words belong to the NEXT cell: the one-cell / one-frame misassociation
@@ -198,6 +210,23 @@ def main():
         sc = rep["scenes"][0]["components"]["scenery"]
         check([(e["event"], e["status"]) for e in lines.get("VIEWER_STATE", [])] == [("rewind", "ok")] and sc["covered"] < sc["requested"] and lines["MOD_SUMMARY"][0]["faulted"] is False,
               f"a rewind across a pending submission leaves that frame generic and the mod healthy: {sc}")
+        # ---- ADR 0313: the same save / restore / rewind contract with two windows per plane (both are staged, committed and discarded together with the frame they belong to) ----
+        ident2 = identities.get("v-split-windows")
+        if ident2:
+            save2 = tmp / "save2"
+            _, ls, _, _ = play(split_windows, "t2-save", "32:9", "0 R\n12 RK\n13 R\n20 -\n", save=save2, identity=ident2)
+            check(ls["VIEWER_STATE"][0]["status"] == "ok", "two windows: a quick save succeeds with scenery in flight")
+            surf, lines, rep, ram = play(split_windows, "t2-load", "32:9", "0 -\n3 M\n4 -\n", save=save2, identity=ident2)
+            sc = rep["scenes"][0]["components"]["scenery"]
+            cam = int.from_bytes(ram[0x12:0x14], "big")
+            want = golden(side, cam)
+            wrong = sum(1 for y in range(H) for xi in range(W + 2 * side) if want[y][xi] is not None and surf[y][xi] != want[y][xi] and not (xi < 24 and y < 8))
+            check(lines["VIEWER_STATE"][0]["status"] == "ok" and sc["covered"] < sc["requested"] and wrong == 0 and lines["MOD_SUMMARY"][0]["faulted"] is False,
+                  f"two windows: after a restore the pre-load windows are never served, later frames are exact ({wrong} pixels differ, {sc})")
+            surf, lines, rep, ram = play(split_windows, "t2-rewind", "32:9", "0 R\n14 RY\n15 R\n20 -\n", save=tmp / "rewind2", identity=ident2)
+            sc = rep["scenes"][0]["components"]["scenery"]
+            check([(e["event"], e["status"]) for e in lines.get("VIEWER_STATE", [])] == [("rewind", "ok")] and sc["covered"] < sc["requested"] and lines["MOD_SUMMARY"][0]["faulted"] is False,
+                  f"two windows: a rewind across a pending submission leaves that frame generic and the mod healthy: {sc}")
         if h.failures:
             return 1
     print("mod_scenery_abi2_test: ok")

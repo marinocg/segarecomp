@@ -23,7 +23,7 @@ constexpr unsigned kEntGreen = 1, kEntYellow = 2, kEntBackdrop = 3, kEntBlue = 4
 
 struct Hw { int x, y; bool prio; };   // all hardware sprites are 2 x 2 cells (16 x 16 px), solid
 
-struct Cmd { int x, y; unsigned layer; unsigned entry; };   // all virtual sprites are 4 x 4 cells (32 x 32 px), solid
+struct Cmd { int x, y; unsigned layer; unsigned entry; bool hw = false; };   // all virtual sprites are 4 x 4 cells (32 x 32 px), solid; hw: GENESIS_VSPRITE_FLAG_HARDWARE_PIECE
 
 void checker_tile(Scene &s, unsigned tile) {
   for (unsigned ty = 0; ty < 8; ++ty)
@@ -84,12 +84,13 @@ struct World {
     if (b_opaque) return {1, kEntBlue};
     return {0, kEntBackdrop};
   }
-  unsigned expected_entry(int x, int y, const std::vector<Cmd> &set, bool sprites_in_margin, int visible) const {
+  unsigned expected_entry(int x, int y, const std::vector<Cmd> &set, bool sprites_in_margin, int visible, bool ext_sprites = false) const {
     const Px n = native(x, y, sprites_in_margin);
     const bool shown = x >= -visible && x < kW + visible;   // only the presented columns are ever drawn
     if (shown)
       for (int layer = 2; layer >= 0; --layer)
         for (const Cmd &c : set) {
+          if (c.hw && ext_sprites) continue;   // ADR 0313: the extension's hardware sprite layer already draws this piece
           if (static_cast<int>(c.layer) != layer || x < c.x || x >= c.x + 32 || y < c.y || y >= c.y + 32) continue;
           if (layer == 0 && n.cls != 0) continue;
           if (layer == 1 && n.cls == 2) continue;
@@ -160,7 +161,10 @@ Out run(const World &wd, const std::vector<Cmd> &cmds, unsigned level, bool give
   wire.set.space = static_cast<uint8_t>(GENESIS_VSPRITE_SPACE_PRESENTATION);
   wire.set.budget_mode = static_cast<uint8_t>(GENESIS_VSPRITE_BUDGET_EXTENDED);
   wire.set.count = static_cast<uint32_t>(cmds.size());
-  for (size_t i = 0; i < cmds.size(); ++i) wire.set.sprites[i] = vsprite(cmds[i].x, cmds[i].y, 4, 4, cmds[i].entry == kEntRed ? kArtRed : kArtCyan, 0, cmds[i].layer);
+  for (size_t i = 0; i < cmds.size(); ++i) {
+    wire.set.sprites[i] = vsprite(cmds[i].x, cmds[i].y, 4, 4, cmds[i].entry == kEntRed ? kArtRed : kArtCyan, 0, cmds[i].layer);
+    wire.set.sprites[i].flags = cmds[i].hw ? GENESIS_VSPRITE_FLAG_HARDWARE_PIECE : 0U;
+  }
   wire.visible = visible;
   wire.tamper = tamper;
   g_wire = &wire;
@@ -207,13 +211,13 @@ Out run(const World &wd, const std::vector<Cmd> &cmds, unsigned level, bool give
 }
 
 // Compares every pixel of the composed surface and every recorded extension class with the model. Returns the number of mismatches.
-unsigned compare(const World &wd, const std::vector<Cmd> &cmds, const Out &o, bool sprites_in_margin, int visible, const char *what, bool check_classes = true) {
+unsigned compare(const World &wd, const std::vector<Cmd> &cmds, const Out &o, bool sprites_in_margin, int visible, const char *what, bool check_classes = true, bool ext_sprites = false) {
   unsigned bad_px = 0, bad_cls = 0;
   if (o.composed.size() != static_cast<size_t>(kPitchPx) * kH * 3) { check(false, what); return 1; }
   for (int y = 0; y < kH; ++y)
     for (int x = -kSide; x < kW + kSide; ++x) {
       uint8_t want[3];
-      rgb_of(wd.sc.cram, wd.expected_entry(x, y, cmds, sprites_in_margin, visible), want);
+      rgb_of(wd.sc.cram, wd.expected_entry(x, y, cmds, sprites_in_margin, visible, ext_sprites), want);
       const uint8_t *got = &o.composed[(static_cast<size_t>(y) * kPitchPx + static_cast<size_t>(x + kSide)) * 3];
       if (std::memcmp(want, got, 3) != 0) {
         if (bad_px == 0) std::printf("  %s: first pixel mismatch at x=%d y=%d want %u,%u,%u got %u,%u,%u\n", what, x, y, want[0], want[1], want[2], got[0], got[1], got[2]);
@@ -328,6 +332,40 @@ void legacy_behaviour_unchanged() {
   compare(wd, inside, in, false, kSide, "picture-only BETWEEN against the model", false);
 }
 
+
+// ADR 0313: a HARDWARE_PIECE command depicts a piece of the game's own sprite table. The Level 3 extension already draws every such piece (original evaluation rules), so the host omits the command there; at Level 2
+// (no hardware sprite layer in the extension) it is drawn as submitted. Unflagged duplicates are what the flag exists to avoid: they would be ordered against classes, not against the individual hardware sprites.
+bool same_surface(const Out &o) { return o.composed.size() == static_cast<size_t>(kPitchPx) * kH * 3 && std::memcmp(o.composed.data(), o.surface.data(), o.composed.size()) == 0; }
+
+void hardware_piece_flag() {
+  const std::vector<Hw> hw = {{-50, 80, false}, {-44, 84, false}};   // two overlapping hardware sprites in the margin: the first in the SAT wins where they overlap (the hardware's own order)
+  const World wd(hw);
+  // the second hardware sprite's piece as a virtual command: red, above everything
+  const std::vector<Cmd> flagged = {{-44, 84, GENESIS_VSPRITE_LAYER_ABOVE_ALL, kEntRed, true}};
+  const std::vector<Cmd> unflagged = {{-44, 84, GENESIS_VSPRITE_LAYER_ABOVE_ALL, kEntRed, false}};
+  const Out l3_flag = run(wd, flagged, GENESIS_EXT_MODE_SPRITES), l3_plain = run(wd, unflagged, GENESIS_EXT_MODE_SPRITES);
+  const Out l2_flag = run(wd, flagged, GENESIS_EXT_MODE_BACKGROUNDS), l2_plain = run(wd, unflagged, GENESIS_EXT_MODE_BACKGROUNDS);
+  check(l3_flag.rep.status == GENESIS_VSPRITE_STATUS_COMPOSED && l3_flag.rep.pixels_drawn_verified == 0 && same_surface(l3_flag), "Level 3: a HARDWARE_PIECE command is omitted (composed, nothing drawn or counted, the surface is exactly the producer's)");
+  compare(wd, flagged, l3_flag, true, kSide, "Level 3 flagged command against the model", true, true);
+  check(l3_plain.rep.pixels_drawn_verified > 0 && !same_surface(l3_plain), "Level 3: the same command without the flag is drawn (a duplicate of what the hardware layer draws)");
+  // the ordering hazard of a duplicate: where the two hardware sprites overlap the first one is in front; an ABOVE_ALL duplicate of the second covers it, the omitted flagged command does not
+  check(rgb_eq(l3_flag, wd, -40, 90, kEntMagenta) && rgb_eq(l3_plain, wd, -40, 90, kEntRed), "a duplicate covers the hardware sprite that is in front of it; the flagged command leaves the hardware ordering intact");
+  check(l2_flag.rep.pixels_drawn_verified > 0 && l2_flag.composed == l2_plain.composed, "Level 2: the extension has no hardware sprite layer, so the flagged command is drawn exactly as submitted");
+  compare(wd, flagged, l2_flag, false, kSide, "Level 2 flagged command against the model");
+  // a flagged BETWEEN command needs no class data where it is omitted, and is not exempt where it is drawn
+  const std::vector<Cmd> between = {{-44, 84, GENESIS_VSPRITE_LAYER_BETWEEN, kEntRed, true}};
+  check(run(wd, between, GENESIS_EXT_MODE_SPRITES, false).rep.status == GENESIS_VSPRITE_STATUS_COMPOSED, "Level 3, no class data: an omitted flagged BETWEEN command does not make the set fail");
+  check(run(wd, between, GENESIS_EXT_MODE_BACKGROUNDS, false).rep.reason == GENESIS_VSPRITE_REJ_SIDE_PRIORITY, "Level 2, no class data: a drawn flagged BETWEEN command still needs class data (fail closed)");
+  // hardware truncation: 21 sprites on one line, the 21st is dropped by the hardware rules; the omitted flagged duplicate keeps it dropped (as in the picture), the unflagged one reveals it
+  std::vector<Hw> many;
+  for (int i = 0; i < 21; ++i) many.push_back({-60 + 16 * i, 130, false});
+  const World wt(many);
+  const int tx = -60 + 16 * 20;   // the 21st sprite
+  const std::vector<Cmd> dup_flag = {{tx, 126, GENESIS_VSPRITE_LAYER_ABOVE_ALL, kEntRed, true}}, dup_plain = {{tx, 126, GENESIS_VSPRITE_LAYER_ABOVE_ALL, kEntRed, false}};
+  const Out t_flag = run(wt, dup_flag, GENESIS_EXT_MODE_SPRITES), t_plain = run(wt, dup_plain, GENESIS_EXT_MODE_SPRITES);
+  check(same_surface(t_flag) && !same_surface(t_plain), "hardware truncation: the flagged duplicate keeps the truncated sprite as the hardware rules leave it, the unflagged one shows what the hardware dropped");
+}
+
 void fail_closed() {
   const World wd({});
   const std::vector<Cmd> margin = {{-56, 72, GENESIS_VSPRITE_LAYER_ABOVE_ALL, kEntRed}, {-56, 8, GENESIS_VSPRITE_LAYER_BETWEEN, kEntRed}};
@@ -381,6 +419,7 @@ int main() {
   hardware_sprite_candidates();
   legacy_behaviour_unchanged();
   fail_closed();
+  hardware_piece_flag();
   replay_and_restore();
   if (failures != 0) { std::printf("genesis_vsprite_priority_test: %d FAILED\n", failures); return 1; }
   std::printf("genesis_vsprite_priority_test: OK\n");

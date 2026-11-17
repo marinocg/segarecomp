@@ -43,6 +43,12 @@ typedef enum GenesisVirtualBudgetMode {
   GENESIS_VSPRITE_BUDGET_EXTENDED = 1 /* explicit mod opt-in: no per-line limit; over-budget lines are still reported */
 } GenesisVirtualBudgetMode;
 
+/* GenesisVirtualSprite::flags. HARDWARE_PIECE (ADR 0313): the command depicts a piece that the game's own sprite table holds (the game kept it), i.e. a piece the hardware sprite layer draws. A frame whose extension
+ * carries the hardware sprite layer (Level 3) already draws that piece in the extension columns with the original evaluation rules, so the host omits such a command there (it is not drawn, not counted, and occupies no
+ * budget); a frame without that layer (Level 2) draws it as submitted. A provider that wants a kept piece to appear beside the picture at both levels without drawing it twice sets the flag on that piece only. */
+#define GENESIS_VSPRITE_FLAG_HARDWARE_PIECE 1U
+#define GENESIS_VSPRITE_FLAGS_DEFINED 1U
+
 typedef struct GenesisVirtualSprite {
   uint8_t provenance;               /* GenesisVirtualProvenance */
   uint8_t layer;                    /* GenesisVirtualLayer */
@@ -50,7 +56,7 @@ typedef struct GenesisVirtualSprite {
   uint8_t palette;                  /* 0..3: palette line of the frame CRAM (verified) or of authored_cram (authored) */
   uint8_t h_flip, v_flip;           /* 0 or 1 */
   uint8_t has_clip;                 /* 0 or 1: when 1 the sprite is drawn only inside the clip rectangle */
-  uint8_t reserved;                 /* must be 0 */
+  uint8_t flags;                    /* GENESIS_VSPRITE_FLAG_* (ADR 0313); every bit that is not defined must be 0 (rejected as RESERVED) */
   uint16_t tile_index;              /* first pattern (0..2047); the block uses width*height consecutive patterns, column-major, exactly like a hardware sprite */
   int16_t x, y;                     /* picture pixel of the sprite's top-left corner (may be negative: partly off the picture) */
   int16_t clip_x, clip_y;           /* clip rectangle in picture pixels (has_clip only) */

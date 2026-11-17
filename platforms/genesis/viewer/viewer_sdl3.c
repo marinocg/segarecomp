@@ -253,7 +253,11 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
       surface.status = r->status == GENESIS_EXT_AVAILABLE ? SV_WS_AVAILABLE : (r->status == GENESIS_EXT_PARTIAL ? SV_WS_PARTIAL : SV_WS_UNAVAILABLE);
       if (v->ext.compat != NULL && r->sequence == sequence) {   /* SEG-124: only the frame's own provider verdict; never inferred from the title, mode or pixels */
         v->compat_stats.frames += 1U;
-        if (r->compat_accepted != 0U && r->compat_reason == 0U) {
+        /* ADR 0313: an unanswered scenery cell (reason FAULT) fails only the frame's authored-scenery claim (`authored` is 0 and the unanswered cells fell back to the generic extension); the provider's HUD, positioned
+         * layers and virtual sprites are independent contributions the provider already produced for this very frame, so they are still delivered. Every other reason (stale state, unsupported scene, bad state or scroll,
+         * mismatch) and a frame the provider did not accept at all still deliver nothing. */
+        if (r->compat_accepted != 0U && r->compat_reason == (uint8_t)GENESIS_COMPAT_FAULT) v->compat_stats.declined[GENESIS_COMPAT_FAULT] += 1U;   /* still counted, so the scenery failures stay observable */
+        if (r->compat_accepted != 0U && (r->compat_reason == 0U || r->compat_reason == (uint8_t)GENESIS_COMPAT_FAULT)) {
           if (r->authored) { surface.source = SV_EXTSRC_AUTHORED; v->compat_stats.authored += 1U; }
           else if (r->authored_row_count > 0U) { surface.authored_rows = r->authored_rows; surface.authored_row_count = (int)r->authored_row_count; }   /* W04: row provenance of a partial frame */
           if (r->overlay_w > 0U && r->overlay_h > 0U && r->overlay_w <= GENESIS_COMPAT_OVERLAY_MAX_W && r->overlay_h <= GENESIS_COMPAT_OVERLAY_MAX_H) {
