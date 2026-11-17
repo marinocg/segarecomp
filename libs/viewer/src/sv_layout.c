@@ -171,7 +171,7 @@ SvSideTreatment sv_side_treatment(SvSideStyle style, SvExtSource source) {
 
 #define SV_SIDE_EDGE_COLS 8   /* native columns averaged along each edge */
 #define SV_SIDE_BLUR_RADIUS 12 /* vertical smoothing radius in rows */
-#define SV_SIDE_MAX_FADE (SV_EXT_MAX_SIDE + 1) /* one fade weight per side column: sized from the hard bound so scratch can never be overrun */
+#define SV_SIDE_MAX_FADE (2 * SV_EXT_MAX_SIDE + 1) /* one fade weight per side column; ADR 0315: one side of an asymmetric view can hold the whole planned total (2 * SV_EXT_MAX_SIDE), so each fade table is sized for that and scratch can never be overrun */
 
 size_t sv_side_scratch_bytes(int h) {
   if (h <= 0 || h > SV_SIDE_MAX_ROWS) return 0;
@@ -188,7 +188,7 @@ int sv_side_fill2(SvSideTreatment treatment, const uint8_t *native, int w, int h
   int32_t *raw, *smooth, *fade_l, *fade_r;
   int y, k, c, e, d;
   if (treatment != SV_TREAT_COMFORT && treatment != SV_TREAT_BORDERS) return -1;
-  if (native == NULL || scratch == NULL || w <= 0 || h <= 0 || h > SV_SIDE_MAX_ROWS || left_w < 0 || right_w < 0 || left_w > SV_EXT_MAX_SIDE || right_w > SV_EXT_MAX_SIDE ||
+  if (native == NULL || scratch == NULL || w <= 0 || h <= 0 || h > SV_SIDE_MAX_ROWS || left_w < 0 || right_w < 0 || left_w > 2 * SV_EXT_MAX_SIDE || right_w > 2 * SV_EXT_MAX_SIDE || left_w + right_w > 2 * SV_EXT_MAX_SIDE ||
       left_w + right_w == 0 || (left_w > 0 && left == NULL) || (right_w > 0 && right == NULL) || pitch < w * 3)
     return -1;
   if (treatment == SV_TREAT_BORDERS) {

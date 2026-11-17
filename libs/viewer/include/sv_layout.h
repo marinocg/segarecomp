@@ -139,7 +139,7 @@ size_t sv_side_scratch_bytes(int h);
 /* Fills `left` and `right` (each `side` x `h` RGB24 pixels, tightly packed, pitch side*3) for the COMFORT or BORDERS treatment from the native picture.
  * `scratch` must hold sv_side_scratch_bytes(h) bytes (suitably aligned for int32). Returns 0, or -1 for invalid input or SV_TREAT_PASSTHROUGH. */
 int sv_side_fill(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int side, uint8_t *left, uint8_t *right, void *scratch);
-/* ADR 0315: the same with an independent width per side (`left` is left_w x h, `right` is right_w x h, either width may be 0 but not both); equal widths are exactly sv_side_fill. */
+/* ADR 0315: the same with an independent width per side (`left` is left_w x h, `right` is right_w x h, either width may be 0 but not both). One side may hold the whole planned total, so each width is bounded by 2 * SV_EXT_MAX_SIDE and their sum by 2 * SV_EXT_MAX_SIDE (the total any validated surface has); equal widths are exactly sv_side_fill. */
 int sv_side_fill2(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int left_w, int right_w, uint8_t *left, uint8_t *right, void *scratch);
 
 /* ---- SEG-139: the checked widescreen surface planner (pure, SDL-free, no platform knowledge, no allocation) ----

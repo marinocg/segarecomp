@@ -43,7 +43,7 @@ PLACE = """    {
       (void)render->view_margin(&margin);
       if (margin != 0U) {
         left = camera * 10U < 2U * margin ? camera * 10U : 2U * margin;
-        (void)render->view_left(left);
+        (void)render->view_left(left, margin);
         x0 = (int32_t)camera - (int32_t)(left / 8U) - 3;   /* the windows follow the placement: the leftmost visible column is screen x = -left */
         bx0 = -(int32_t)(left / 8U) - 3;                    /* plane B does not scroll: its cell is screen x / 8 */
       }
@@ -94,9 +94,9 @@ def main():
         check(h.build(rom, tmp / "vanilla").returncode == 0, "Vanilla builds")
         unmodified = project("plain")   # the fixture's own provider: declares no placement
         placed = project("placed", lambda t: t.replace(marker, marker + PLACE))
-        outofrange = project("out-of-range", lambda t: t.replace(marker, marker + "    (void)render->view_left(600U);\n"))   # valid for 32:9 (total 476) but beyond the 16:9 total (78)
-        absolute = project("absolute", lambda t: t.replace(marker, marker + "    (void)render->view_left(1345U);\n"))      # above 2 * the maximum margin: a range fault
-        once = project("once", lambda t: t.replace("static uint32_t camera;", "static uint32_t camera, placed_once;").replace(marker, marker + "    if (placed_once == 0U) {\n      uint32_t m = 0U;\n      (void)render->view_margin(&m);\n      if (m != 0U) { (void)render->view_left(m); placed_once = 1U; }\n    }\n"))
+        outofrange = project("out-of-range", lambda t: t.replace(marker, marker + "    (void)render->view_left(600U, 39U);\n"))   # valid for 32:9 (total 476) but beyond the 16:9 total (78)
+        absolute = project("absolute", lambda t: t.replace(marker, marker + "    (void)render->view_left(1345U, 238U);\n"))      # above 2 * the maximum margin: a range fault
+        once = project("once", lambda t: t.replace("static uint32_t camera;", "static uint32_t camera, placed_once;").replace(marker, marker + "    if (placed_once == 0U) {\n      uint32_t m = 0U;\n      (void)render->view_margin(&m);\n      if (m != 0U) { (void)render->view_left(m, m); placed_once = 1U; }\n    }\n"))
         no_follow = "\n".join(line for line in PLACE.splitlines() if "x0 =" not in line and "bx0 =" not in line) + "\n"
         mutant = project("no-follow", lambda t: t.replace(marker, marker + no_follow))   # placed 200/276 but with the centred layout's windows: the right-hand cells are unanswered
         if h.failures:

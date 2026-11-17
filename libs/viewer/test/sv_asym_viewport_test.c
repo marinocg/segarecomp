@@ -24,8 +24,8 @@ static int failures = 0;
 /* ---------------------------------------------------------------------------------------------------------------- part 1: the pure layer */
 static void pure_side_fill(void) {
   static uint8_t native[NW * NH * 3];
-  static uint8_t l1[TOTAL * NH * 3], r1[TOTAL * NH * 3], l2[TOTAL * NH * 3], r2[TOTAL * NH * 3];
-  static int32_t scratch[(NH * 12 + 2 * (672 + 1)) + 64];
+  static uint8_t l1[2 * 672 * NH * 3], r1[2 * 672 * NH * 3], l2[2 * 672 * NH * 3], r2[2 * 672 * NH * 3];
+  static int32_t scratch[(NH * 12 + 2 * (2 * 672 + 1)) + 64];
   int x, y, widths[3] = {39, 238, 5}, i;
   for (y = 0; y < NH; ++y) for (x = 0; x < NW; ++x) { uint8_t *p = native + ((size_t)y * NW + (size_t)x) * 3u; p[0] = (uint8_t)(x * 3 + y); p[1] = (uint8_t)(y * 5); p[2] = (uint8_t)(x ^ y); }
   CHECK(sv_side_scratch_bytes(NH) <= sizeof scratch, "scratch for the test");
@@ -39,6 +39,21 @@ static void pure_side_fill(void) {
             memcmp(l1, l2, (size_t)s * NH * 3u) == 0 && memcmp(r1, r2, (size_t)s * NH * 3u) == 0, "equal widths: sv_side_fill2 is the historical fill bit for bit");
     }
   }
+  {   /* ADR 0315: one side of an asymmetric view can hold the whole planned total (2 * 672): any split up to it is valid, a sum beyond it is not */
+    static const int splits[5][2] = {{1344, 0}, {0, 1344}, {1000, 344}, {673, 671}, {672, 672}};
+    for (i = 0; i < 5; ++i) {
+      const int lw = splits[i][0], rw = splits[i][1];
+      int tr;
+      for (tr = 0; tr < 2; ++tr) {
+        const SvSideTreatment t = tr == 0 ? SV_TREAT_COMFORT : SV_TREAT_BORDERS;
+        CHECK(sv_side_fill2(t, native, NW, NH, NW * 3, lw, rw, lw > 0 ? l1 : NULL, rw > 0 ? r1 : NULL, scratch) == 0, "a side wider than 672 is valid while the sum stays within the total");
+        if (lw > 0) CHECK(t == SV_TREAT_BORDERS ? (l1[0] == 14 && l1[(size_t)(lw - 1) * 3] == 14) : (l1[(size_t)100 * (size_t)lw * 3u] <= 12 && (l1[((size_t)100 * (size_t)lw + (size_t)(lw - 1)) * 3u] > 12 || l1[((size_t)100 * (size_t)lw + (size_t)(lw - 1)) * 3u + 1u] > 12)), "the wide left strip: flat panel (Borders) or dark at its outer edge and brighter at the picture (Comfort)");
+        if (rw > 0) CHECK(t == SV_TREAT_BORDERS ? (r1[0] == 14) : (r1[(size_t)(rw - 1) * 3] <= 12), "the wide right strip: flat panel (Borders) or dark at its outer edge (Comfort)");
+      }
+    }
+    CHECK(sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, 1345, 0, l1, r1, scratch) != 0 && sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, 0, 1345, l1, r1, scratch) != 0 &&
+          sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, 700, 700, l1, r1, scratch) != 0 && sv_side_fill2(SV_TREAT_BORDERS, native, NW, NH, NW * 3, 1000, 345, l1, r1, scratch) != 0, "more than the total is refused, never clamped");
+  }
   {   /* each side's fade spans its own width: a side of width W is the same pixels whatever the other side is */
     int lw = 100, rw = 376;
     CHECK(sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, lw, rw, l1, r1, scratch) == 0, "asymmetric fill");
@@ -46,7 +61,7 @@ static void pure_side_fill(void) {
     CHECK(sv_side_fill(SV_TREAT_COMFORT, native, NW, NH, NW * 3, rw, l2, r2, scratch) == 0 && memcmp(r1, r2, (size_t)rw * NH * 3u) == 0, "the right strip equals the symmetric fill of its own width");
     CHECK(sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, 0, 476, NULL, r1, scratch) == 0 && sv_side_fill2(SV_TREAT_BORDERS, native, NW, NH, NW * 3, 476, 0, l1, NULL, scratch) == 0, "a zero-width side needs no buffer");
     CHECK(sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, 0, 0, l1, r1, scratch) != 0 && sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, -1, 5, l1, r1, scratch) != 0 &&
-          sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, 5, 673, l1, r1, scratch) != 0 && sv_side_fill2(SV_TREAT_PASSTHROUGH, native, NW, NH, NW * 3, 5, 5, l1, r1, scratch) != 0 &&
+          sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, 5, 1345, l1, r1, scratch) != 0 && sv_side_fill2(SV_TREAT_PASSTHROUGH, native, NW, NH, NW * 3, 5, 5, l1, r1, scratch) != 0 &&
           sv_side_fill2(SV_TREAT_COMFORT, native, NW, NH, NW * 3, 5, 5, NULL, r1, scratch) != 0, "no width, a negative or oversized width, passthrough and a missing buffer are refused");
   }
 }
@@ -329,6 +344,63 @@ static void through_host(void) {
     if (o != NULL) SDL_DestroySurface(o);
   }
 
+  /* ---- a tall (interlaced-height) native, 320 x 448 at 32:9: side 636, so one side of the view can hold 1272 columns, far past the symmetric 672 bound of a single side ---- */
+  {
+    enum { TH = 448, TSIDE = 636, TT = 2 * TSIDE };
+    static const int tl[3] = {0, 700, TT};
+    uint8_t *tn = (uint8_t *)malloc((size_t)NW * TH * 3u), *ts = (uint8_t *)malloc((size_t)(NW + TT) * TH * 3u);
+    int ti, st;
+    CHECK(tn != NULL && ts != NULL, "tall buffers");
+    if (tn != NULL && ts != NULL) {
+      for (y = 0; y < TH; ++y) for (x = 0; x < NW; ++x) native_px(x, y, tn + ((size_t)y * NW + (size_t)x) * 3u);
+      for (ti = 0; ti < 3; ++ti)
+        for (st = 0; st < 3; ++st) {
+          const int left = tl[ti];
+          SvExtendedSurface e;
+          SvSettings sset = *sv_host_settings(h);
+          int vl = -1, vr = -1, bad = 0;
+          char what[160];
+          for (y = 0; y < TH; ++y) for (x = 0; x < NW + TT; ++x) surface_px(left, x, y, ts + ((size_t)y * (size_t)(NW + TT) + (size_t)x) * 3u);
+          memset(&e, 0, sizeof e);
+          ++seq;
+          e.rgb24 = ts; e.size = (size_t)(NW + TT) * TH * 3u; e.width = NW + TT; e.height = TH; e.pitch = (NW + TT) * 3; e.side = TSIDE; e.shift = left - TSIDE; e.sequence = seq;
+          e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL; e.source = st == 0 ? SV_EXTSRC_AUTHORED : SV_EXTSRC_GENERIC;
+          sset.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY; sset.video.widescreen_ratio = r329; sset.video.widescreen_width = 100; sset.video.aspect = SV_ASPECT_ORIGINAL; sset.video.scale = SV_SCALE_INTEGER;
+          sset.video.widescreen_side_style = st == 2 ? SV_SIDE_BORDERS : (st == 1 ? SV_SIDE_COMFORT : SV_SIDE_RAW);
+          sv_host_apply_settings(h, &sset);
+          SDL_SetWindowSize(h->window, NW + TT, TH);
+          CHECK(sv_host_present_extended(h, tn, NW, TH, NW * 3, seq, &e) == 0 && sv_host_extension_side(h) == TSIDE, "a tall surface with a 1272-column side is accepted");
+          sv_host_visible_columns(h, &vl, &vr);
+          snprintf(what, sizeof what, "tall 320x448, split %d/%d: the whole total is visible", left, TT - left);
+          CHECK(vl == left && vr == TT - left, what);
+          o = shoot(h);
+          if (o == NULL) continue;
+          CHECK(o->w == NW + TT && o->h == TH, "the output is the 1x surface");
+          for (y = 0; y < TH; y += 5)
+            for (x = 0; x < NW; x += 7) {
+              Uint8 r8 = 0, g8 = 0, b8 = 0, a8 = 0; uint8_t want[3];
+              native_px(x, y, want);
+              (void)SDL_ReadSurfacePixel(o, left + x, y, &r8, &g8, &b8, &a8);
+              bad += r8 != want[0] || g8 != want[1] || b8 != want[2];
+            }
+          snprintf(what, sizeof what, "tall 320x448, split %d/%d, %s: the native picture is exact at its column", left, TT - left, st == 0 ? "Raw" : (st == 1 ? "Comfort" : "Borders"));
+          CHECK(bad == 0, what);
+          if (st == 0) {   /* Raw: the far edges are the surface's own columns */
+            Uint8 r8 = 0, g8 = 0, b8 = 0, a8 = 0; uint8_t want[3];
+            (void)SDL_ReadSurfacePixel(o, left > 0 ? 0 : NW + TT - 1, 200, &r8, &g8, &b8, &a8);
+            surface_px(left, left > 0 ? 0 : NW + TT - 1, 200, want);
+            CHECK(r8 == want[0] && g8 == want[1] && b8 == want[2], "Raw: the outermost visible column is the surface's own");
+          } else if (st == 2) {   /* Borders: the flat panel on the wide side */
+            Uint8 r8 = 0, g8 = 0, b8 = 0, a8 = 0;
+            (void)SDL_ReadSurfacePixel(o, left == 0 ? NW + TT - 1 : 0, 200, &r8, &g8, &b8, &a8);
+            CHECK(r8 == 14 && g8 == 14 && b8 == 14, "Borders: the wide side is the flat panel");
+          }
+          SDL_DestroySurface(o);
+        }
+    }
+    free(tn); free(ts);
+  }
+
   /* ---- the legacy centred surface is untouched: shift 0 behaves exactly as before ---- */
   {
     int vl = -1, vr = -1;
@@ -344,11 +416,68 @@ static void through_host(void) {
   sv_host_close(h);
 }
 
+/* ---- Task D (ADR 0315): scenery and extension-column sprite pixels are credited only where the extension is actually visible ---- */
+static void coverage_follows_visibility(void) {
+  SvHostConfig cfg;
+  SvHost *h;
+  char dir[512], buf[4096];
+  const char *tmp = SDL_getenv("TMPDIR") ? SDL_getenv("TMPDIR") : (SDL_getenv("TEMP") ? SDL_getenv("TEMP") : "/tmp");
+  uint64_t seq = 5000;
+  struct { const char *what; SvDisplayRatio ratio; int shift; int scenery; uint64_t left, right; } c[] = {
+      {"centred, 32:9 requested: both sides visible", {32, 9}, 0, 1, 60, 40},
+      {"asymmetric all-right (0/476), 32:9: the right side only is visible", {32, 9}, -SIDE, 1, 0, 40},
+      {"asymmetric all-left (476/0), 32:9: the left side only is visible", {32, 9}, SIDE, 1, 60, 0},
+      {"asymmetric under a narrower plan (21:9): the native picture only, nothing credited", {21, 9}, -SIDE, 0, 0, 0},
+      {"centred under 4:3: no visible column, nothing credited", {4, 3}, 0, 0, 0, 0},
+  };
+  size_t i;
+  snprintf(dir, sizeof dir, "%s/sv_asym_cov_%lld_%d", tmp, (long long)time(NULL), (int)SDL_GetTicks());
+  SDL_CreateDirectory(dir);
+  snprintf(g_settings, sizeof g_settings, "%s/c.cfg", dir);
+  SDL_setenv_unsafe("SEGARECOMP_VIEWER_SETTINGS", g_settings, 1);
+  memset(&cfg, 0, sizeof cfg);
+  cfg.system = SV_SYSTEM_GENESIS; cfg.title = "cov"; cfg.picture_w = NW; cfg.picture_h = NH; cfg.max_w = 320; cfg.max_h = 448; cfg.default_scale = 3;
+  cfg.geometry_declaration = "max=32:9;scene=s:hud+scenery";
+  h = sv_host_open(&cfg);
+  CHECK(h != NULL, "coverage host opens");
+  if (h == NULL) return;
+  sv_host_set_scene(h, "s");
+  for (i = 0; i < sizeof c / sizeof c[0]; ++i) {
+    SvExtendedSurface e;
+    SvSettings st = *sv_host_settings(h);
+    uint64_t l0 = h->cov.vs_pixels_left, r0 = h->cov.vs_pixels_right;
+    char want[64];
+    int cov0, cov1;
+    const char *k;
+    build(c[i].shift + SIDE);
+    st.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY; st.video.widescreen_side_style = SV_SIDE_RAW; st.video.widescreen_ratio = c[i].ratio; st.video.widescreen_width = 100; st.video.aspect = SV_ASPECT_ORIGINAL;
+    sv_host_apply_settings(h, &st);
+    (void)sv_host_coverage_json(h, buf, sizeof buf);
+    k = strstr(buf, "\"scenery\":{\"declared\":true,\"covered\":");
+    cov0 = k != NULL ? atoi(k + strlen("\"scenery\":{\"declared\":true,\"covered\":")) : -1;
+    memset(&e, 0, sizeof e);
+    ++seq;
+    e.rgb24 = g_surface; e.size = sizeof g_surface; e.width = NW + TOTAL; e.height = NH; e.pitch = (NW + TOTAL) * 3; e.side = SIDE; e.shift = c[i].shift; e.sequence = seq;
+    e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL; e.source = SV_EXTSRC_AUTHORED;
+    e.actor_stage = SV_ACT_COMPOSED; e.actor_provenance = 2; e.actor_state_verified = 1;
+    e.actor_pixels_authored = 100; e.actor_left_authored = 60; e.actor_right_authored = 40;   /* 60 pixels drawn in the left columns, 40 in the right ones (the compositor draws only visible ones) */
+    CHECK(sv_host_present_extended(h, g_native, NW, NH, NW * 3, seq, &e) == 0, "frame presented");
+    (void)sv_host_coverage_json(h, buf, sizeof buf);
+    k = strstr(buf, "\"scenery\":{\"declared\":true,\"covered\":");
+    cov1 = k != NULL ? atoi(k + strlen("\"scenery\":{\"declared\":true,\"covered\":")) : -1;
+    snprintf(want, sizeof want, "%s", c[i].what);
+    CHECK(cov1 - cov0 == c[i].scenery, want);
+    CHECK(h->cov.vs_pixels_left - l0 == c[i].left && h->cov.vs_pixels_right - r0 == c[i].right, want);
+  }
+  sv_host_close(h);
+}
+
 int main(void) {
   pure_side_fill();
   pure_overlay_plan();
   pure_surface_check();
   through_host();
+  coverage_follows_visibility();
   printf(failures == 0 ? "sv_asym_viewport_test: all checks passed\n" : "sv_asym_viewport_test: %d FAILED\n", failures);
   return failures == 0 ? 0 : 1;
 }

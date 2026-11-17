@@ -50,14 +50,15 @@ typedef struct SegaGenesisRenderApi {
    * Replaces the second reserved slot: size and the other slots are unchanged. */
   int (*scenery_window)(uint32_t plane, int32_t cell_x0, int32_t cell_y0, uint32_t cols, uint32_t rows, const uint16_t *words);
   /* ADR 0315: the asymmetric widescreen viewport. The host plans one TOTAL number of extra source pixels, 2 * margin (`margin` on each side when centred), from the user's display aspect; the provider only chooses
-   * where the native picture sits inside that total. `view_margin` writes the per-side margin of the host's most recently produced frame (0 until one has been produced, or when no extension is produced: keep the
-   * picture centred then). `view_left` declares, for the frame this callback describes, that `left_px` of the planned columns lie LEFT of the picture and the rest, 2 * margin - left_px, right of it (0 = the
-   * picture at the left edge of the view, margin = centred, 2 * margin = at the right edge). The provider supplies a placement, never dimensions: the host validates it and falls back to the centred layout when it is
+   * where the native picture sits inside that total. `view_margin` writes the per-side margin of the host's most recent extension that is PRESENTED (0 in Original, at 4:3, after a failed production or before the first one: keep the
+   * picture centred then; a verified-HUD package makes the producer run in Original but nothing of it is presented, so the margin is 0 there). `view_left` declares, for the frame this callback describes, that `left_px` of the planned columns lie LEFT of the picture and the rest, 2 * margin_px - left_px, right of it (0 = the
+   * picture at the left edge of the view, margin_px = centred). `margin_px` is the per-side margin the placement AND the scenery windows built for it were computed for (the provider may have computed from an earlier read of
+   * `view_margin`): the host serves the placement and those windows only when it is the margin the frame is produced with, and otherwise neither (the HUD and sprites are independent of the view and stay). The provider supplies a placement, never dimensions: the host validates it and falls back to the centred layout when it is
    * missing, out of range, from a callback that is not the frame's own (a skipped callback, restore or rewind), or computed for a different margin than the one the frame is produced with (an aspect change); it never
-   * reinterprets columns made for another view. A placement lives for one frame and needs only the render API. `left_px` above 1344 is a range fault (the absolute bound of two maximum margins). Replaces the third and
+   * reinterprets columns made for another view. A placement lives for one frame and needs only the render API. `left_px` above 1344 or `margin_px` above 672 is a range fault (the absolute bounds of two maximum margins and of one). Replaces the third and
    * fourth reserved slots: size and the others are unchanged. */
   int (*view_margin)(uint32_t *margin_px);
-  int (*view_left)(uint32_t left_px);
+  int (*view_left)(uint32_t left_px, uint32_t margin_px);
   void *reserved[4];                          /* NULL */
 } SegaGenesisRenderApi;
 

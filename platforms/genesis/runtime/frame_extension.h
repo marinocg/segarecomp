@@ -116,6 +116,7 @@ typedef int (*GenesisExtensionProducerFunction)(const uint8_t vram[GENESIS_VDP_V
 
 typedef struct GenesisFrameExtension {
   /* Adapter-owned inputs, changed only between guest slices (the runtime reads `request` once per publication). */
+  uint8_t extension_shown;          /* ADR 0315, adapter-set once per slice with `request`: 1 = the produced extension will be PRESENTED (0 in Original, where a verified-HUD provider still makes the producer run); what a provider's `view_margin` reports is gated by it */
   uint8_t request;                  /* GenesisExtensionMode: 0 = no work; 1 = Level 2 scenery; 2 = Level 3 (scenery + sprites) for the next completed frame */
   GenesisExtensionProducerFunction producer; /* normally genesis_vdp_produce_extension */
   /* Extension width per side for a native size (the adapter calls its layout math); returns nonzero for "no extension". */

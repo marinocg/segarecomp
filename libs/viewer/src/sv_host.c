@@ -1516,7 +1516,16 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     unsigned off = 0, acc = 0, why = 0, a_off = 0, a_acc = 0, a_why = 0;
     const uint32_t vs_total = ext->actor_pixels_verified + ext->actor_pixels_authored;
     int vs_picture = 0, vs_left = 0, vs_right = 0;
-    if (ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) { off |= SV_COV_BIT(SV_COV_SCENERY); if (accepted) acc |= SV_COV_BIT(SV_COV_SCENERY); }
+    /* ADR 0315: extension content is credited only where it is actually VISIBLE. A centred surface shows `vis` columns on each side (0 at 4:3 or with a zero width); an asymmetric one is shown whole or not at all
+     * (the native picture only under a narrower plan). Scenery needs at least one visible extension column; a sprite drawn in a side column needs that very side to be visible. */
+    int vis_l = 0, vis_r = 0;
+    if (accepted && ext->side > 0) {
+      const int vis = sv_geom_resolve_visible(&h->settings.video, w, hgt, ext->side);
+      if (ext->shift == 0) { vis_l = vis_r = vis; }
+      else if (vis == ext->side) { vis_l = ext->side + ext->shift; vis_r = ext->side - ext->shift; }
+    }
+    const int ext_visible = accepted && vis_l + vis_r > 0;
+    if (ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) { off |= SV_COV_BIT(SV_COV_SCENERY); if (ext_visible) acc |= SV_COV_BIT(SV_COV_SCENERY); }
     if (ext->overlay_rgba != NULL) {
       off |= SV_COV_BIT(SV_COV_HUD);
       if (geom_ok && ext->overlay_w > 0 && ext->overlay_w <= SV_OVERLAY_MAX && ext->overlay_h > 0 && ext->overlay_h <= SV_OVERLAY_MAX) acc |= SV_COV_BIT(SV_COV_HUD);
@@ -1530,10 +1539,10 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
       const uint32_t pic_px = vs_total > side_px ? vs_total - side_px : 0u;
       /* an extension column is credited only when it is really displayed: the surface accepted, and a side treatment that shows the supplied columns (Comfort and Borders replace them with a fill, so a sprite
        * drawn there is discarded and counts for nothing) */
-      const int shown = accepted && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
+      const int shown = ext_visible && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
       vs_picture = pic_px > 0u && picture_admitted && ext->actor_picture != NULL;
-      vs_left = left_px > 0u && shown;
-      vs_right = right_px > 0u && shown;
+      vs_left = left_px > 0u && shown && vis_l > 0;
+      vs_right = right_px > 0u && shown && vis_r > 0;
       if (!vs_picture && !vs_left && !vs_right) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }
     } else if (a_acc != 0u && !accepted) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }   /* a composed set rides on the surface: if the host refused that frame nothing was presented, so nothing is delivered */
     if (a_acc != 0u && vs_total == 0u) vs_picture = 1;   /* a surface that carries no pixel counts (the SEG-140-T005 fixtures): its credit is the picture's, with no pixels to add */

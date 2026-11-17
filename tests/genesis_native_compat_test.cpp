@@ -228,6 +228,34 @@ void asymmetric_placement() {
     std::snprintf(what, sizeof what, "asymmetric %d/%d: winner classes equal the crop", left, 78 - left);
     check(cl, what);
   }
+  // a side wider than the symmetric bound: side 600 gives a total of 1200 columns, and one side of the view can hold all of it (> 672). No symmetric reference of that width exists (the bound is 672),
+  // so two placements of the same frame are compared: the world columns both show must be identical, sprites included.
+  {
+    constexpr unsigned kWide = 600, kTotal = 2 * kWide;
+    const size_t wcap = (size_t)(320 + kTotal) * 224;
+    std::vector<uint8_t> c0(wcap), c1(wcap);
+    GenesisFrameExtension e0{}, e1{}; attach(e0); attach(e1);
+    e0.classes = c0.data(); e0.classes_capacity = wcap; e1.classes = c1.data(); e1.classes_capacity = wcap;
+    g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.accept = GENESIS_COMPAT_HUD; g_mock.placement = 0;
+    const Out all_right = produce(sc, e0, kWide);
+    g_mock.placement = (int)kTotal;
+    const Out all_left = produce(sc, e1, kWide);
+    check(all_right.rc == 0 && all_left.rc == 0 && all_right.res.shift == -(int)kWide && all_left.res.shift == (int)kWide, "wide: 0/1200 and 1200/0 are produced");
+    bool eq = true;
+    const unsigned W2 = all_right.res.native_w, H2 = all_right.res.native_h;
+    // world x of surface column c: all_right: c; all_left: c - kTotal. Shared world columns: 0 .. W2 + kTotal - 1 - kTotal = W2 - 1, i.e. the picture only, plus nothing else; compare the picture and the generic columns that coincide
+    for (unsigned r = 0; r < H2 && eq; ++r)
+      eq = std::memcmp(&all_right.surface[(size_t)r * all_right.res.pitch], &all_left.surface[(size_t)r * all_left.res.pitch + (size_t)kTotal * 3], (size_t)W2 * 3) == 0 &&
+           std::memcmp(&c0[(size_t)r * (W2 + kTotal)], &c1[(size_t)r * (W2 + kTotal) + kTotal], W2) == 0;
+    check(eq, "wide: the picture columns and their winner classes are identical in both extreme placements");
+    g_mock.placement = 700;
+    GenesisFrameExtension e2{}; attach(e2);
+    const Out mid = produce(sc, e2, kWide);
+    bool mid_eq = true;   // the middle placement (700 / 500) shares world columns -500 .. 819 with all_left?? no: compare against all_right (world 0..): mid column c is world c - 700
+    for (unsigned r = 0; r < H2 && mid_eq; ++r)   // world columns 0 .. W2 + 499 are in both mid (columns 700 ..) and all_right (columns 0 ..)
+      mid_eq = std::memcmp(&mid.surface[((size_t)r * mid.res.pitch / 3 + 700) * 3], &all_right.surface[(size_t)r * all_right.res.pitch], (size_t)(W2 + 499) * 3) == 0;
+    check(mid.rc == 0 && mid.res.shift == 100 && mid_eq, "wide: the 700/500 placement shows the same world columns as 0/1200 where they overlap");
+  }
   // a placement that is missing, out of range, or declared by a frame the provider did not accept is exactly the centred layout
   GenesisFrameExtension cx{}; g_mock = Mock{}; g_mock.vram = sc.vram.data();
   const Out centred = produce(sc, cx, kSide);

@@ -160,6 +160,7 @@ static int sdl_closed(void *ctx) {
   if (v->ext_attached) { /* the requested mode is sampled here, between guest slices: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
     v->ext.request = request_of_compat(video->widescreen, v->compat_enabled & GENESIS_COMPAT_HUD);
+    v->ext.extension_shown = video->widescreen != SV_WIDESCREEN_ORIGINAL;   /* ADR 0315: in Original nothing of the extension is presented, whatever the producer makes for the HUD */
     if (v->ext.compat != NULL) v->ext.compat_components = video->widescreen == SV_WIDESCREEN_ORIGINAL ? (v->compat_enabled & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES)) : v->compat_enabled;   /* Original: the HUD (and the virtual sprites drawn in the picture) only */
     v->plan_video = *video;
   }
@@ -369,6 +370,7 @@ int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameE
   ext->compat_components = components & compat->components;
   v->compat_enabled = ext->compat_components;
   ext->request = request_of_compat(sv_host_settings(v->host)->video.widescreen, ext->compat_components & GENESIS_COMPAT_HUD);
+  ext->extension_shown = sv_host_settings(v->host)->video.widescreen != SV_WIDESCREEN_ORIGINAL;
   ext->compat_ram = g_compat_ram;
   ext->compat_ram_stamp = 0U;
   ext->overlay_rgba = g_compat_overlay;

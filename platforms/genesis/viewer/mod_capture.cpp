@@ -103,7 +103,6 @@ struct Mod {
   // ADR 0315: the frame-bound asymmetric placement. `margin` is the per-side margin the provider saw when it chose `left_px`; -1 = none declared.
   std::int64_t staged_left_px = -1, visible_left_px = -1;
   std::uint32_t staged_left_margin = 0, visible_left_margin = 0;
-  std::uint32_t last_margin = 0;   // the per-side margin of the host's most recently produced frame (seen in prepare)
 #endif
   std::unique_ptr<GenesisModScheduler> scheduler;
   GenesisSnapshotModState snapshot{};
@@ -241,17 +240,25 @@ int api_scenery_window(std::uint32_t plane, std::int32_t cell_x0, std::int32_t c
   w.words.assign(words, words + static_cast<std::size_t>(cols) * rows);
   return SEGA_MOD_OK;
 }
+// ADR 0315: the per-side margin of the host's most recently PUBLISHED extension result, read from the runtime's own publication (never cached): zero for Original, 4:3, a failed production or before the first one,
+// because the runtime publishes a result (status NONE / UNAVAILABLE, side 0) for every frame, including the ones that return before prepare().
+std::uint32_t current_margin() {
+  if (g.scheduler == nullptr || g.scheduler->runtime == nullptr || g.scheduler->runtime->live_raster == nullptr || g.scheduler->runtime->live_raster->extension == nullptr) return 0U;
+  const GenesisExtensionResult &r = g.scheduler->runtime->live_raster->extension->result;
+  const GenesisFrameExtension *ext = g.scheduler->runtime->live_raster->extension;
+  return ext->extension_shown != 0U && (r.status == GENESIS_EXT_AVAILABLE || r.status == GENESIS_EXT_PARTIAL) ? r.side : 0U;
+}
 int api_view_margin(std::uint32_t *margin_px) {
   if (!in_render()) return refused_phase();
   if (margin_px == nullptr) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
-  *margin_px = g.last_margin;
+  *margin_px = current_margin();
   return SEGA_MOD_OK;
 }
-int api_view_left(std::uint32_t left_px) {
+int api_view_left(std::uint32_t left_px, std::uint32_t margin_px) {
   if (!in_render()) return refused_phase();
-  if (left_px > 2U * 672U) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }   // 672 = SV_EXT_MAX_SIDE; whether it fits the planned total is the host's validation at production
+  if (left_px > 2U * 672U || margin_px > 672U) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }   // 672 = SV_EXT_MAX_SIDE; whether it fits the planned total is the host's validation at production
   g.staged_left_px = static_cast<std::int64_t>(left_px);
-  g.staged_left_margin = g.last_margin;
+  g.staged_left_margin = margin_px;   // the margin the provider computed for, not the one the host happens to show at the call
   return SEGA_MOD_OK;
 }
 SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, api_view_margin, api_view_left, {nullptr, nullptr, nullptr, nullptr}};
@@ -415,9 +422,6 @@ struct Presented {
 } p;
 
 void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out) {
-#ifdef SEGARECOMP_MOD_NATIVE
-  const std::uint32_t margin_of_this_frame = frame->side;   // ADR 0315: what the provider's NEXT render callback will learn (the host's most recent plan)
-#endif
   out->accepted = 0;
   out->reason = GENESIS_COMPAT_OK;
   p.have = false;
@@ -425,9 +429,6 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   p.have_set = false;
   p.scenery = false;
   p.left_ok = false;
-#ifdef SEGARECOMP_MOD_NATIVE
-  g.last_margin = margin_of_this_frame;
-#endif
   if ((frame->requested & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY)) == 0) return;
   if (!g.attached || g.scheduler->fault.faulted != 0U || g.scheduler->disabled != 0U) {   // a faulted mod presents nothing; the guest and the picture go on
     out->reason = GENESIS_COMPAT_FAULT;
@@ -443,7 +444,11 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     if (p.scenery) accepted |= GENESIS_COMPAT_SCENERY;
     // ADR 0315: a placement is served only for the frame it was declared for (the same epoch as the scenery window), only when it was computed for the margin this frame is produced with, and only inside the
     // planned total; anything else is the centred layout.
-    p.left_ok = current && g.visible_left_px >= 0 && frame->side > 0U && g.visible_left_margin == frame->side && g.visible_left_px <= 2 * static_cast<std::int64_t>(frame->side);
+    const bool declared = current && g.visible_left_px >= 0;
+    p.left_ok = declared && frame->side > 0U && g.visible_left_margin == frame->side && g.visible_left_px <= 2 * static_cast<std::int64_t>(frame->side);
+    // The windows of a callback that declared a placement were built for THAT view: when the placement is not valid for this frame's geometry they are not served either (they would answer the wrong
+    // cells), so the scenery falls back to the generic extension. The HUD and sprite contributions are independent of the view and stay accepted. A provider that declared no placement is untouched.
+    if (declared && !p.left_ok && p.scenery) { p.scenery = false; accepted &= ~static_cast<unsigned>(GENESIS_COMPAT_SCENERY); }
   }
 #endif
   if ((frame->requested & GENESIS_COMPAT_HUD) != 0U) {
