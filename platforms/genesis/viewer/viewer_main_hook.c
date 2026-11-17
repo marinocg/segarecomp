@@ -110,10 +110,10 @@ static void perf_slice_done(GenesisRuntime *runtime) {
 #ifdef SEGARECOMP_VIEWER_FINAL_FRAME_SEAM
   {   /* Automation seam (tests, ADR 0315), compiled in only by `segarecomp build --test-frame-seam 1`: SEGARECOMP_VIEWER_TEST_VIDEO_AT=<frame>:<N>:<M>|<frame>:orig[,...] changes the widescreen aspect (or returns to Original) through the
      * real settings path when the guest frame count reaches <frame>; SEGARECOMP_VIEWER_TEST_TRACE=1 prints one line per guest frame with the extension result the producer published (status, side, shift, provider verdict). */
-    static int init, n, done[6], trace; static unsigned long at[6]; static int num[6], den[6];
+    static int init, n, done[12], trace; static unsigned long at[12]; static int num[12], den[12];
     static unsigned long last_traced = (unsigned long)-1;
     if (!init) { const char *e = getenv("SEGARECOMP_VIEWER_TEST_VIDEO_AT"); init = 1; trace = getenv("SEGARECOMP_VIEWER_TEST_TRACE") != NULL;
-      while (e != NULL && *e != '\0' && n < 6) { unsigned long f; int a1 = 0, b1 = 0, used = 0;
+      while (e != NULL && *e != '\0' && n < 12) { unsigned long f; int a1 = 0, b1 = 0, used = 0;
         if (sscanf(e, "%lu:orig%n", &f, &used) == 1 && used > 0) { at[n] = f; num[n] = 0; den[n] = 0; ++n; e += used; }
         else if (sscanf(e, "%lu:%d:%d%n", &f, &a1, &b1, &used) >= 3) { at[n] = f; num[n] = a1; den[n] = b1; ++n; e += used; }
         else break;
