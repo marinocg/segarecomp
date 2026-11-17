@@ -83,7 +83,20 @@ path = "edits/main.edits"
         luau_pkg = tmp / "luau.segapatch"
         r = subprocess.run([str(cli), "mod", "pack", str(luau_project), "--out", str(luau_pkg)], text=True, capture_output=True, timeout=300)
         assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
-        packages = [package("native", rom), package("wrong", other), data_pkg, luau_pkg]
+        # a native package that ALSO carries a typed ROM edit (native-c11 + rom-edit-set): the provider runs over the verified edited image
+        edit_project = tmp / "native-edit"
+        (edit_project / "src").mkdir(parents=True)
+        (edit_project / "edits").mkdir()
+        shutil.copy(fixtures / "provider.c", edit_project / "src/provider.c")
+        (edit_project / "edits/main.edits").write_text("fixture u16 0x00000244 0x00e0 0x0e00\n")
+        manifest = (fixtures / "mod.toml").read_text().replace("@@SHA@@", hashlib.sha256(rom.read_bytes()).hexdigest()).replace('id = "scenery-fixture-native"', 'id = "scenery-fixture-native-edit"')
+        manifest = manifest.replace('[[source]]\nkind = "native-c11"\npath = "src/provider.c"\n', '[[source]]\nkind = "native-c11"\npath = "src/provider.c"\n\n[[source]]\nkind = "rom-edit-set"\npath = "edits/main.edits"\n')
+        assert "rom-edit-set" in manifest
+        (edit_project / "mod.toml").write_text(manifest)
+        native_edit_pkg = tmp / "native-edit.segapatch"
+        r = subprocess.run([str(cli), "mod", "pack", str(edit_project), "--out", str(native_edit_pkg)], text=True, capture_output=True, timeout=300)
+        assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
+        packages = [package("native", rom), package("wrong", other), data_pkg, luau_pkg, native_edit_pkg]
         env = dict(os.environ, LD_LIBRARY_PATH=str(sdl / "lib") + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""), SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
         r = subprocess.run([test_exe, str(install), str(rom), str(other), *map(str, packages)], text=True, capture_output=True, env=env, timeout=1500)
         sys.stdout.write(r.stdout)
