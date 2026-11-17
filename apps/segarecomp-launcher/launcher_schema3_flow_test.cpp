@@ -57,10 +57,11 @@ BuildOutcome build(const RomView &rom, const Layout &layout, std::string *messag
 
 int main(int argc, char **argv) {
   if (argc < 8) {
-    std::cerr << "usage: launcher_schema3_flow_test <install-root> <rom> <other-rom> <native.segapatch> <wrong-rom.segapatch> <data.segapatch> <luau.segapatch>\n";
+    std::cerr << "usage: launcher_schema3_flow_test <install-root> <rom> <other-rom> <native.segapatch> <wrong-rom.segapatch> <data.segapatch> <luau.segapatch> [<native-with-edit.segapatch>]\n";
     return 2;
   }
   const fs::path root = argv[1], rom_path = argv[2], other_path = argv[3], native = argv[4], wrong = argv[5], data = argv[6], luau = argv[7];
+  const fs::path native_edit = argc >= 9 ? fs::path(argv[8]) : fs::path();   // optional: the native + typed-edit case runs when a package for it is given
   const fs::path cache = root.parent_path() / "cache", library = root.parent_path() / "library";
   fs::create_directories(cache);
   fs::create_directories(library);
@@ -176,6 +177,36 @@ int main(int argc, char **argv) {
     expect(!verify_installed_mod(dv).empty() && build(dv, layout, &message) != BuildOutcome::succeeded, "a tampered data package never builds");
     { std::ofstream out(stored_data, std::ios::binary | std::ios::trunc); out << good; }
     expect(remove_patch(*entry, d.identity, library) && digest_of(entry_executable(vanilla_entry)) == vanilla_game, "removing it leaves Vanilla untouched");
+    entry->selected_variant = installed.identity;
+  }
+
+  // ---- a NATIVE package that ALSO carries a typed ROM edit (native-c11 + rom-edit-set, one package): the provider runs over the VERIFIED EDITED image, as a distinct variant ----
+  if (!native_edit.empty()) {
+    const PatchPreview pe = preview_patch(*entry, native_edit, rom_path);
+    expect(pe.ok && pe.schema3 && pe.mod_trust == "native" && pe.info.has_native && pe.effective_sha256.size() == 64U && pe.effective_sha256 != vanilla.sha256 && pe.effective_sha256 != preview.effective_sha256,
+           "a native package with a typed edit previews with an effective image that is neither the original's nor the plain native package's: " + pe.error);
+    PatchInstall pn = install_patch(*entry, native_edit, rom_path, library, 1006, false);
+    expect(!pn.ok && !fs::exists(library / "patches" / (pe.info.identity + ".segapatch")), "its native code is not installed without approval: " + pn.error);
+    pn = install_patch(*entry, native_edit, rom_path, library, 1007, true);
+    expect(pn.ok && pn.added && pn.identity != installed.identity, "the approved package installs under its own identity: " + pn.error);
+    const InstalledPatch *rec = static_cast<const LibraryEntry *>(entry)->find_patch(pn.identity);
+    expect(rec != nullptr && rec->schema3 && rec->native_approved && rec->mod_trust == "native" && rec->effective_sha256 == pe.effective_sha256 && rec->effective_sha256 != vanilla.sha256, "the record is a native mod bound to the edited image");
+    entry->selected_variant = pn.identity;
+    const RomView ev = view_from_entry(*entry);
+    expect(ev.luau_mod() && ev.luau_native && ev.luau_approved && !ev.patched() && ev.sha256 == vanilla.sha256 && ev.effective_sha256() == pe.effective_sha256 && verify_installed_mod(ev).empty(), "selecting it yields one native variant over the ORIGINAL game whose effective image is the edited one");
+    const fs::path edit_entry = entry_dir(ev, layout);
+    expect(edit_entry != vanilla_entry && edit_entry != mod_entry && genesis_save_dir(ev) != vanilla_saves && genesis_save_dir(ev) != genesis_save_dir(mod) && !genesis_save_dir(ev).empty(), "its build cache entry and its saves are its own (a save of another variant is never loaded)");
+    expect(build(ev, layout, &message) == BuildOutcome::succeeded && entry_ready_for(edit_entry, ev, layout) && fs::is_regular_file(entry_executable(edit_entry)), "it builds through the launcher pipeline: " + message);
+    const std::string emeta = slurp(edit_entry / "metadata.json");
+    expect(emeta.find("\"mod_kind\":\"native\"") != std::string::npos && emeta.find(pn.identity) != std::string::npos && emeta.find(pe.effective_sha256) != std::string::npos, "the record names the package and the effective image it was built for");
+    expect(digest_of(entry_executable(edit_entry)) != digest_of(entry_executable(mod_entry)) && digest_of(entry_executable(edit_entry)) != vanilla_game, "the edited program is a different program from the plain mod's and from Vanilla");
+    expect(!entry_ready_for(edit_entry, mod, layout) && !entry_ready_for(mod_entry, ev, layout) && !entry_ready_for(edit_entry, vanilla, layout) && !entry_ready_for(vanilla_entry, ev, layout), "no program is ever another variant's");
+    const fs::path stored_edit = library / "patches" / (pn.identity + ".segapatch");
+    const std::string good = slurp(stored_edit);
+    { std::ofstream out(stored_edit, std::ios::binary | std::ios::trunc); out << good << "x"; }
+    expect(!verify_installed_mod(ev).empty() && build(ev, layout, &message) != BuildOutcome::succeeded, "a tampered package never builds");
+    { std::ofstream out(stored_edit, std::ios::binary | std::ios::trunc); out << good; }
+    expect(remove_patch(*entry, pn.identity, library) && digest_of(entry_executable(vanilla_entry)) == vanilla_game && slurp(vanilla_saves / "slot0.sav") == "vanilla save", "removing it leaves Vanilla untouched");
     entry->selected_variant = installed.identity;
   }
 

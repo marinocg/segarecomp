@@ -83,6 +83,8 @@ segarecomp mod apply <dir|package.segapatch> --rom <original-image> --out <edite
 segarecomp mod import-hints <dir> --revision <label> --from <symbols.csv>                 # imported-hint entries only
 ```
 
+A package may combine a `rom-edit-set` with `native-c11` sources (an ABI 2 provider): the build, the launcher and the program use the VERIFIED EDITED image as the one the provider runs over (the program's ROM is the effective image; the manifest's revisions, memory ranges and function hooks are resolved against the original image), the package identity and the effective image digest give it its own build cache entry and its own saves, and a save made under another variant is refused. `tests/launcher_schema3_flow_test.py` proves install, approval, selection, build, tamper refusal and Vanilla's integrity for such a package on a fabricated image. Nothing mutates the ROM at run time: the edit is applied once, by the build, with the original values asserted.
+
 Symbols (`[[symbol]]`) name a location per revision: `@name` or `@name+0xN` in a site resolves to that revision's `verified` address. `manual` and `imported-hint` entries are recorded in the package and printed by `mod inspect` (`symbols` with `provenance`) but are refused as edit sites. Public symbol maps hold names only (lower-case tokens), never disassembly.
 
 ## Guest code injection, header repair and BPS (ADR 0292, ADR 0293)
