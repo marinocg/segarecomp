@@ -1441,7 +1441,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
       target->compat->prepare(target->compat_state, &cf, &decision);
       compat_accepted = decision.accepted & cf.requested;
       compat_reason = compat_accepted != 0U ? (uint8_t)GENESIS_COMPAT_OK : decision.reason;
-      if (compat_accepted != 0U && decision.has_left_px != 0U) { placement_requested = 1; placement_left = decision.left_px; }
+      if (decision.has_left_px != 0U && compat_reason == (uint8_t)GENESIS_COMPAT_OK) { placement_requested = 1; placement_left = decision.left_px; }   /* a framing request needs an OK verdict, not an accepted component */
       if (compat_accepted != 0U) {   /* a scene name is accepted only as a bounded token; anything else is dropped, never repaired */
         size_t n = 0U;
         while (n <= GENESIS_COMPAT_SCENE_MAX && decision.scene[n] != '\0') ++n;

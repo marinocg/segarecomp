@@ -268,6 +268,17 @@ void asymmetric_placement() {
     char what[160]; std::snprintf(what, sizeof what, "placement %s: the centred layout, byte for byte", b.what);
     check(o.rc == 0 && o.res.shift == 0 && o.surface == centred.surface, what);
   }
+  // framing without scenery: a provider whose verdict is OK but that accepts no component (generic scenery, nothing else to deliver) is still framed, and claims nothing
+  {
+    GenesisFrameExtension ext{}; attach(ext);
+    g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.accept = 0; g_mock.reason = GENESIS_COMPAT_OK; g_mock.placement = 20;
+    const Out o = produce(sc, ext, kSide);
+    check(o.rc == 0 && o.res.shift == 20 - (int)kSide && o.res.compat_accepted == 0 && o.res.authored == 0 && o.res.compat_reason == GENESIS_COMPAT_OK, "framing-only: the placement is applied, no component is accepted, nothing is authored");
+    g_mock.reason = GENESIS_COMPAT_UNSUPPORTED_SCENE;
+    GenesisFrameExtension e2{}; attach(e2);
+    const Out o2 = produce(sc, e2, kSide);
+    check(o2.rc == 0 && o2.res.shift == 0, "a declined verdict (not OK) never frames");
+  }
   // the same placement presented under a different plan is validated against THAT plan, never reused: a placement valid for 39 is out of range for a total of 20
   {
     GenesisFrameExtension ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.accept = GENESIS_COMPAT_HUD; g_mock.placement = 60;

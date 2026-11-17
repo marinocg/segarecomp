@@ -70,7 +70,7 @@ def main():
         rom.write_bytes(image)
         image_sha = sha(image)
 
-        def project(name, stale):
+        def project(name, stale, only_framing=False, indicator=False):
             d = tmp / (name + "-src")
             (d / "src").mkdir(parents=True)
             t = (fixtures / "provider.c").read_text()
@@ -83,6 +83,10 @@ def main():
             t = t.replace("scenery_window(1U, -40, 0, COLS, ROWS, blank)", "scenery_window(1U, bx0, 0, COLS, ROWS, blank)")
             t = t.replace("    (void)render->scenery_window(1U, bx0, 0, COLS, ROWS, blank);\n", "    if (serve != 0U) (void)render->scenery_window(1U, bx0, 0, COLS, ROWS, blank);\n")
             t = t.replace("    (void)blank;", POST + "    (void)blank;")
+            if only_framing:   # generic scenery: no window, no overlay: only the placement (ADR 0315: framing is independent of scenery)
+                t = t.replace("    if (serve != 0U) (void)render->scenery_window(0U, x0, 0, COLS, ROWS, words);\n", "").replace("    if (serve != 0U) (void)render->scenery_window(1U, bx0, 0, COLS, ROWS, blank);\n", "").replace("    (void)render->overlay_rect(0, 0, 24, 8, 0x000000C0U);\n", "").replace("    (void)blank;", "    (void)blank; (void)words; (void)bx0; (void)serve; (void)x0;")
+            if indicator:   # the Castle indicator: a positioned layer anchored to the top right of the presentation, drawn in magenta so the test can find it
+                t = t.replace("    (void)render->overlay_rect(0, 0, 24, 8, 0x000000C0U);\n", "    if (render->overlay_layer(1U, 2U, 1U, 0, 0, 24U, 8U, 0U) == 0) (void)render->overlay_target(1U);\n    (void)render->overlay_rect(0, 0, 24, 8, 0xFF00FFFFU);\n")
             (d / "src/provider.c").write_text(t)
             (d / "mod.toml").write_text((fixtures / "mod.toml").read_text().replace("@@SHA@@", image_sha).replace('"overlay.rgba", "scenery.words"', '"host.log", "overlay.rgba", "scenery.words"'))
             out = tmp / (name + ".segapatch")
@@ -93,6 +97,8 @@ def main():
             check(built.returncode == 0, f"{name} builds: {built.stdout[-400:]}{built.stderr[-300:]}")
             return tmp / name
 
+        framing = project("framing", CAREFUL_STALE, only_framing=True)
+        indicator = project("indicator", CAREFUL_STALE, indicator=True)
         careful = project("careful", CAREFUL_STALE)
         naive = project("naive", NAIVE_STALE)
         if h.failures:
@@ -113,6 +119,24 @@ def main():
             return trace, seen
 
         # widen 16:9 -> 32:9 at 40, narrow to 16:9 at 80, Original at 120, back to 32:9 at 160, 4:3 (nothing planned) at 200, 21:9 at 240
+        # the indicator layer through the real presenter (the host's timed notices are cleared before the final frame is captured)
+        from viewer_mod_support import read_bmp
+        for label, sched in (("32:9", "5:32:9"), ("Original", "5:orig"), ("exact 4:3", "5:4:3")):
+            cfg = tmp / "ind.cfg"
+            cfg.write_text("video.widescreen=enhanced_gameplay\nvideo.widescreen_side_style=raw\nvideo.scale=1\nvideo.aspect=0\nvideo.widescreen_ratio=16:9\n")
+            run, lines, frame, ram = h.play(indicator, "ind-" + label.replace(" ", ""), "0 -\n", extra={"SEGARECOMP_VIEWER_SETTINGS": str(cfg), "SEGARECOMP_VIEWER_TEST_VIDEO_AT": sched}, budget=20_000_000)
+            bmp = read_bmp(frame)
+            hits = [(x, y) for y, row in enumerate(bmp) for x, px in enumerate(row) if tuple(px[:3]) == (255, 0, 255)]
+            box = (min(x for x, y in hits), max(x for x, y in hits), min(y for x, y in hits), max(y for x, y in hits)) if hits else None
+            # the panel is 24 x 8 source pixels at the top right of the presented picture / surface: its pixels are all there, at any integer scale, and nowhere else
+            check(box is not None and (box[1] - box[0] + 1) % 24 == 0 and box[2] <= 8 + (224 if label == "32:9" else 0), f"the indicator layer is presented in {label} through the real presenter: {len(hits)} pixels, box {box}")
+            check(box is not None and box[1] >= len(bmp[0]) - 90, f"{label}: it is at the top-right corner of the presented picture")
+        # a provider with generic scenery that only asks for framing: placed with nothing accepted, never authored, through every transition
+        trace_f, _ = play(framing, "framing", "16:9", "40:32:9,80:16:9")
+        fr = [f for f in sorted(trace_f) if trace_f[f]["status"] in (STATUS_AVAILABLE, STATUS_PARTIAL)]
+        placed_f = [f for f in fr if trace_f[f]["shift"] != 0]
+        check(len(placed_f) > 40 and all(trace_f[f]["acc"] == 0 and trace_f[f]["auth"] == 0 for f in placed_f), f"framing-only: placed frames accept no component and claim no authored scenery ({len(placed_f)} placed frames)")
+        check(all(trace_f[f]["side"] + trace_f[f]["shift"] == trace_f[f]["side"] // 2 for f in placed_f), "framing-only: never a placement computed for another margin")
         schedule = "40:32:9,80:16:9,120:orig,160:32:9,200:4:3,240:21:9"
         for name, program in (("careful", careful), ("naive", naive)):
             trace, seen = play(program, name, "16:9", schedule)
@@ -123,7 +147,7 @@ def main():
             extended = [f for f in frames if trace[f]["status"] in (STATUS_AVAILABLE, STATUS_PARTIAL)]
             # (1) the margin the provider reads: 0 where nothing is produced (Original 120-159, 4:3 200-239), the planned side where it is
             planned = {f: trace[f]["side"] for f in extended}
-            check(all(trace[f]["status"] not in (STATUS_AVAILABLE, STATUS_PARTIAL) and trace[f]["side"] == 0 for f in frames if 210 <= f <= 238), f"{name}: 4:3: no extension is produced (the producer returns before prepare) and its side is 0")
+            check(all(trace[f]["shift"] == 0 for f in frames if 210 <= f <= 238), f"{name}: 4:3: no placement is applied (a verified provider is served on the legacy plan; nothing extended is shown)")
             check(all(trace[f]["shift"] == 0 for f in frames if 130 <= f <= 158), f"{name}: Original: no placement is applied (the producer runs for the HUD only; nothing of it is presented)")
             check(seen and 0 in seen and any(m > 0 for m in seen), f"{name}: the provider's own reads include 0 and a planned margin: {sorted(set(seen))[:6]}")
             # the per-render margins in the Original and 4:3 spans are 0 (render frame order = guest frame order, one entry per render callback)
@@ -144,7 +168,7 @@ def main():
                 dropped = [f for f in around if trace[f]["shift"] == 0 and not (trace[f]["acc"] & SCENERY)]
                 check(len(dropped) >= 4, f"naive: the windows of a stale placement are not served ({len(dropped)} transition frames lost their scenery, the HUD kept)")
             # (4) placed frames are consistent and placement resumes after every transition
-            placed = [f for f in extended if trace[f]["shift"] != 0]
+            placed = [f for f in extended if trace[f]["shift"] != 0 and not 120 <= f <= 126]   # a placement declared just before the switch to Original is honoured on the one frame produced after it (scenery is not requested in Original; nothing of it is presented)
             check(placed and all(trace[f]["reason"] == 0 and (trace[f]["acc"] & SCENERY) for f in placed), f"{name}: every placed frame has its scenery accepted and no unanswered cell")
             for lo, hi, what in ((60, 80, "after widening"), (100, 120, "after narrowing"), (180, 200, "after returning from Original"), (265, 285, "after 21:9")):
                 check(any(trace[f]["shift"] != 0 for f in extended if lo <= f <= hi), f"{name}: placement resumes {what}")

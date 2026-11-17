@@ -436,16 +436,16 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   }
   unsigned accepted = 0;
 #ifdef SEGARECOMP_MOD_NATIVE
+  // SEG-140-T011: a window belongs to exactly one produced frame. The render callback of guest frame N runs right after frame N ended; the host produces the frame that callback describes when the runtime counts N + 2
+  // (the producer sees the work-RAM snapshot taken one onset earlier, as for every route). A window committed for any other frame (a rewind, a load, a skipped callback), or none, is never served.
+  const bool current = g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count;
+  // ADR 0315: framing is a render-API feature of its own, independent of scenery: a provider with generic scenery can request a placement without claiming authored scenery. It is served only for the frame it was
+  // declared for (the same epoch), only when it was computed for the margin this frame is produced with, and only inside the planned total; anything else is the centred layout.
+  const bool declared = current && g.visible_left_px >= 0;
+  p.left_ok = declared && frame->side > 0U && g.visible_left_margin == frame->side && g.visible_left_px <= 2 * static_cast<std::int64_t>(frame->side);
   if ((frame->requested & GENESIS_COMPAT_SCENERY) != 0U) {
-    // SEG-140-T011: a window belongs to exactly one produced frame. The render callback of guest frame N runs right after frame N ended; the host produces the frame that callback describes when the runtime counts N + 2
-    // (the producer sees the work-RAM snapshot taken one onset earlier, as for every route). A window committed for any other frame (a rewind, a load, a skipped callback), or none, is never served.
-    const bool current = g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count;
     p.scenery = current && (g.visible_scenery[0][0].present || g.visible_scenery[1][0].present);   // ADR 0314: a frame is served when at least one plane has a window (an empty plane is a window of blank cells); a plane without one is left to the generic extension
     if (p.scenery) accepted |= GENESIS_COMPAT_SCENERY;
-    // ADR 0315: a placement is served only for the frame it was declared for (the same epoch as the scenery window), only when it was computed for the margin this frame is produced with, and only inside the
-    // planned total; anything else is the centred layout.
-    const bool declared = current && g.visible_left_px >= 0;
-    p.left_ok = declared && frame->side > 0U && g.visible_left_margin == frame->side && g.visible_left_px <= 2 * static_cast<std::int64_t>(frame->side);
     // The windows of a callback that declared a placement were built for THAT view: when the placement is not valid for this frame's geometry they are not served either (they would answer the wrong
     // cells), so the scenery falls back to the generic extension. The HUD and sprite contributions are independent of the view and stay accepted. A provider that declared no placement is untouched.
     if (declared && !p.left_ok && p.scenery) { p.scenery = false; accepted &= ~static_cast<unsigned>(GENESIS_COMPAT_SCENERY); }
@@ -478,10 +478,10 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     }
   }
   out->accepted = accepted;
-  if (accepted == 0U) return;
 #ifdef SEGARECOMP_MOD_NATIVE
-  if (p.left_ok) { out->left_px = static_cast<std::int32_t>(g.visible_left_px); out->has_left_px = 1U; }
+  if (p.left_ok) { out->left_px = static_cast<std::int32_t>(g.visible_left_px); out->has_left_px = 1U; }   // with the verdict OK even when no component is accepted (ADR 0315)
 #endif
+  if (accepted == 0U) return;
   const std::string &scene = *render_view().scene;
   if (!scene.empty() && scene.size() <= GENESIS_COMPAT_SCENE_MAX) std::memcpy(out->scene, scene.c_str(), scene.size() + 1U);
 }

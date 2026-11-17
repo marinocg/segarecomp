@@ -424,6 +424,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   {   /* Automation seam (tests, SEG-137-T007), compiled in only by `segarecomp build --test-frame-seam 1`: SEGARECOMP_VIEWER_FINAL_FRAME=<file.bmp> saves the last presented frame exactly as composed for the window (picture, HUD overlay, no menus). */
     const char *dump = getenv("SEGARECOMP_VIEWER_FINAL_FRAME");
     if (dump != NULL && *dump != '\0') {
+      sv_host_toast(genesis_sdl3_viewer_sv_host(sdl), "");   /* the host's timed notices are not part of what a test judges (ADR 0315) */
       SDL_Surface *shot = sv_host_capture_output(genesis_sdl3_viewer_sv_host(sdl));
       if (shot != NULL && SDL_SaveBMP(shot, dump)) fprintf(stderr, "VIEWER_FINAL_FRAME {\"width\":%d,\"height\":%d}\n", shot->w, shot->h);
       else fprintf(stderr, "VIEWER_FINAL_FRAME {\"error\":true}\n");

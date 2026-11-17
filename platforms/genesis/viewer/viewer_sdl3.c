@@ -323,9 +323,20 @@ static void sdl_widescreen_caps(void *ctx, SvWidescreenCaps *out) {
 }
 
 static int sdl_extension_plan(void *ctx, unsigned native_w, unsigned native_h, unsigned *side_out) {
-  const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;
+  GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   int side = 0;
-  if (sv_geom_resolve_production(&v->plan_video, (int)native_w, (int)native_h, &side) != SV_GEOM_OK || side <= 0) return -1; /* a rejected plan produces nothing (never a clamped surface) */
+  if (sv_geom_resolve_production(&v->plan_video, (int)native_w, (int)native_h, &side) != SV_GEOM_OK) return -1; /* a rejected plan produces nothing (never a clamped surface) */
+  if (side <= 0) {
+    /* ADR 0315: an exact aspect that needs no extension (4:3) plans nothing, and the producer then returns before it serves any render contribution, so a verified provider's indicator layer would vanish at exactly
+     * 4:3 although it is shown in Original. As in Original (where a verified HUD also makes the producer run on the legacy plan) such a provider is served on the legacy side and the extension is marked not shown:
+     * its contributions are presented, nothing extended is. Without a provider nothing is produced, as before. */
+    if ((v->compat_enabled & GENESIS_COMPAT_HUD) == 0U || v->plan_video.widescreen == SV_WIDESCREEN_ORIGINAL) return -1;
+    side = sv_layout_extension_side((int)native_w, (int)native_h, v->plan_video.aspect);
+    if (side <= 0) return -1;
+    v->ext.extension_shown = 0U;
+  } else {
+    v->ext.extension_shown = v->plan_video.widescreen != SV_WIDESCREEN_ORIGINAL;
+  }
   *side_out = (unsigned)side;
   return 0;
 }
