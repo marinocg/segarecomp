@@ -330,7 +330,7 @@ static int sdl_extension_plan(void *ctx, unsigned native_w, unsigned native_h, u
     /* ADR 0315: an exact aspect that needs no extension (4:3) plans nothing, and the producer then returns before it serves any render contribution, so a verified provider's indicator layer would vanish at exactly
      * 4:3 although it is shown in Original. As in Original (where a verified HUD also makes the producer run on the legacy plan) such a provider is served on the legacy side and the extension is marked not shown:
      * its contributions are presented, nothing extended is. Without a provider nothing is produced, as before. */
-    if ((v->compat_enabled & GENESIS_COMPAT_HUD) == 0U || v->plan_video.widescreen == SV_WIDESCREEN_ORIGINAL) return -1;
+    if ((v->compat_enabled & GENESIS_COMPAT_HUD) == 0U) return -1;   /* also in Original with an exact aspect retained (a zero plan must not drop the provider there either) */
     side = sv_layout_extension_side((int)native_w, (int)native_h, v->plan_video.aspect);
     if (side <= 0) return -1;
     v->ext.extension_shown = 0U;

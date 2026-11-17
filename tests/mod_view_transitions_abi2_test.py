@@ -121,9 +121,10 @@ def main():
         # widen 16:9 -> 32:9 at 40, narrow to 16:9 at 80, Original at 120, back to 32:9 at 160, 4:3 (nothing planned) at 200, 21:9 at 240
         # the indicator layer through the real presenter (the host's timed notices are cleared before the final frame is captured)
         from viewer_mod_support import read_bmp
-        for label, sched in (("32:9", "5:32:9"), ("Original", "5:orig"), ("exact 4:3", "5:4:3")):
+        # (label, starting configured ratio, scripted changes): Original after exact 4:3 retains the configured exact aspect, which plans nothing: the provider must still be served
+        for label, ratio0, sched in (("32:9", "16:9", "5:32:9"), ("Original", "16:9", "5:orig"), ("exact 4:3", "16:9", "5:4:3"), ("Original after exact 4:3", "16:9", "5:4:3,10:orig"), ("Original with the 4:3 ratio configured", "4:3", "5:orig")):
             cfg = tmp / "ind.cfg"
-            cfg.write_text("video.widescreen=enhanced_gameplay\nvideo.widescreen_side_style=raw\nvideo.scale=1\nvideo.aspect=0\nvideo.widescreen_ratio=16:9\n")
+            cfg.write_text(f"video.widescreen=enhanced_gameplay\nvideo.widescreen_side_style=raw\nvideo.scale=1\nvideo.aspect=0\nvideo.widescreen_ratio={ratio0}\n")
             run, lines, frame, ram = h.play(indicator, "ind-" + label.replace(" ", ""), "0 -\n", extra={"SEGARECOMP_VIEWER_SETTINGS": str(cfg), "SEGARECOMP_VIEWER_TEST_VIDEO_AT": sched, "SEGARECOMP_VIEWER_FINAL_FRAME_NO_NOTICES": "1"}, budget=20_000_000)
             bmp = read_bmp(frame)
             hits = [(x, y) for y, row in enumerate(bmp) for x, px in enumerate(row) if tuple(px[:3]) == (255, 0, 255)]
