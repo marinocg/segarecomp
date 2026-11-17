@@ -170,7 +170,7 @@ void rejection_rules() {
       {"empty clip", GENESIS_VSPRITE_REJ_CLIP, 0, 1, [](GenesisVirtualSpriteSet *s) { s->sprites[0].has_clip = 1; s->sprites[0].clip_w = 0; s->sprites[0].clip_h = 4; }},
       {"clip beyond the picture", GENESIS_VSPRITE_REJ_CLIP, 1, 1, [](GenesisVirtualSpriteSet *s) { s->sprites[1].has_clip = 1; s->sprites[1].clip_x = 300; s->sprites[1].clip_w = 21; s->sprites[1].clip_h = 1; }},
       {"negative clip origin", GENESIS_VSPRITE_REJ_CLIP, 0, 1, [](GenesisVirtualSpriteSet *s) { s->sprites[0].has_clip = 1; s->sprites[0].clip_x = -1; s->sprites[0].clip_w = 4; s->sprites[0].clip_h = 4; }},
-      {"reserved byte", GENESIS_VSPRITE_REJ_RESERVED, 1, 1, [](GenesisVirtualSpriteSet *s) { s->sprites[1].reserved = 1; }},
+      {"undefined flag bit", GENESIS_VSPRITE_REJ_RESERVED, 1, 1, [](GenesisVirtualSpriteSet *s) { s->sprites[1].flags = 0x80; }},
       {"flip not 0/1", GENESIS_VSPRITE_REJ_RESERVED, 0, 1, [](GenesisVirtualSpriteSet *s) { s->sprites[0].h_flip = 2; }},
       {"set reserved bytes", GENESIS_VSPRITE_REJ_RESERVED, 0, 1, [](GenesisVirtualSpriteSet *s) { s->reserved[1] = 1; }},
       {"unknown budget mode", GENESIS_VSPRITE_REJ_BUDGET_MODE, 0, 1, [](GenesisVirtualSpriteSet *s) { s->budget_mode = 2; }},

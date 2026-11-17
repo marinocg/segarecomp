@@ -1,0 +1,25 @@
+# ADR 0313: hardware-piece commands, independent provider contributions and two scenery windows per plane
+
+- Status: accepted (W04). Extends [ADR 0306](0306-virtual-sprite-authoring-transport-and-coverage.md), [ADR 0309](0309-abi-2-authored-scenery-window.md) and [ADR 0312](0312-virtual-sprite-priority-in-extension-columns.md). No game-specific behavior; no ABI break (a reserved byte gains one defined bit, a limit of one grows to two).
+
+## Context
+
+Controlled runs of a real widescreen package (aggregates only) showed three generic gaps:
+
+1. **Duplicated pieces.** A provider that wants a piece of the game's own sprite table to appear beside the picture at *both* extension levels had no way to avoid drawing it twice at Level 3, where the extension producer already draws every hardware sprite across the margins with the original evaluation rules. In three real scenes (20 frames each) the Level 3 output of "kept pieces submitted" and "dropped pieces only" was pixel-identical (0 differing pixels), i.e. the submissions were redundant there, while at Level 2 (no hardware sprite layer in the extension) they completed actors that the dropped-pieces-only submission left as fragments. A duplicate is also not harmless in principle: a virtual command is ordered against priority classes, not against individual hardware sprites, so an `ABOVE_ALL` duplicate of a later sprite covers an earlier hardware sprite that is in front of it, and an `EXTENDED` duplicate reveals a sprite the hardware rules truncated.
+2. **Coupled contributions.** One unanswered scenery cell (`GENESIS_COMPAT_FAULT`) made the adapter withdraw the whole provider contribution of the frame, including the independent HUD, positioned layers and virtual sprites, although the contract documents that fault as failing only the frame's authored-scenery claim.
+3. **One window cannot express a split-scroll frame.** Per frame, a plane's rows can be scrolled differently (a status band or a strip with scroll 0 next to a parallax playfield). Their plane-cell ranges are disjoint; across 17 real scenes the persistent failures were two stages (532 and 1,274 failing frames of about 2,300 and 2,800 on plane B), and in 436 of the 532 and 1,073 of the 1,274 the union of the needed ranges was wider than the 128-column window bound even with the best possible placement (up to 228 columns).
+
+## Decision
+
+1. **`GenesisVirtualSprite::flags`** (the former `reserved` byte; the layout is unchanged). Bit 0 `GENESIS_VSPRITE_FLAG_HARDWARE_PIECE`: the command depicts a piece of the game's own sprite table. The producer tells the compositor (host flag `GENESIS_VSPRITE_HOST_EXT_SPRITES`) whether the frame's extension carries the hardware sprite layer; when it does, such a command is omitted (not drawn, not counted, no budget, no class data needed), otherwise it is drawn as submitted. Every other bit must still be 0 (`REJ_RESERVED`). The decision is made per frame inside the product, so a provider needs no knowledge of the Level and nothing can race.
+2. **Fault independence.** Reason `GENESIS_COMPAT_FAULT` with an accepted frame fails only the authored-scenery claim: `authored` is already 0, rows without an unanswered cell keep their row provenance, the unanswered cells fall back to the generic extension, and the HUD, layers and virtual sprites of that frame are delivered. The failure stays observable (`declined[FAULT]`). Every other reason (stale state, unsupported scene, bad state or scroll, mismatch) and a frame the provider did not accept still deliver nothing.
+3. **Two windows per plane.** `scenery_window` accepts up to two windows per plane per render callback (a third is a range fault). A cell is answered by the first window of its plane that contains it; a frame is served only when each plane has at least one window; each window keeps the existing bounds (1..128 columns, 1..64 rows, at most 4096 words). Overlapping windows are the provider's own words, so overlap needs no arbitration beyond the order.
+
+## Not decided here
+
+The content of a split-scroll band is not world scenery: its cells are VRAM columns the game keeps for that strip, which the generic extension reproduces exactly. A provider that authors those rows takes responsibility for that mapping (the Castle package maps them like the playfield and the measurements above found its authored band margins equal to the generic ones in 6 of 10 sampled frames of one stage). The five frames at each level start in which a provider's vertical scroll read at frame end leads the VDP's are a provider matter and remain generic.
+
+## Tests
+
+`genesis_vsprite_priority_test` (omitted at Level 3, drawn at Level 2, ordering and truncation relations against hardware sprites, no class data needed where omitted), `genesis_vsprite_layers_test` (undefined flag bit rejected), `mod_scenery_abi2_test` (the HUD stays credited while the scenery of a missing plane is not; two windows holding the same cells present the identical frame and coverage; a third window faults), and the provider suites of the consuming package.

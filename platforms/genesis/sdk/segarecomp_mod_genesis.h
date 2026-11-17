@@ -45,7 +45,7 @@ typedef struct SegaGenesisRenderApi {
    * of name-table words in unwrapped plane-cell coordinates: word (c, r) of `words` (row-major, `cols` x `rows`, 1..128 x 1..64, at most 4096 words) is the cell at plane x = (cell_x0 + c) * 8, plane y = (cell_y0 + r) * 8,
    * where the host's producer looks a column outside the picture up at plane x = screen x - hscroll, plane y = line + vscroll (the horizontal/vertical scroll the VDP applies to that line, floor-divided by 8).
    * Words are standard VDP name-table words (priority, palette line, flips, pattern); the host's own VDP code decodes patterns and palettes, so art must already be resident in VRAM. A cell outside the window fails the
-   * frame's authored scenery claim (the host then reports scenery not delivered and presents generically); it never invents a tile. At most one window per plane per render callback (a second is a range fault); the
+   * frame's authored scenery claim (the host then reports scenery not delivered and presents generically); it never invents a tile. At most TWO windows per plane per render callback (a third is a range fault; ADR 0313: a split-scroll band can need cells disjoint from the playfield's): a cell is answered by the first window of its plane that contains it, and a frame is served only when every plane has at least one window; the
    * window is committed with the callback's other output, belongs to exactly that one frame and is never carried to another. `words` is copied; NULL or out-of-bounds arguments are range faults.
    * Replaces the second reserved slot: size and the other slots are unchanged. */
   int (*scenery_window)(uint32_t plane, int32_t cell_x0, int32_t cell_y0, uint32_t cols, uint32_t rows, const uint16_t *words);

@@ -147,7 +147,7 @@ static int hud(void *state, GenesisCompatOverlay *out) {
     else if (strcmp(kase, "bad_layer") == 0) c->layer = 3U;
     else if (strcmp(kase, "bad_position") == 0) c->x = 2000;
     else if (strcmp(kase, "bad_clip") == 0) { c->has_clip = 1U; c->clip_w = 0U; c->clip_h = 4U; }
-    else if (strcmp(kase, "bad_reserved") == 0) c->reserved = 1U;
+    else if (strcmp(kase, "bad_reserved") == 0) c->flags = 0x80U;
     else if (strcmp(kase, "bad_budget") == 0) s->budget_mode = 2U;
     else if (strcmp(kase, "bad_too_many") == 0) s->count = 65U;
   }

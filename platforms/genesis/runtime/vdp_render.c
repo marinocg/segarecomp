@@ -1578,13 +1578,13 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   /* SEG-140-T008: the virtual-sprite set the provider submitted for this frame goes through the adapter's compositor (the F14 compositor: validation as a whole, the VDP's own decoder and priority
    * rules, the original budget accounting), now, while the frame's raster state and VRAM are valid. Zero commands: none of this runs. */
   if (vsprite_submitted) {
-    const unsigned host_flags = (target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U && target->compat_ram_valid ? GENESIS_VSPRITE_HOST_STATE_VERIFIED : 0U;
+    const unsigned host_flags = ((target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U && target->compat_ram_valid ? GENESIS_VSPRITE_HOST_STATE_VERIFIED : 0U) | (sprites ? GENESIS_VSPRITE_HOST_EXT_SPRITES : 0U);
     if (target->vsprite_compose == NULL || target->vsprite_compose(target->vsprite_ctx, target->vsprite_set, host_flags, vram, raster, native, target->pixels, classes_ok ? target->classes : NULL, side, &vsprite_outcome) != 0) {
       memset(&vsprite_outcome, 0, sizeof vsprite_outcome);
       vsprite_outcome.status = (uint8_t)GENESIS_VSPRITE_STATUS_REJECTED;
       vsprite_outcome.reason = (uint8_t)GENESIS_VSPRITE_REJ_ARGUMENTS;
     }
-    vsprite_outcome.state_verified = host_flags != 0U ? 1U : 0U;
+    vsprite_outcome.state_verified = (host_flags & GENESIS_VSPRITE_HOST_STATE_VERIFIED) != 0U ? 1U : 0U;
   }
   memset(out, 0, sizeof(*out));
   out->status = flags == 0U ? GENESIS_EXT_AVAILABLE : GENESIS_EXT_PARTIAL;

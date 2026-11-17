@@ -22,7 +22,7 @@ int genesis_virtual_sprites_validate(const GenesisVirtualSpriteSet *set, unsigne
     const GenesisVirtualSprite *s = &set->sprites[i];
     if (s->provenance != GENESIS_VSPRITE_GAME_STATE_VERIFIED && s->provenance != GENESIS_VSPRITE_MOD_AUTHORED) return vs_fail(diag, GENESIS_VSPRITE_REJ_PROVENANCE, i);
     if (s->provenance == GENESIS_VSPRITE_GAME_STATE_VERIFIED && (host_flags & GENESIS_VSPRITE_HOST_STATE_VERIFIED) == 0U) return vs_fail(diag, GENESIS_VSPRITE_REJ_UNVERIFIED_STATE, i);
-    if (s->reserved != 0U) return vs_fail(diag, GENESIS_VSPRITE_REJ_RESERVED, i);
+    if ((s->flags & ~GENESIS_VSPRITE_FLAGS_DEFINED) != 0U) return vs_fail(diag, GENESIS_VSPRITE_REJ_RESERVED, i);
     if (s->width_cells < 1U || s->width_cells > 4U || s->height_cells < 1U || s->height_cells > 4U) return vs_fail(diag, GENESIS_VSPRITE_REJ_SIZE, i);
     if (s->h_flip > 1U || s->v_flip > 1U || s->has_clip > 1U) return vs_fail(diag, GENESIS_VSPRITE_REJ_RESERVED, i);
     if ((unsigned)s->tile_index + (unsigned)s->width_cells * (unsigned)s->height_cells > tile_limit) return vs_fail(diag, GENESIS_VSPRITE_REJ_TILE_RANGE, i);
@@ -100,7 +100,7 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
           const GenesisVirtualSprite *s = &set->sprites[i];
           int lo = s->x, hi = (int)s->x + (int)s->width_cells * (int)GENESIS_VDP_TILE_WIDTH;
           int cy0 = s->y, cy1 = (int)s->y + (int)s->height_cells * (int)aux->cell_height;
-          if (s->layer == GENESIS_VSPRITE_LAYER_ABOVE_ALL) continue;
+          if (s->layer == GENESIS_VSPRITE_LAYER_ABOVE_ALL || ((s->flags & GENESIS_VSPRITE_FLAG_HARDWARE_PIECE) != 0U && (host_flags & GENESIS_VSPRITE_HOST_EXT_SPRITES) != 0U)) continue;
           if (s->has_clip) {
             if (lo < s->clip_x) lo = s->clip_x;
             if (hi > (int)s->clip_x + (int)s->clip_w) hi = (int)s->clip_x + (int)s->clip_w;
@@ -156,6 +156,7 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
         int x0, x1, cy0, cy1;
         unsigned drawn;
         VsActive *a;
+        if ((s->flags & GENESIS_VSPRITE_FLAG_HARDWARE_PIECE) != 0U && extended && (host_flags & GENESIS_VSPRITE_HOST_EXT_SPRITES) != 0U) continue;   /* ADR 0313: the extension's hardware sprite layer already draws this piece */
         if ((int)row < y0 || (int)row >= y0 + h_px) continue;
         cy0 = s->has_clip ? s->clip_y : 0;
         cy1 = s->has_clip ? (int)s->clip_y + (int)s->clip_h : (int)height;

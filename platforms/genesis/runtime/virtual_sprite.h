@@ -32,6 +32,7 @@ typedef char genesis_vsprite_vram_matches_vdp[(GENESIS_VSPRITE_VRAM_BYTES == GEN
 typedef char genesis_vsprite_cram_matches_vdp[(GENESIS_VSPRITE_CRAM_BYTES == GENESIS_VDP_CRAM_BYTES) ? 1 : -1];
 
 #define GENESIS_VSPRITE_HOST_STATE_VERIFIED 1U /* host flag: the frame's guest snapshot is valid and exactly current */
+#define GENESIS_VSPRITE_HOST_EXT_SPRITES 2U    /* host flag (ADR 0313): the frame's extension carries the hardware sprite layer, so HARDWARE_PIECE commands are omitted from it */
 
 typedef enum GenesisVirtualReason {
   GENESIS_VSPRITE_OK = 0,

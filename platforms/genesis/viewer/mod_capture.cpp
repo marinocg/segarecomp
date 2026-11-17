@@ -98,7 +98,7 @@ struct Mod {
     std::uint32_t cols = 0, rows = 0;
     std::vector<std::uint16_t> words;
   };
-  SceneryWindow staged_scenery[2], visible_scenery[2];
+  SceneryWindow staged_scenery[2][2], visible_scenery[2][2];   // [plane][window]: ADR 0313, up to two windows per plane (the playfield rows and a split-scroll band can need disjoint cell ranges)
   std::uint64_t visible_scenery_frame = 0;   // the guest frame whose render callback committed `visible_scenery`
 #endif
   std::unique_ptr<GenesisModScheduler> scheduler;
@@ -223,12 +223,12 @@ constexpr std::uint32_t kSceneryColsMax = 128U, kSceneryRowsMax = 64U, kSceneryW
 int api_scenery_window(std::uint32_t plane, std::int32_t cell_x0, std::int32_t cell_y0, std::uint32_t cols, std::uint32_t rows, const std::uint16_t *words) {
   if (!in_render()) return refused_phase();
   if (!sega_mod_is_granted(&g.scheduler->host, SEGA_MOD_CAP_SCENERY_WORDS)) { genesis_mod_fault_current("capability"); return SEGA_MOD_E_CAPABILITY; }
-  if (plane > 1U || words == nullptr || cols == 0U || rows == 0U || cols > kSceneryColsMax || rows > kSceneryRowsMax || cols * rows > kSceneryWordsMax || g.staged_scenery[plane].present ||
+  if (plane > 1U || words == nullptr || cols == 0U || rows == 0U || cols > kSceneryColsMax || rows > kSceneryRowsMax || cols * rows > kSceneryWordsMax || (g.staged_scenery[plane][0].present && g.staged_scenery[plane][1].present) ||
       cell_x0 < -(1 << 20) || cell_x0 > (1 << 20) || cell_y0 < -(1 << 20) || cell_y0 > (1 << 20)) {
     genesis_mod_fault_current("range");   // one window per plane per callback, inside the declared bounds
     return SEGA_MOD_E_RANGE;
   }
-  Mod::SceneryWindow &w = g.staged_scenery[plane];
+  Mod::SceneryWindow &w = g.staged_scenery[plane][g.staged_scenery[plane][0].present ? 1U : 0U];   // the first free slot of the plane; a third window was refused above (range fault)
   w.present = true;
   w.x0 = cell_x0;
   w.y0 = cell_y0;
@@ -244,8 +244,8 @@ void wrapped_phase(void *state, const SegaModHost *host) {
   const bool render = host->phase == SEGA_MOD_PHASE_RENDER;
   if (render) {
     g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; g.have_staged_set = false; g.have_visible_set = false;
-    for (Mod::SceneryWindow &w : g.staged_scenery) w = Mod::SceneryWindow{};
-    for (Mod::SceneryWindow &w : g.visible_scenery) w = Mod::SceneryWindow{};   // nothing of an earlier frame survives the start of a render callback
+    for (auto &plane_windows : g.staged_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};
+    for (auto &plane_windows : g.visible_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};   // nothing of an earlier frame survives the start of a render callback
   }
   g.native_phase_entry(state, host);
   if (render && g.scheduler->fault_status == SEGA_MOD_OK && g.scheduler->external_cause == nullptr) {
@@ -256,12 +256,12 @@ void wrapped_phase(void *state, const SegaModHost *host) {
       g.visible_set_digest_valid = g.scheduler->render_copy_valid != 0U;
       g.visible_set_digest = g.visible_set_digest_valid ? fnv1a64(g.scheduler->render_copy, GENESIS_MOD_WORK_RAM_BYTES) : 0U;
     }
-    for (unsigned plane = 0; plane < 2U; ++plane) std::swap(g.visible_scenery[plane], g.staged_scenery[plane]);
+    for (unsigned plane = 0; plane < 2U; ++plane) for (unsigned k = 0; k < 2U; ++k) std::swap(g.visible_scenery[plane][k], g.staged_scenery[plane][k]);
     g.visible_scenery_frame = host->frame;
   }
   if (render) {
     g.staged = luau::Output{}; g.have_staged_set = false;
-    for (Mod::SceneryWindow &w : g.staged_scenery) w = Mod::SceneryWindow{};
+    for (auto &plane_windows : g.staged_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};
   }
 }
 #endif
@@ -411,7 +411,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     // SEG-140-T011: a window belongs to exactly one produced frame. The render callback of guest frame N runs right after frame N ended; the host produces the frame that callback describes when the runtime counts N + 2
     // (the producer sees the work-RAM snapshot taken one onset earlier, as for every route). A window committed for any other frame (a rewind, a load, a skipped callback), or none, is never served.
     const bool current = g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count;
-    p.scenery = current && g.visible_scenery[0].present && g.visible_scenery[1].present;   // the producer asks both planes for every offscreen cell: a frame is served only with a window for each (an empty plane is a window of blank cells)
+    p.scenery = current && g.visible_scenery[0][0].present && g.visible_scenery[1][0].present;   // the producer asks both planes for every offscreen cell: a frame is served only with a window for each (an empty plane is a window of blank cells)
     if (p.scenery) accepted |= GENESIS_COMPAT_SCENERY;
   }
 #endif
@@ -450,13 +450,16 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
 int scenery_word(void *, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
 #ifdef SEGARECOMP_MOD_NATIVE
   if (!p.scenery || plane > 1U || word == nullptr) return 0;
-  const Mod::SceneryWindow &w = g.visible_scenery[plane];
-  if (!w.present) return 0;
   const auto cell = [](long long pixel) { return static_cast<long long>(pixel >= 0 ? pixel / 8 : -((-pixel + 7) / 8)); };   // floor division by 8
-  const long long cx = cell(static_cast<long long>(x) - hscroll) - w.x0, cy = cell(static_cast<long long>(row) + vscroll) - w.y0;
-  if (cx < 0 || cy < 0 || cx >= static_cast<long long>(w.cols) || cy >= static_cast<long long>(w.rows)) return 0;
-  *word = w.words[static_cast<std::size_t>(cy) * w.cols + static_cast<std::size_t>(cx)];
-  return 1;
+  const long long wx = cell(static_cast<long long>(x) - hscroll), wy = cell(static_cast<long long>(row) + vscroll);
+  for (const Mod::SceneryWindow &w : g.visible_scenery[plane]) {   // ADR 0313: the first window of the plane that contains the cell answers it
+    if (!w.present) continue;
+    const long long cx = wx - w.x0, cy = wy - w.y0;
+    if (cx < 0 || cy < 0 || cx >= static_cast<long long>(w.cols) || cy >= static_cast<long long>(w.rows)) continue;
+    *word = w.words[static_cast<std::size_t>(cy) * w.cols + static_cast<std::size_t>(cx)];
+    return 1;
+  }
+  return 0;
 #else
   (void)plane; (void)row; (void)x; (void)hscroll; (void)vscroll; (void)word;
   return 0;
