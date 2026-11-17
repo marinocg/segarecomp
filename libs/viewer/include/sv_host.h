@@ -94,6 +94,8 @@ void sv_host_extension_stats(const SvHost *host, uint32_t *accepted, uint32_t *r
 SvSideTreatment sv_host_side_treatment(const SvHost *host);
 /* Visible side width of the frame on screen in source pixels per side (<= the produced `sv_host_extension_side`), from `video.widescreen_width` and the native geometry. */
 int sv_host_visible_side(const SvHost *host);
+/* ADR 0315: the visible extension columns left and right of the picture (both 0 when none is shown). Equal to sv_host_visible_side on each side for a centred surface; an asymmetric surface is shown whole. */
+void sv_host_visible_columns(const SvHost *host, int *left, int *right);
 /* 1 when this game has a valid identity (widescreen preferences are saved per game); path of its profile file (NULL when none). */
 int sv_host_profile_active(const SvHost *host);
 const char *sv_host_profile_path(const SvHost *host);

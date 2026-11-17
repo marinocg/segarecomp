@@ -1353,6 +1353,9 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   GenesisVdpDisplayGeometry geometry;
   uint8_t work_vram[GENESIS_VDP_VRAM_BYTES];
   unsigned side = 0U, applied = 0U, width, height, groups;
+  unsigned left_cols, right_cols;   /* ADR 0315: the produced columns left and right of the picture; left + right = 2 * side always */
+  int placement_shift = 0, placement_requested = 0;
+  int32_t placement_left = 0;
   size_t pitch, needed;
   uint8_t flags = 0U;
   uint8_t sprite_reason = 0U;
@@ -1438,6 +1441,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
       target->compat->prepare(target->compat_state, &cf, &decision);
       compat_accepted = decision.accepted & cf.requested;
       compat_reason = compat_accepted != 0U ? (uint8_t)GENESIS_COMPAT_OK : decision.reason;
+      if (decision.has_left_px != 0U && compat_reason == (uint8_t)GENESIS_COMPAT_OK) { placement_requested = 1; placement_left = decision.left_px; }   /* a framing request needs an OK verdict, not an accepted component */
       if (compat_accepted != 0U) {   /* a scene name is accepted only as a bounded token; anything else is dropped, never repaired */
         size_t n = 0U;
         while (n <= GENESIS_COMPAT_SCENE_MAX && decision.scene[n] != '\0') ++n;
@@ -1451,6 +1455,14 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         }
       }
     }
+  }
+  /* ADR 0315: a provider may place the picture asymmetrically: `left_px` source columns left of it, the rest of the planned total (2 * side) on the right. The host validates it against the plan it is
+   * using right now; a missing, out-of-range or stale (the provider's request is bound to the plan it saw, checked by the adapter) request is exactly the centred layout, never a reinterpretation. */
+  left_cols = right_cols = side;
+  if (placement_requested && placement_left >= 0 && (unsigned)placement_left <= 2U * side) {
+    left_cols = (unsigned)placement_left;
+    right_cols = 2U * side - left_cols;
+    placement_shift = (int)left_cols - (int)side;
   }
   groups = width / 16U;
   for (unsigned row = 0U; row < height; ++row) {
@@ -1472,10 +1484,10 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     (void)genesis_vdp_backdrop_cram_index(line->registers, &backdrop);
     genesis_vdp_prepare_row_plane(&ctx, line, GENESIS_VDP_PLANE_A, row, &plane_a);
     genesis_vdp_prepare_row_plane(&ctx, line, GENESIS_VDP_PLANE_B, row, &plane_b);
-    if (sprites) (void)genesis_vdp_build_sprite_row(&ctx, line, row, -(int)side, width + 2U * side, sprite_row); /* pre-checked: cannot fail */
+    if (sprites) (void)genesis_vdp_build_sprite_row(&ctx, line, row, -(int)left_cols, width + 2U * side, sprite_row); /* pre-checked: cannot fail */
     if (genesis_ext_vscroll_differs(&plane_a, groups) || genesis_ext_vscroll_differs(&plane_b, groups)) flags |= GENESIS_EXT_FLAG_COLUMN_VSCROLL;
     /* The native centre is copied verbatim from the finished artifact (the host also re-uploads it from the native picture). */
-    if (genesis_vdp_frame_row_rgb888(native, row, dst + (size_t)side * 3U) != 0) {
+    if (genesis_vdp_frame_row_rgb888(native, row, dst + (size_t)left_cols * 3U) != 0) {
       genesis_ext_unavailable(out, GENESIS_EXT_REASON_NATIVE_GEOMETRY);
       return -1;
     }
@@ -1486,8 +1498,8 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
       const int window_edge = genesis_vdp_window_covers(line->registers, &geometry, edge_x, row);
       const unsigned group = left ? 0U : (groups != 0U ? groups - 1U : 0U);
       if (window_edge) { flags |= GENESIS_EXT_FLAG_WINDOW_EDGE; row_window_edge = 1; }
-      for (unsigned i = 0U; i < side; ++i) {
-        const int64_t x = left ? (int64_t)i - (int64_t)side : (int64_t)width + (int64_t)i;
+      for (unsigned i = 0U; i < (left ? left_cols : right_cols); ++i) {
+        const int64_t x = left ? (int64_t)i - (int64_t)left_cols : (int64_t)width + (int64_t)i;
         GenesisVdpCandidatePixel a, b, none;
         GenesisRgb888 color;
         unsigned index;
@@ -1520,18 +1532,18 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
           }
         }
         {
-          const GenesisVdpCandidatePixel *spr = sprites ? &sprite_row[left ? i : (size_t)side + width + i] : &none;
+          const GenesisVdpCandidatePixel *spr = sprites ? &sprite_row[left ? i : (size_t)left_cols + width + i] : &none;
           uint8_t winner_class = (uint8_t)GENESIS_VDP_LAYER_BACKDROP;
           if (genesis_ext_sprite_wins(&a, &b, spr)) ++sprite_pixels;
           index = genesis_vdp_select_cram_index(&a, &b, spr, backdrop, &winner_class);
-          if (classes_row != NULL) classes_row[left ? (size_t)i : (size_t)side + width + i] = winner_class;   /* ADR 0312: the class of the very candidate that gave this pixel its colour */
+          if (classes_row != NULL) classes_row[left ? (size_t)i : (size_t)left_cols + width + i] = winner_class;   /* ADR 0312: the class of the very candidate that gave this pixel its colour */
         }
         if (genesis_vdp_decode_cram_entry(line->cram, index, &color) != 0) {
           genesis_ext_unavailable(out, GENESIS_EXT_REASON_NATIVE_GEOMETRY);
           return -1;
         }
         {
-          uint8_t *px = dst + (left ? (size_t)i : (size_t)side + width + i) * 3U;
+          uint8_t *px = dst + (left ? (size_t)i : (size_t)left_cols + width + i) * 3U;
           px[0] = color.r; px[1] = color.g; px[2] = color.b;
         }
       }
@@ -1585,7 +1597,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
    * rules, the original budget accounting), now, while the frame's raster state and VRAM are valid. Zero commands: none of this runs. */
   if (vsprite_submitted) {
     const unsigned host_flags = ((target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U && target->compat_ram_valid ? GENESIS_VSPRITE_HOST_STATE_VERIFIED : 0U) | (sprites ? GENESIS_VSPRITE_HOST_EXT_SPRITES : 0U);
-    if (target->vsprite_compose == NULL || target->vsprite_compose(target->vsprite_ctx, target->vsprite_set, host_flags, vram, raster, native, target->pixels, classes_ok ? target->classes : NULL, side, &vsprite_outcome) != 0) {
+    if (target->vsprite_compose == NULL || target->vsprite_compose(target->vsprite_ctx, target->vsprite_set, host_flags, vram, raster, native, target->pixels, classes_ok ? target->classes : NULL, side, placement_shift, &vsprite_outcome) != 0) {
       memset(&vsprite_outcome, 0, sizeof vsprite_outcome);
       vsprite_outcome.status = (uint8_t)GENESIS_VSPRITE_STATUS_REJECTED;
       vsprite_outcome.reason = (uint8_t)GENESIS_VSPRITE_REJ_ARGUMENTS;
@@ -1615,6 +1627,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   out->native_w = (uint16_t)width;
   out->native_h = (uint16_t)height;
   out->side = (uint16_t)side;
+  out->shift = (int16_t)placement_shift;   /* ADR 0315: picture column = side + shift; 0 = centred */
   out->pitch = (uint32_t)pitch;
   return 0;
 }

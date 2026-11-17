@@ -107,6 +107,30 @@ static int perf_raster_producer(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], cons
 
 /* End of every guest slice: emulation time of the slice, then the observation (frame boundaries crossed, if any). */
 static void perf_slice_done(GenesisRuntime *runtime) {
+#ifdef SEGARECOMP_VIEWER_FINAL_FRAME_SEAM
+  {   /* Automation seam (tests, ADR 0315), compiled in only by `segarecomp build --test-frame-seam 1`: SEGARECOMP_VIEWER_TEST_VIDEO_AT=<frame>:<N>:<M>|<frame>:orig[,...] changes the widescreen aspect (or returns to Original) through the
+     * real settings path when the guest frame count reaches <frame>; SEGARECOMP_VIEWER_TEST_TRACE=1 prints one line per guest frame with the extension result the producer published (status, side, shift, provider verdict). */
+    static int init, n, done[12], trace; static unsigned long at[12]; static int num[12], den[12];
+    static unsigned long last_traced = (unsigned long)-1;
+    if (!init) { const char *e = getenv("SEGARECOMP_VIEWER_TEST_VIDEO_AT"); init = 1; trace = getenv("SEGARECOMP_VIEWER_TEST_TRACE") != NULL;
+      while (e != NULL && *e != '\0' && n < 12) { unsigned long f; int a1 = 0, b1 = 0, used = 0;
+        if (sscanf(e, "%lu:orig%n", &f, &used) == 1 && used > 0) { at[n] = f; num[n] = 0; den[n] = 0; ++n; e += used; }
+        else if (sscanf(e, "%lu:%d:%d%n", &f, &a1, &b1, &used) >= 3) { at[n] = f; num[n] = a1; den[n] = b1; ++n; e += used; }
+        else break;
+        if (*e == ',') ++e; } }
+    for (int k = 0; k < n; ++k)
+      if (!done[k] && g_sdl != NULL && (unsigned long)runtime->virtual_frame_count >= at[k]) {
+        SvHost *h = genesis_sdl3_viewer_sv_host(g_sdl);
+        if (h != NULL) { SvSettings st = *sv_host_settings(h); if (num[k] == 0) st.video.widescreen = SV_WIDESCREEN_ORIGINAL; else { st.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY; st.video.widescreen_ratio.num = num[k]; st.video.widescreen_ratio.den = den[k]; } sv_host_apply_settings(h, &st); }
+        done[k] = 1;
+      }
+    if (trace && runtime->live_raster != NULL && runtime->live_raster->extension != NULL && (unsigned long)runtime->virtual_frame_count != last_traced) {
+      const GenesisExtensionResult *r = &runtime->live_raster->extension->result;
+      last_traced = (unsigned long)runtime->virtual_frame_count;
+      fprintf(stderr, "VIEWER_TEST_TRACE {\"f\":%lu,\"status\":%u,\"side\":%u,\"shift\":%d,\"acc\":%u,\"reason\":%u,\"auth\":%u}\n", last_traced, (unsigned)r->status, (unsigned)r->side, (int)r->shift, (unsigned)r->compat_accepted, (unsigned)r->compat_reason, (unsigned)r->authored);
+    }
+  }
+#endif
   if (!g_perf.active) { g_perf.observing = 0; return; }
   if (g_slice_t0 != 0U) sv_perf_span_end(&g_perf, SV_SPAN_EMULATION, g_slice_t0);
   g_slice_t0 = 0U;
@@ -400,6 +424,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   {   /* Automation seam (tests, SEG-137-T007), compiled in only by `segarecomp build --test-frame-seam 1`: SEGARECOMP_VIEWER_FINAL_FRAME=<file.bmp> saves the last presented frame exactly as composed for the window (picture, HUD overlay, no menus). */
     const char *dump = getenv("SEGARECOMP_VIEWER_FINAL_FRAME");
     if (dump != NULL && *dump != '\0') {
+      if (getenv("SEGARECOMP_VIEWER_FINAL_FRAME_NO_NOTICES") != NULL) sv_host_toast(genesis_sdl3_viewer_sv_host(sdl), "");   /* opt-in (ADR 0315): a test that judges a presented layer excludes the host's timed notices */
       SDL_Surface *shot = sv_host_capture_output(genesis_sdl3_viewer_sv_host(sdl));
       if (shot != NULL && SDL_SaveBMP(shot, dump)) fprintf(stderr, "VIEWER_FINAL_FRAME {\"width\":%d,\"height\":%d}\n", shot->w, shot->h);
       else fprintf(stderr, "VIEWER_FINAL_FRAME {\"error\":true}\n");

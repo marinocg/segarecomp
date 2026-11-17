@@ -81,7 +81,8 @@ typedef struct GenesisExtensionResult {
   uint8_t flags;       /* GENESIS_EXT_FLAG_* (PARTIAL) */
   uint8_t mode;        /* GenesisExtensionMode actually produced (AVAILABLE/PARTIAL only): the identity of the frame's content */
   uint16_t native_w, native_h; /* the native picture the surface was built around */
-  uint16_t side;       /* extension width in source pixels on EACH side; surface width = native_w + 2 * side */
+  uint16_t side;       /* planned extension width in source pixels on EACH side; surface width = native_w + 2 * side, always */
+  int16_t shift;       /* ADR 0315: the native picture starts at surface column `side + shift`: left columns = side + shift, right columns = side - shift (0 = centred; -side = nothing on the left, +side = nothing on the right) */
   uint8_t sprite_reason; /* a Level 3 request served as Level 2: GENESIS_EXT_REASON_SPRITE_STATE; else 0 */
   uint8_t reserved;
   uint32_t pitch;      /* bytes per surface row */
@@ -115,6 +116,7 @@ typedef int (*GenesisExtensionProducerFunction)(const uint8_t vram[GENESIS_VDP_V
 
 typedef struct GenesisFrameExtension {
   /* Adapter-owned inputs, changed only between guest slices (the runtime reads `request` once per publication). */
+  uint8_t extension_shown;          /* ADR 0315, adapter-set once per slice with `request`: 1 = the produced extension will be PRESENTED (0 in Original, where a verified-HUD provider still makes the producer run); what a provider's `view_margin` reports is gated by it */
   uint8_t request;                  /* GenesisExtensionMode: 0 = no work; 1 = Level 2 scenery; 2 = Level 3 (scenery + sprites) for the next completed frame */
   GenesisExtensionProducerFunction producer; /* normally genesis_vdp_produce_extension */
   /* Extension width per side for a native size (the adapter calls its layout math); returns nonzero for "no extension". */
@@ -146,7 +148,7 @@ typedef struct GenesisFrameExtension {
    * not part of the runtime library). Zero commands: neither runs. */
   GenesisVirtualSpriteSet *vsprite_set;
   int (*vsprite_compose)(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
-                         const GenesisFrameArtifact *native, const uint8_t *surface, const uint8_t *classes, unsigned side, GenesisVirtualSpriteOutcome *out);   /* surface: the produced extension, (native width + 2 * side) x height RGB24; classes: the winner class of each of its pixels for THIS frame, or NULL (ADR 0312) */
+                         const GenesisFrameArtifact *native, const uint8_t *surface, const uint8_t *classes, unsigned side, int shift, GenesisVirtualSpriteOutcome *out);   /* surface: the produced extension, (native width + 2 * side) x height RGB24; classes: the winner class of each of its pixels for THIS frame, or NULL (ADR 0312) */
   void *vsprite_ctx;
   /* Runtime-written. */
   GenesisExtensionResult result;    /* the latest publication's result */

@@ -144,6 +144,10 @@ build list changes).
 | Host visible side / presentation | `sv_geom_resolve_visible`; `sv_layout_extended_dest` unchanged | `sv_aspect_matrix_test` (4 presets + one custom ratio x 3 pictures x 4 windows, fit; integer scale in 1920x1080) |
 | Legacy settings | production and visible side unchanged | fixture hash of 352 values recorded from the unmodified functions at `ce49e73` |
 
+## 6b. Asymmetric placement inside the planned total (ADR 0315)
+
+The planner is unchanged: one total of `2 * side` extra source pixels per aspect. A surface may place the picture anywhere inside it (`shift`, |shift| <= side; zero = centred, every legacy caller): `left = side + shift` columns are produced left of the picture, `2 * side - left` right of it, by the same producer loops (never a larger symmetric surface cropped). Produced columns and visible columns are different things: the host shows `vl` / `vr` visible columns (`sv_host_visible_columns`); a centred surface keeps the historical visible-side rule (a narrower aspect crops it symmetrically), an asymmetric one is shown whole under a plan at least as wide as the one it was produced for and is otherwise (a narrower plan) shown as the native picture, never as a crop. Side fill, overlays, hardware-piece omission and the virtual-sprite compositor take the two visible widths; checked arithmetic, `SV_GEOM_MAX_SIDE` and the rejection of unsupported sizes are those of the symmetric path.
+
 ## 7. Out of scope (recorded, not hidden)
 
 - No menu/launcher control for the exact ratio (A6); it is a settings-file value in this delivery.

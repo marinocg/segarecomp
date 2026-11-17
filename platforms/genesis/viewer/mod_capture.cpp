@@ -99,7 +99,10 @@ struct Mod {
     std::vector<std::uint16_t> words;
   };
   SceneryWindow staged_scenery[2][2], visible_scenery[2][2];   // [plane][window]: ADR 0313, up to two windows per plane (the playfield rows and a split-scroll band can need disjoint cell ranges)
-  std::uint64_t visible_scenery_frame = 0;   // the guest frame whose render callback committed `visible_scenery`
+  std::uint64_t visible_scenery_frame = 0;   // the guest frame whose render callback committed `visible_scenery` (and the ADR 0315 placement below: they are committed together)
+  // ADR 0315: the frame-bound asymmetric placement. `margin` is the per-side margin the provider saw when it chose `left_px`; -1 = none declared.
+  std::int64_t staged_left_px = -1, visible_left_px = -1;
+  std::uint32_t staged_left_margin = 0, visible_left_margin = 0;
 #endif
   std::unique_ptr<GenesisModScheduler> scheduler;
   GenesisSnapshotModState snapshot{};
@@ -237,7 +240,28 @@ int api_scenery_window(std::uint32_t plane, std::int32_t cell_x0, std::int32_t c
   w.words.assign(words, words + static_cast<std::size_t>(cols) * rows);
   return SEGA_MOD_OK;
 }
-SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr}};
+// ADR 0315: the per-side margin of the host's most recently PUBLISHED extension result, read from the runtime's own publication (never cached): zero for Original, 4:3, a failed production or before the first one,
+// because the runtime publishes a result (status NONE / UNAVAILABLE, side 0) for every frame, including the ones that return before prepare().
+std::uint32_t current_margin() {
+  if (g.scheduler == nullptr || g.scheduler->runtime == nullptr || g.scheduler->runtime->live_raster == nullptr || g.scheduler->runtime->live_raster->extension == nullptr) return 0U;
+  const GenesisExtensionResult &r = g.scheduler->runtime->live_raster->extension->result;
+  const GenesisFrameExtension *ext = g.scheduler->runtime->live_raster->extension;
+  return ext->extension_shown != 0U && (r.status == GENESIS_EXT_AVAILABLE || r.status == GENESIS_EXT_PARTIAL) ? r.side : 0U;
+}
+int api_view_margin(std::uint32_t *margin_px) {
+  if (!in_render()) return refused_phase();
+  if (margin_px == nullptr) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
+  *margin_px = current_margin();
+  return SEGA_MOD_OK;
+}
+int api_view_left(std::uint32_t left_px, std::uint32_t margin_px) {
+  if (!in_render()) return refused_phase();
+  if (left_px > 2U * 672U || margin_px > 672U) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }   // 672 = SV_EXT_MAX_SIDE; whether it fits the planned total is the host's validation at production
+  g.staged_left_px = static_cast<std::int64_t>(left_px);
+  g.staged_left_margin = margin_px;   // the margin the provider computed for, not the one the host happens to show at the call
+  return SEGA_MOD_OK;
+}
+SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, api_view_margin, api_view_left, {nullptr, nullptr, nullptr, nullptr}};
 
 // The provider's `phase` entry, wrapped: a render callback starts from an empty staging area, and what it staged becomes visible only if the callback finished without a fault (a faulted callback leaves nothing).
 void wrapped_phase(void *state, const SegaModHost *host) {
@@ -246,6 +270,7 @@ void wrapped_phase(void *state, const SegaModHost *host) {
     g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; g.have_staged_set = false; g.have_visible_set = false;
     for (auto &plane_windows : g.staged_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};
     for (auto &plane_windows : g.visible_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};   // nothing of an earlier frame survives the start of a render callback
+    g.staged_left_px = g.visible_left_px = -1;
   }
   g.native_phase_entry(state, host);
   if (render && g.scheduler->fault_status == SEGA_MOD_OK && g.scheduler->external_cause == nullptr) {
@@ -258,8 +283,11 @@ void wrapped_phase(void *state, const SegaModHost *host) {
     }
     for (unsigned plane = 0; plane < 2U; ++plane) for (unsigned k = 0; k < 2U; ++k) std::swap(g.visible_scenery[plane][k], g.staged_scenery[plane][k]);
     g.visible_scenery_frame = host->frame;
+    g.visible_left_px = g.staged_left_px;
+    g.visible_left_margin = g.staged_left_margin;
   }
   if (render) {
+    g.staged_left_px = -1;
     g.staged = luau::Output{}; g.have_staged_set = false;
     for (auto &plane_windows : g.staged_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};
   }
@@ -390,7 +418,7 @@ struct Presented {
   luau::RasterizedLayers layers;
   luau::SpriteSubmission sprites;   // SEG-140-T008: the virtual sprites committed by the last successful render callback
   const GenesisVirtualSpriteSet *set = nullptr;   // SEG-140-T010: the native route's committed set (owned by the adapter, valid until the next render callback)
-  bool fixed = false, have = false, have_sprites = false, have_set = false, scenery = false;
+  bool fixed = false, have = false, have_sprites = false, have_set = false, scenery = false, left_ok = false;
 } p;
 
 void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out) {
@@ -400,6 +428,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   p.have_sprites = false;
   p.have_set = false;
   p.scenery = false;
+  p.left_ok = false;
   if ((frame->requested & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY)) == 0) return;
   if (!g.attached || g.scheduler->fault.faulted != 0U || g.scheduler->disabled != 0U) {   // a faulted mod presents nothing; the guest and the picture go on
     out->reason = GENESIS_COMPAT_FAULT;
@@ -407,12 +436,19 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   }
   unsigned accepted = 0;
 #ifdef SEGARECOMP_MOD_NATIVE
+  // SEG-140-T011: a window belongs to exactly one produced frame. The render callback of guest frame N runs right after frame N ended; the host produces the frame that callback describes when the runtime counts N + 2
+  // (the producer sees the work-RAM snapshot taken one onset earlier, as for every route). A window committed for any other frame (a rewind, a load, a skipped callback), or none, is never served.
+  const bool current = g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count;
+  // ADR 0315: framing is a render-API feature of its own, independent of scenery: a provider with generic scenery can request a placement without claiming authored scenery. It is served only for the frame it was
+  // declared for (the same epoch), only when it was computed for the margin this frame is produced with, and only inside the planned total; anything else is the centred layout.
+  const bool declared = current && g.visible_left_px >= 0;
+  p.left_ok = declared && frame->side > 0U && g.visible_left_margin == frame->side && g.visible_left_px <= 2 * static_cast<std::int64_t>(frame->side);
   if ((frame->requested & GENESIS_COMPAT_SCENERY) != 0U) {
-    // SEG-140-T011: a window belongs to exactly one produced frame. The render callback of guest frame N runs right after frame N ended; the host produces the frame that callback describes when the runtime counts N + 2
-    // (the producer sees the work-RAM snapshot taken one onset earlier, as for every route). A window committed for any other frame (a rewind, a load, a skipped callback), or none, is never served.
-    const bool current = g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count;
     p.scenery = current && (g.visible_scenery[0][0].present || g.visible_scenery[1][0].present);   // ADR 0314: a frame is served when at least one plane has a window (an empty plane is a window of blank cells); a plane without one is left to the generic extension
     if (p.scenery) accepted |= GENESIS_COMPAT_SCENERY;
+    // The windows of a callback that declared a placement were built for THAT view: when the placement is not valid for this frame's geometry they are not served either (they would answer the wrong
+    // cells), so the scenery falls back to the generic extension. The HUD and sprite contributions are independent of the view and stay accepted. A provider that declared no placement is untouched.
+    if (declared && !p.left_ok && p.scenery) { p.scenery = false; accepted &= ~static_cast<unsigned>(GENESIS_COMPAT_SCENERY); }
   }
 #endif
   if ((frame->requested & GENESIS_COMPAT_HUD) != 0U) {
@@ -442,6 +478,9 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     }
   }
   out->accepted = accepted;
+#ifdef SEGARECOMP_MOD_NATIVE
+  if (p.left_ok) { out->left_px = static_cast<std::int32_t>(g.visible_left_px); out->has_left_px = 1U; }   // with the verdict OK even when no component is accepted (ADR 0315)
+#endif
   if (accepted == 0U) return;
   const std::string &scene = *render_view().scene;
   if (!scene.empty() && scene.size() <= GENESIS_COMPAT_SCENE_MAX) std::memcpy(out->scene, scene.c_str(), scene.size() + 1U);

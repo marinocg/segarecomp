@@ -133,7 +133,7 @@ def main():
             cfg.write_text(f"video.widescreen=extended_backgrounds\nvideo.widescreen_side_style=raw\nvideo.scale=1\nvideo.aspect=0\nvideo.widescreen_ratio={ratio}\n")
             rep = tmp / (name + ".coverage.json")
             rep.unlink(missing_ok=True)
-            e = {"SEGARECOMP_COVERAGE_REPORT": str(rep), "SEGARECOMP_VIEWER_SETTINGS": str(cfg)}
+            e = {"SEGARECOMP_COVERAGE_REPORT": str(rep), "SEGARECOMP_VIEWER_SETTINGS": str(cfg), "SEGARECOMP_VIEWER_FINAL_FRAME_NO_NOTICES": "1"}   # the picture is judged, not the host's timed notice (at exact 4:3 the provider is now served as in Original, so the notice about a sprite beside the picture can appear)
             e.update(extra or {})
             run, lines, frame, ram = h.play(program, name, pad, save=save, identity=identity, rom_sha=image_sha, extra=e)
             check(lines.get("VIEWER_SUMMARY", [{}])[0].get("outcome") == "guest_stop", f"{name}: runs to its own guest stop: {run.stderr[-200:]}")

@@ -61,6 +61,7 @@ struct SvHost {
   SDL_Renderer *renderer;
   SDL_Texture *frame_tex;      /* RGB24 streaming picture */
   int tex_w, tex_h;
+  int ext_shift;               /* ADR 0315: the picture starts at texture column ext_side + ext_shift (0 = centred) */
   int ext_side;                /* SEG-118: the frame texture holds an extended picture (native + ext_side px each side); 0 = the original picture */
   uint32_t ext_accepted, ext_rejected, tex_creations; /* saturating, bounded diagnostics */
   SvCovAccount cov;            /* SEG-139-T004: the package's geometry declaration and the per-scene, per-component accounting */

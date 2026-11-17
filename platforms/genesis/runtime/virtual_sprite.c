@@ -67,7 +67,7 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
   GenesisVirtualSpriteReport local;
   GenesisVirtualSpriteReport *rep = report != NULL ? report : &local;
   GenesisVirtualSpriteDiag diag;
-  unsigned width, height, side = 0U, visible = 0U;
+  unsigned width, height, side = 0U, visible = 0U, left = 0U, vl = 0U, vr = 0U;   /* ADR 0315: left = the picture's column in the surface; vl / vr = the visible columns left / right of it */
   int compose = 0, extended = 0;
   memset(rep, 0, sizeof(*rep));
   if (native == NULL || aux == NULL || rgb_out == NULL || vram == NULL) return 1;
@@ -77,11 +77,16 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
     side = surface->side;
     visible = surface->visible < side ? surface->visible : side;
     if (surface->rgb == NULL || side > GENESIS_EXT_MAX_SIDE) return 1;
+    if (surface->shift < -(int)side || surface->shift > (int)side) return 1;
+    left = (unsigned)((int)side + surface->shift);
+    if (surface->shift != 0 && visible != 0U && visible != side) return 1;   /* an asymmetric surface is composed whole or not at all: a partial crop would reinterpret columns the producer did not make for that view */
+    if (surface->shift == 0) { vl = vr = visible; }
+    else if (visible != 0U) { vl = left; vr = 2U * side - left; }
   }
   if (width == 0U || width > GENESIS_FRAME_MAX_WIDTH || height == 0U || height > GENESIS_FRAME_MAX_HEIGHT || aux->width != width || aux->height != height ||
       rgb_capacity < (size_t)(width + 2U * side) * height * 3U)
     return 1;
-  extended = set != NULL && set->space == GENESIS_VSPRITE_SPACE_PRESENTATION && visible > 0U;
+  extended = set != NULL && set->space == GENESIS_VSPRITE_SPACE_PRESENTATION && (vl > 0U || vr > 0U);
   rep->sprite_limit = aux->sprite_limit;
   rep->cell_budget = aux->cell_budget;
   rep->rows = (uint16_t)height;
@@ -107,16 +112,16 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
             if (cy0 < s->clip_y) cy0 = s->clip_y;
             if (cy1 > (int)s->clip_y + (int)s->clip_h) cy1 = (int)s->clip_y + (int)s->clip_h;
           }
-          if (lo < -(int)visible) lo = -(int)visible;
-          if (hi > (int)width + (int)visible) hi = (int)width + (int)visible;
+          if (lo < -(int)vl) lo = -(int)vl;
+          if (hi > (int)width + (int)vr) hi = (int)width + (int)vr;
           if (cy0 < 0) cy0 = 0;
           if (cy1 > (int)height) cy1 = (int)height;
           if (lo < hi && cy0 < cy1 && (lo < 0 || hi > (int)width) && classes_ok < 0) {
             classes_ok = surface->layer != NULL;
             for (unsigned r = 0U; classes_ok && r < height; ++r) {   /* inconsistent data is as unusable as none: every visible extension pixel must hold a class */
               const uint8_t *lrow = surface->layer + (size_t)r * (width + 2U * side);
-              for (unsigned k = 0U; k < visible; ++k)
-                if (lrow[side - 1U - k] > GENESIS_VDP_LAYER_HIGH || lrow[side + width + k] > GENESIS_VDP_LAYER_HIGH) { classes_ok = 0; break; }
+              for (unsigned k = 0U; k < vl; ++k) if (lrow[left - 1U - k] > GENESIS_VDP_LAYER_HIGH) { classes_ok = 0; break; }
+              for (unsigned k = 0U; classes_ok && k < vr; ++k) if (lrow[left + width + k] > GENESIS_VDP_LAYER_HIGH) { classes_ok = 0; break; }
             }
           }
           if (classes_ok == 0 && lo < hi && cy0 < cy1 && (lo < 0 || hi > (int)width)) {
@@ -145,7 +150,7 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
     unsigned sprite_demand = aux->row_hw_sprites[row];
     const uint8_t *row_cram;
     if (side > 0U) memcpy(out, surface->rgb + (size_t)row * (width + 2U * side) * 3U, (size_t)(width + 2U * side) * 3U);   /* the produced columns are the base of the extension */
-    if (genesis_vdp_frame_row_rgb888(native, row, out + (size_t)side * 3U) != 0) return 1;   /* the centre is always the native picture itself */
+    if (genesis_vdp_frame_row_rgb888(native, row, out + (size_t)left * 3U) != 0) return 1;   /* the picture is always the native picture itself */
     row_cram = genesis_vdp_frame_row_cram(native, row);
     if (row_cram == NULL) return 1;
     if (compose) {
@@ -173,10 +178,10 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
           drawn = s->width_cells;
         }
         if (drawn == 0U) continue;
-        x0 = s->has_clip ? s->clip_x : (extended ? -(int)visible : 0);
-        x1 = s->has_clip ? (int)s->clip_x + (int)s->clip_w : (extended ? (int)width + (int)visible : (int)width);
+        x0 = s->has_clip ? s->clip_x : (extended ? -(int)vl : 0);
+        x1 = s->has_clip ? (int)s->clip_x + (int)s->clip_w : (extended ? (int)width + (int)vr : (int)width);
         a = &active[active_count++];
-        a->entry.x = (int16_t)(s->x + (int)side);   /* surface coordinates: the picture starts `side` pixels in */
+        a->entry.x = (int16_t)(s->x + (int)left);   /* surface coordinates: the picture starts `left` pixels in */
         a->entry.y = s->y;
         a->entry.width_cells = s->width_cells;
         a->entry.height_cells = s->height_cells;
@@ -195,10 +200,10 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
         /* only the first `drawn` cells exist on this line (the hardware's own truncation); beyond them nothing is drawn */
         if (x0 < (int)s->x) x0 = s->x;
         if (x1 > (int)s->x + (int)drawn * (int)GENESIS_VDP_TILE_WIDTH) x1 = (int)s->x + (int)drawn * (int)GENESIS_VDP_TILE_WIDTH;
-        if (x0 < (extended ? -(int)visible : 0)) x0 = extended ? -(int)visible : 0;
-        if (x1 > (extended ? (int)width + (int)visible : (int)width)) x1 = extended ? (int)width + (int)visible : (int)width;
-        a->clip_x0 = x0 + (int)side;   /* surface coordinates */
-        a->clip_x1 = x1 + (int)side;
+        if (x0 < (extended ? -(int)vl : 0)) x0 = extended ? -(int)vl : 0;
+        if (x1 > (extended ? (int)width + (int)vr : (int)width)) x1 = extended ? (int)width + (int)vr : (int)width;
+        a->clip_x0 = x0 + (int)left;   /* surface coordinates */
+        a->clip_x1 = x1 + (int)left;
       }
       memset(claimed, 0, width + 2U * side);
       for (int layer = GENESIS_VSPRITE_LAYER_ABOVE_ALL; layer >= GENESIS_VSPRITE_LAYER_BEHIND_PLANES; --layer) {
@@ -206,7 +211,7 @@ int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, uns
           const VsActive *a = &active[i];
           if ((int)a->layer != layer) continue;
           for (int x = a->clip_x0; x < a->clip_x1; ++x) {
-            const int picture_x = x - (int)side;   /* the native picture's own coordinate; an extension column has none */
+            const int picture_x = x - (int)left;   /* the native picture's own coordinate; an extension column has none */
             /* the native picture's own class inside the picture; in an extension column the producer's recorded class of this very pixel (ADR 0312). Without a record only ABOVE_ALL reaches an extension column (rejected above otherwise). */
             const uint8_t native_class = picture_x >= 0 && picture_x < (int)width ? aux->layer[(size_t)row * width + (unsigned)picture_x]
                                          : (side > 0U && surface != NULL && surface->layer != NULL ? surface->layer[(size_t)row * (width + 2U * side) + (unsigned)x] : (uint8_t)GENESIS_VDP_LAYER_BACKDROP);

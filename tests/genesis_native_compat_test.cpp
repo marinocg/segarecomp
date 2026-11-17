@@ -101,6 +101,7 @@ struct Mock {
   int bad_layer_index = -1;        // only this descriptor's image leaves the buffer
   unsigned over_count = 0;         // report this many layers (more than the descriptor array holds)
   bool no_fixed = false;           // a layers-only provider
+  int placement = -1000;           // ADR 0315: -1000 = declares none; otherwise the left_px the provider asks for
 } g_mock;
 std::vector<uint8_t> g_layer_buf(GENESIS_COMPAT_LAYER_BYTES);
 
@@ -113,6 +114,7 @@ void mock_prepare(void *state, const GenesisCompatFrame *f, GenesisCompatDecisio
   m->seen_host = f->host;
   out->accepted = m->accept & f->requested;
   out->reason = m->reason;
+  if (m->placement != -1000) { out->left_px = m->placement; out->has_left_px = 1; }
 }
 int mock_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
   Mock *m = static_cast<Mock *>(state);
@@ -122,7 +124,7 @@ int mock_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int
   if (m->word_mode == 4 && plane == 1) return 3;
   if (m->word_mode == 5) return GENESIS_COMPAT_WORD_GENERIC;                  // both planes generic: no authored word at all
   if (m->word_mode == 6 && plane == 0) return GENESIS_COMPAT_WORD_GENERIC;    // plane A generic, plane B answers
-  if (m->word_mode == 8 && row < 100U) return GENESIS_COMPAT_WORD_GENERIC;    // generic on the first 100 rows, answers below                              // an undefined result is an unanswered cell, never "generic"
+  if (m->word_mode == 8 && row < 100U) return GENESIS_COMPAT_WORD_GENERIC;    // generic on the first 100 rows, answers below                               never "generic"
   if (m->word_mode == 2 || m->word_mode == 3 || m->word_mode == 4 || m->word_mode == 6 || m->word_mode == 8) {
     const unsigned px = (unsigned)(x - hscroll) & 511U, py = (unsigned)((int)row + vscroll) & 255U;
     const uint32_t base = plane == 0 ? 0xC000u : 0xE000u;
@@ -179,6 +181,110 @@ void attach(GenesisFrameExtension &ext, bool valid = true) {
   ext.compat_ram_valid = valid ? 1 : 0;
   ext.overlay_rgba = g_overlay.data();
   ext.layer_rgba = nullptr;   // layers are opt-in per adapter (SEG-140-T004)
+}
+
+// ---- ADR 0315: the asymmetric placement of the picture inside the planned total ------------------------------------------------------------
+// The reference is INDEPENDENT of the placement code: the same frame produced symmetrically with a side large enough to hold either margin (no provider), cropped. The asymmetric
+// surface must equal that crop pixel for pixel, class for class, for every placement, with sprites crossing both picture edges.
+void put_sprite(Scene &sc, unsigned index, int x, int y, unsigned cells_w, unsigned cells_h, unsigned tile, bool high, bool last) {
+  uint8_t *e = &sc.vram[0xF800 + index * 8];
+  const unsigned yy = (unsigned)(y + 128) & 0x3FF, xx = (unsigned)(x + 128) & 0x1FF, attr = ((high ? 1u : 0u) << 15) | (tile & 0x7FF);
+  e[0] = (uint8_t)(yy >> 8); e[1] = (uint8_t)yy; e[2] = (uint8_t)(((cells_w - 1) << 2) | (cells_h - 1)); e[3] = last ? 0 : (uint8_t)(index + 1);
+  e[4] = (uint8_t)(attr >> 8); e[5] = (uint8_t)attr; e[6] = (uint8_t)(xx >> 8); e[7] = (uint8_t)xx;
+  std::memcpy(sc.raster->vram_start, sc.vram.data(), GENESIS_VDP_VRAM_BYTES);
+}
+
+void asymmetric_placement() {
+  Scene sc;
+  build_scene(sc, 23);
+  put_sprite(sc, 0, -14, 40, 4, 3, 1, false, false);    // crosses the left picture edge
+  put_sprite(sc, 1, 320 - 18, 90, 4, 4, 2, true, false);   // crosses the right edge, high priority
+  put_sprite(sc, 2, -20, 150, 2, 2, 3, false, false);   // entirely in the left extension
+  put_sprite(sc, 3, 330, 20, 2, 2, 4, true, true);      // entirely in the right extension
+  constexpr unsigned kSide = 39, kBig = 2 * kSide;
+  const size_t cap = (size_t)(320 + 2 * kBig) * 224;
+  std::vector<uint8_t> ref_classes(cap, 0xEE), cls(cap, 0xEE);
+  g_mock = Mock{}; g_mock.vram = sc.vram.data();
+  GenesisFrameExtension refx{}; refx.classes = ref_classes.data(); refx.classes_capacity = cap;
+  const Out ref = produce(sc, refx, kBig);   // symmetric, side 78, no provider
+  check(ref.rc == 0 && ref.res.side == kBig && ref.res.shift == 0, "asymmetric: the symmetric reference is produced");
+  const unsigned W = ref.res.native_w, H = ref.res.native_h;
+  const size_t ref_pitch = ref.res.pitch;
+  const int placements[] = {0, 1, 20, 38, 39, 40, 58, 77, 78};   // all-right, nearly, intermediate, centred +-1, nearly all-left, all-left
+  for (int left : placements) {
+    GenesisFrameExtension ext{}; attach(ext); ext.classes = cls.data(); ext.classes_capacity = cap;
+    g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.accept = GENESIS_COMPAT_HUD; g_mock.placement = left;
+    std::fill(cls.begin(), cls.end(), 0xEE);
+    const Out o = produce(sc, ext, kSide);
+    char what[160]; std::snprintf(what, sizeof what, "asymmetric %d/%d: produced, total unchanged, shift reported", left, 78 - left);
+    check(o.rc == 0 && o.res.side == kSide && o.res.shift == left - (int)kSide && o.res.pitch == (size_t)(W + 2 * kSide) * 3, what);
+    bool pix = true, cl = true;
+    for (unsigned r = 0; r < H; ++r) {
+      pix = pix && std::memcmp(&o.surface[(size_t)r * o.res.pitch], &ref.surface[r * ref_pitch + (size_t)(kBig - (unsigned)left) * 3], (size_t)(W + 2 * kSide) * 3) == 0;
+      cl = cl && std::memcmp(&cls[(size_t)r * (W + 2 * kSide)], &ref_classes[(size_t)r * (W + 2 * kBig) + (kBig - (unsigned)left)], W + 2 * kSide) == 0;
+    }
+    std::snprintf(what, sizeof what, "asymmetric %d/%d: pixels equal the crop of a large symmetric source (sprites crossing both edges)", left, 78 - left);
+    check(pix, what);
+    std::snprintf(what, sizeof what, "asymmetric %d/%d: winner classes equal the crop", left, 78 - left);
+    check(cl, what);
+  }
+  // a side wider than the symmetric bound: side 600 gives a total of 1200 columns, and one side of the view can hold all of it (> 672). No symmetric reference of that width exists (the bound is 672),
+  // so two placements of the same frame are compared: the world columns both show must be identical, sprites included.
+  {
+    constexpr unsigned kWide = 600, kTotal = 2 * kWide;
+    const size_t wcap = (size_t)(320 + kTotal) * 224;
+    std::vector<uint8_t> c0(wcap), c1(wcap);
+    GenesisFrameExtension e0{}, e1{}; attach(e0); attach(e1);
+    e0.classes = c0.data(); e0.classes_capacity = wcap; e1.classes = c1.data(); e1.classes_capacity = wcap;
+    g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.accept = GENESIS_COMPAT_HUD; g_mock.placement = 0;
+    const Out all_right = produce(sc, e0, kWide);
+    g_mock.placement = (int)kTotal;
+    const Out all_left = produce(sc, e1, kWide);
+    check(all_right.rc == 0 && all_left.rc == 0 && all_right.res.shift == -(int)kWide && all_left.res.shift == (int)kWide, "wide: 0/1200 and 1200/0 are produced");
+    bool eq = true;
+    const unsigned W2 = all_right.res.native_w, H2 = all_right.res.native_h;
+    // world x of surface column c: all_right: c; all_left: c - kTotal. Shared world columns: 0 .. W2 + kTotal - 1 - kTotal = W2 - 1, i.e. the picture only, plus nothing else; compare the picture and the generic columns that coincide
+    for (unsigned r = 0; r < H2 && eq; ++r)
+      eq = std::memcmp(&all_right.surface[(size_t)r * all_right.res.pitch], &all_left.surface[(size_t)r * all_left.res.pitch + (size_t)kTotal * 3], (size_t)W2 * 3) == 0 &&
+           std::memcmp(&c0[(size_t)r * (W2 + kTotal)], &c1[(size_t)r * (W2 + kTotal) + kTotal], W2) == 0;
+    check(eq, "wide: the picture columns and their winner classes are identical in both extreme placements");
+    g_mock.placement = 700;
+    GenesisFrameExtension e2{}; attach(e2);
+    const Out mid = produce(sc, e2, kWide);
+    bool mid_eq = true;   // the middle placement (700 / 500) shares world columns -500 .. 819 with all_left?? no: compare against all_right (world 0..): mid column c is world c - 700
+    for (unsigned r = 0; r < H2 && mid_eq; ++r)   // world columns 0 .. W2 + 499 are in both mid (columns 700 ..) and all_right (columns 0 ..)
+      mid_eq = std::memcmp(&mid.surface[((size_t)r * mid.res.pitch / 3 + 700) * 3], &all_right.surface[(size_t)r * all_right.res.pitch], (size_t)(W2 + 499) * 3) == 0;
+    check(mid.rc == 0 && mid.res.shift == 100 && mid_eq, "wide: the 700/500 placement shows the same world columns as 0/1200 where they overlap");
+  }
+  // a placement that is missing, out of range, or declared by a frame the provider did not accept is exactly the centred layout
+  GenesisFrameExtension cx{}; g_mock = Mock{}; g_mock.vram = sc.vram.data();
+  const Out centred = produce(sc, cx, kSide);
+  struct Bad { int left; unsigned accept; const char *what; } bad[] = {
+      {-1, GENESIS_COMPAT_HUD, "negative"}, {79, GENESIS_COMPAT_HUD, "one past the total"}, {1 << 30, GENESIS_COMPAT_HUD, "huge"}, {-1000, GENESIS_COMPAT_HUD, "none declared"}, {20, 0, "frame not accepted"}};
+  for (const Bad &b : bad) {
+    GenesisFrameExtension ext{}; attach(ext);
+    g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.accept = b.accept; g_mock.placement = b.left;
+    const Out o = produce(sc, ext, kSide);
+    char what[160]; std::snprintf(what, sizeof what, "placement %s: the centred layout, byte for byte", b.what);
+    check(o.rc == 0 && o.res.shift == 0 && o.surface == centred.surface, what);
+  }
+  // framing without scenery: a provider whose verdict is OK but that accepts no component (generic scenery, nothing else to deliver) is still framed, and claims nothing
+  {
+    GenesisFrameExtension ext{}; attach(ext);
+    g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.accept = 0; g_mock.reason = GENESIS_COMPAT_OK; g_mock.placement = 20;
+    const Out o = produce(sc, ext, kSide);
+    check(o.rc == 0 && o.res.shift == 20 - (int)kSide && o.res.compat_accepted == 0 && o.res.authored == 0 && o.res.compat_reason == GENESIS_COMPAT_OK, "framing-only: the placement is applied, no component is accepted, nothing is authored");
+    g_mock.reason = GENESIS_COMPAT_UNSUPPORTED_SCENE;
+    GenesisFrameExtension e2{}; attach(e2);
+    const Out o2 = produce(sc, e2, kSide);
+    check(o2.rc == 0 && o2.res.shift == 0, "a declined verdict (not OK) never frames");
+  }
+  // the same placement presented under a different plan is validated against THAT plan, never reused: a placement valid for 39 is out of range for a total of 20
+  {
+    GenesisFrameExtension ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.accept = GENESIS_COMPAT_HUD; g_mock.placement = 60;
+    const Out o = produce(sc, ext, 10);
+    check(o.rc == 0 && o.res.side == 10 && o.res.shift == 0, "a placement larger than the CURRENT plan's total is the centred layout");
+  }
 }
 
 void generic_hook() {
@@ -519,6 +625,7 @@ void sdk_contract() {
 
 int main() {
   generic_hook();
+  asymmetric_placement();
   runtime_snapshot();
   sdk_contract();
   if (failures != 0) { std::printf("genesis_native_compat_test: %d failure(s)\n", failures); return 1; }

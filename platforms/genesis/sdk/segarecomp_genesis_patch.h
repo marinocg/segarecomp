@@ -107,6 +107,10 @@ typedef struct GenesisCompatDecision {
    * belongs to, `[a-z0-9_-]`, at most GENESIS_COMPAT_SCENE_MAX characters, NUL-terminated. The host never infers a scene; it uses this one only to account declared-versus-delivered coverage
    * per scene against the package's geometry declaration. A scene the declaration does not list is accounted as undeclared, never as covered. It grants nothing. */
   char scene[GENESIS_COMPAT_SCENE_MAX + 1];
+  /* ADR 0315 (appended; the host zero-initialises the struct): the provider's request for where the native picture sits in the presented view for THIS frame: `left_px` extension columns left of it, the rest of the
+   * planned total (2 * GenesisCompatFrame::side) on the right. Only read when `has_left_px` is set and the frame was accepted; out of range (< 0 or > 2 * side) is ignored (the centred layout). */
+  int32_t left_px;
+  uint8_t has_left_px;
 } GenesisCompatDecision;
 
 /* SEG-140-T004 (ADR 0303): positioned, layered overlays, additive to ABI 1 (the host zero-initialises GenesisCompatOverlay, so a provider that predates these fields leaves them empty and is presented

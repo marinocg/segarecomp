@@ -57,7 +57,7 @@ static uint8_t g_vsprite_wide_valid;                                            
 /* SEG-140-T008 (ADR 0306): the adapter's compositor, called by the producer for a frame whose provider submitted at least one command, while the frame's raster state and VRAM are valid. It runs the VDP's
  * own auxiliary render (identical artifact, plus per-pixel layer classes and per-row sprite demand) and the F14 compositor, and keeps the composed picture in a static buffer the presenter reads. */
 static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
-                                  const GenesisFrameArtifact *native, const uint8_t *surface, const uint8_t *classes, unsigned side, GenesisVirtualSpriteOutcome *out) {
+                                  const GenesisFrameArtifact *native, const uint8_t *surface, const uint8_t *classes, unsigned side, int shift, GenesisVirtualSpriteOutcome *out) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   GenesisVirtualSpriteReport report;
   GenesisVirtualSpriteSurface target;
@@ -69,7 +69,9 @@ static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set,
   if (surface != NULL && side > 0U && settings->video.widescreen != SV_WIDESCREEN_ORIGINAL) {   /* ADR 0307: only the columns the host will present for the CURRENT aspect are ever drawn */
     const int vis = sv_geom_resolve_visible(&settings->video, (int)width, (int)height, (int)side);
     visible = vis > 0 ? (unsigned)vis : 0U;
+    if (shift != 0 && visible != side) visible = 0U;   /* ADR 0315: an asymmetric surface is presented whole or not at all, and only then are its extension columns composed */
   }
+  target.shift = shift;
   target.rgb = surface;
   target.side = side;
   target.visible = visible;
@@ -77,7 +79,7 @@ static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set,
   if (genesis_vdp_produce_frame_raster_aux(vram, raster, &g_vsprite_scratch, &g_vsprite_aux) != 0) return -1;
   if (side > 0U && surface != NULL) {   /* the composition keeps the extension's layout; the native picture is its centre */
     if (genesis_virtual_sprites_compose_wide(set, host_flags, vram, native, &g_vsprite_aux, &target, g_vsprite_wide, sizeof g_vsprite_wide, &report) != 0) return -1;
-    for (unsigned row = 0U; row < height; ++row) memcpy(&g_vsprite_rgb[(size_t)row * width * 3U], &g_vsprite_wide[((size_t)row * (width + 2U * side) + side) * 3U], (size_t)width * 3U);
+    for (unsigned row = 0U; row < height; ++row) memcpy(&g_vsprite_rgb[(size_t)row * width * 3U], &g_vsprite_wide[((size_t)row * (width + 2U * side) + (size_t)((int)side + shift)) * 3U], (size_t)width * 3U);
     g_vsprite_wide_valid = (uint8_t)(report.pixels_left_verified + report.pixels_left_authored + report.pixels_right_verified + report.pixels_right_authored > 0U);
   } else if (genesis_virtual_sprites_compose(set, host_flags, vram, native, &g_vsprite_aux, g_vsprite_rgb, sizeof g_vsprite_rgb, &report) != 0) {
     return -1;
@@ -158,6 +160,7 @@ static int sdl_closed(void *ctx) {
   if (v->ext_attached) { /* the requested mode is sampled here, between guest slices: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
     v->ext.request = request_of_compat(video->widescreen, v->compat_enabled & GENESIS_COMPAT_HUD);
+    v->ext.extension_shown = video->widescreen != SV_WIDESCREEN_ORIGINAL;   /* ADR 0315: in Original nothing of the extension is presented, whatever the producer makes for the HUD */
     if (v->ext.compat != NULL) v->ext.compat_components = video->widescreen == SV_WIDESCREEN_ORIGINAL ? (v->compat_enabled & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES)) : v->compat_enabled;   /* Original: the HUD (and the virtual sprites drawn in the picture) only */
     v->plan_video = *video;
   }
@@ -246,6 +249,7 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
       surface.height = (int)r->native_h;
       surface.pitch = (int)r->pitch;
       surface.side = (int)r->side;
+      surface.shift = (int)r->shift;   /* ADR 0315: where the picture sits in the planned total; validated again by the host */
       surface.sequence = r->sequence;
       /* the produced frame's own identity, never the saved preference */
       surface.mode = r->mode == GENESIS_EXT_MODE_SPRITES ? SV_WIDESCREEN_ENHANCED_GAMEPLAY
@@ -319,9 +323,20 @@ static void sdl_widescreen_caps(void *ctx, SvWidescreenCaps *out) {
 }
 
 static int sdl_extension_plan(void *ctx, unsigned native_w, unsigned native_h, unsigned *side_out) {
-  const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;
+  GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   int side = 0;
-  if (sv_geom_resolve_production(&v->plan_video, (int)native_w, (int)native_h, &side) != SV_GEOM_OK || side <= 0) return -1; /* a rejected plan produces nothing (never a clamped surface) */
+  if (sv_geom_resolve_production(&v->plan_video, (int)native_w, (int)native_h, &side) != SV_GEOM_OK) return -1; /* a rejected plan produces nothing (never a clamped surface) */
+  if (side <= 0) {
+    /* ADR 0315: an exact aspect that needs no extension (4:3) plans nothing, and the producer then returns before it serves any render contribution, so a verified provider's indicator layer would vanish at exactly
+     * 4:3 although it is shown in Original. As in Original (where a verified HUD also makes the producer run on the legacy plan) such a provider is served on the legacy side and the extension is marked not shown:
+     * its contributions are presented, nothing extended is. Without a provider nothing is produced, as before. */
+    if ((v->compat_enabled & GENESIS_COMPAT_HUD) == 0U) return -1;   /* also in Original with an exact aspect retained (a zero plan must not drop the provider there either) */
+    side = sv_layout_extension_side((int)native_w, (int)native_h, v->plan_video.aspect);
+    if (side <= 0) return -1;
+    v->ext.extension_shown = 0U;
+  } else {
+    v->ext.extension_shown = v->plan_video.widescreen != SV_WIDESCREEN_ORIGINAL;
+  }
   *side_out = (unsigned)side;
   return 0;
 }
@@ -366,6 +381,7 @@ int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameE
   ext->compat_components = components & compat->components;
   v->compat_enabled = ext->compat_components;
   ext->request = request_of_compat(sv_host_settings(v->host)->video.widescreen, ext->compat_components & GENESIS_COMPAT_HUD);
+  ext->extension_shown = sv_host_settings(v->host)->video.widescreen != SV_WIDESCREEN_ORIGINAL;
   ext->compat_ram = g_compat_ram;
   ext->compat_ram_stamp = 0U;
   ext->overlay_rgba = g_compat_overlay;

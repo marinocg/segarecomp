@@ -1533,6 +1533,17 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_scenery_abi2_test APPEND PROPERTY LABELS full)
   set_property(TEST mod_scenery_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_scenery_abi2_test PROPERTY TIMEOUT 1500)
+  # ADR 0315: the asymmetric widescreen viewport from a native ABI 2 provider (view_margin / view_left): placement follows the provider at 16:9, 21:9 and 32:9 against an independent golden; containment and the frame contract.
+  add_test(NAME mod_view_abi2_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_view_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_view_abi2_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_view_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_view_abi2_test PROPERTY TIMEOUT 1500)
+  add_test(NAME mod_view_transitions_abi2_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_view_transitions_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_view_transitions_abi2_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_view_transitions_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_view_transitions_abi2_test PROPERTY TIMEOUT 1500)
   add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
   set_property(TEST genesis_viewer_extension_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST genesis_viewer_extension_sdl_test PROPERTY TIMEOUT 240)
