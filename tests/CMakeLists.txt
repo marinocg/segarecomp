@@ -1522,6 +1522,12 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_f28_integration_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_f28_integration_test PROPERTY TIMEOUT 1500)
   # SEG-140-T011 (ADR 0309, delivery F29): authored offscreen scenery from a native ABI 2 provider (typed scenery_window) at 16:9, 21:9 and 32:9, against an independently constructed golden; containment and stale-window negatives.
+  # A native ABI 2 package that also carries a typed ROM edit, EXECUTED: the edited palette colour and the provider's contribution in one frame, the effective digest against independently constructed bytes.
+  add_test(NAME mod_native_edit_program_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_native_edit_program_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_native_edit_program_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_native_edit_program_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_native_edit_program_test PROPERTY TIMEOUT 1500)
   add_test(NAME mod_scenery_abi2_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_scenery_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
   set_property(TEST mod_scenery_abi2_test APPEND PROPERTY LABELS full)
