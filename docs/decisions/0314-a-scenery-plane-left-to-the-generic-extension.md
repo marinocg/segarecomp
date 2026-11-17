@@ -16,7 +16,15 @@ The contract could not express "serve plane A, leave plane B to the VDP": a fram
 2. Every other rule is unchanged: a cell of a plane that has a window and falls outside all of its windows is an unanswered cell (generic fallback, a failed authored-scenery claim, ADR 0313); any result other than a word or `GENERIC` is an unanswered cell; the generic cells still never invent a tile.
 3. The producer still asks the provider for every off-picture cell of both planes (a provider that wants the generic extension on one plane answers `GENERIC`/has no window), so the generic frame and the partly authored frame differ only where the provider authored.
 
+## Provenance (what earns authored credit)
+
+"Authored" is earned only by words the provider actually supplied; the absence of failures alone is not evidence. The producer counts the cells answered with a word (`answer == 1`):
+
+- **Whole frame** (`GenesisExtensionResult::authored`): at least one answered word, no unanswered cell, and none of the existing degradations (window edge, per-column vertical scroll, no VRAM journal). A frame in which every plane is left to the generic extension earns nothing (it is exactly the generic frame), and neither does a frame whose cells are all unanswered (that is a failure).
+- **Row level** (`authored_rows`, ADR 0310): a row is marked when its off-picture cells include at least one answered word and none unanswered, outside window-edge rows. A row whose cells are all generic by declaration is not marked; a row that mixes an authored plane with a generic one is. The credit therefore measures where the provider's own data is on screen, not where nothing went wrong.
+- A mixed-plane frame (one plane authored, the other generic) stays valid and is credited, because its authored plane is the provider's data.
+
 ## Consequences
 
 - A package whose plane is provably what the generic extension already shows submits nothing for it: no failures from scroll sources it cannot read, no authoring claim beyond what it verified.
-- Tests: `genesis_native_compat_test` (a plane answering `GENERIC` reproduces the generic frame byte for byte, is no failure and keeps the frame authored; an undefined result is a fault), `mod_scenery_abi2_test` (plane B without a window: plane A authored equal to the golden, the frame equal to the two-plane frame, scenery credited, no fault; unanswered cells still keep the HUD).
+- Tests: `genesis_native_compat_test` (a plane answering `GENERIC` reproduces the generic frame byte for byte and is no failure; the provenance matrix: both planes authored, one authored and one generic in either order, both generic earns nothing, every cell unanswered or an undefined value is a failure with no credit, and a row-level mixed frame marks exactly the answered rows), `mod_scenery_abi2_test` (plane B without a window: plane A authored equal to the golden, the frame equal to the two-plane frame, scenery credited, no fault; unanswered cells still keep the HUD).

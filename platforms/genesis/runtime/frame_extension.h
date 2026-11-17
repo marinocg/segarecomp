@@ -89,9 +89,11 @@ typedef struct GenesisExtensionResult {
   /* SEG-124 (ADR 0267): what a verified native compatibility provider contributed to THIS frame. All zero without a provider or when it declined the frame. */
   uint8_t compat_accepted; /* GENESIS_COMPAT_* components served for this frame */
   uint8_t compat_reason;   /* GenesisCompatReason when a provider was attached but declined (or partially failed) the frame */
-  uint8_t authored;        /* 1 = both sides' scenery came from the provider AND nothing else degraded the frame: the only case presented as authored */
+  uint8_t authored;        /* 1 = the provider ANSWERED at least one off-picture cell with a word of its own, no cell was left unanswered (a plane it deliberately left to the generic extension, ADR 0314, answers none and is not a
+                            * failure, but earns no credit), AND nothing else degraded the frame: the only case presented as authored. A frame whose every cell is generic, or unanswered, is never authored */
   uint8_t reserved2;
-  /* Row-level provenance (W04): bit y is set when output row y's off-picture cells ALL came from the provider (no unanswered cell, no window plane on either picture edge in that row) and the frame as a whole
+  /* Row-level provenance (W04): bit y is set when output row y's off-picture cells include at least one word the provider actually supplied, none of them was left unanswered, and no window plane owns either picture
+   * edge in that row (a row whose cells are all generic by the provider's own declaration, ADR 0314, is not marked; a row that mixes an authored plane with a generic one is), and the frame as a whole
    * has no per-column vertical scroll and a VRAM journal. It never replaces `authored`, which stays the strict whole-frame verdict: a frame with some authored rows is still Partial. Zero without a provider. */
   uint16_t authored_row_count;
   uint8_t authored_rows[(GENESIS_FRAME_MAX_HEIGHT + 7U) / 8U];
