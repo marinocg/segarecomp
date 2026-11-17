@@ -1496,20 +1496,22 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         } else {
           const unsigned ga = plane_a.per_column ? group : 0U;
           uint16_t word = 0U;
-          if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && target->compat->scenery_word(target->compat_state, 0U, row, (int)x, (int)plane_a.hscroll, (int)plane_a.vscroll[ga], &word) != 0)
+          const int answer = (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U ? target->compat->scenery_word(target->compat_state, 0U, row, (int)x, (int)plane_a.hscroll, (int)plane_a.vscroll[ga], &word) : 0;
+          if (answer == 1)
             a = genesis_vdp_plane_candidate_from_word(&ctx, &plane_a, x, ga, row, word);
           else {
-            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U) ++compat_faults;
+            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && answer != GENESIS_COMPAT_WORD_GENERIC) ++compat_faults;   /* ADR 0314: a plane left to the generic extension is not a failure */
             a = genesis_vdp_plane_candidate_at(&ctx, &plane_a, x, ga, row);
           }
         }
         {
           const unsigned gb = plane_b.per_column ? group : 0U;
           uint16_t word = 0U;
-          if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && target->compat->scenery_word(target->compat_state, 1U, row, (int)x, (int)plane_b.hscroll, (int)plane_b.vscroll[gb], &word) != 0)
+          const int answer = (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U ? target->compat->scenery_word(target->compat_state, 1U, row, (int)x, (int)plane_b.hscroll, (int)plane_b.vscroll[gb], &word) : 0;
+          if (answer == 1)
             b = genesis_vdp_plane_candidate_from_word(&ctx, &plane_b, x, gb, row, word);
           else {
-            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U) ++compat_faults;
+            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && answer != GENESIS_COMPAT_WORD_GENERIC) ++compat_faults;   /* ADR 0314: a plane left to the generic extension is not a failure */
             b = genesis_vdp_plane_candidate_at(&ctx, &plane_b, x, gb, row);
           }
         }

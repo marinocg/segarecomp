@@ -411,7 +411,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     // SEG-140-T011: a window belongs to exactly one produced frame. The render callback of guest frame N runs right after frame N ended; the host produces the frame that callback describes when the runtime counts N + 2
     // (the producer sees the work-RAM snapshot taken one onset earlier, as for every route). A window committed for any other frame (a rewind, a load, a skipped callback), or none, is never served.
     const bool current = g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count;
-    p.scenery = current && g.visible_scenery[0][0].present && g.visible_scenery[1][0].present;   // the producer asks both planes for every offscreen cell: a frame is served only with a window for each (an empty plane is a window of blank cells)
+    p.scenery = current && (g.visible_scenery[0][0].present || g.visible_scenery[1][0].present);   // ADR 0314: a frame is served when at least one plane has a window (an empty plane is a window of blank cells); a plane without one is left to the generic extension
     if (p.scenery) accepted |= GENESIS_COMPAT_SCENERY;
   }
 #endif
@@ -450,6 +450,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
 int scenery_word(void *, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
 #ifdef SEGARECOMP_MOD_NATIVE
   if (!p.scenery || plane > 1U || word == nullptr) return 0;
+  if (!g.visible_scenery[plane][0].present && !g.visible_scenery[plane][1].present) return GENESIS_COMPAT_WORD_GENERIC;   // ADR 0314: this plane has no window: the VDP-derived extension answers it, not a failure
   const auto cell = [](long long pixel) { return static_cast<long long>(pixel >= 0 ? pixel / 8 : -((-pixel + 7) / 8)); };   // floor division by 8
   const long long wx = cell(static_cast<long long>(x) - hscroll), wy = cell(static_cast<long long>(row) + vscroll);
   for (const Mod::SceneryWindow &w : g.visible_scenery[plane]) {   // ADR 0313: the first window of the plane that contains the cell answers it

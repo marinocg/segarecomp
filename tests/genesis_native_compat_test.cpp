@@ -118,7 +118,9 @@ int mock_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int
   Mock *m = static_cast<Mock *>(state);
   ++m->cells;
   if (m->word_mode == 1) return 0;
-  if (m->word_mode == 2) {
+  if (m->word_mode == 3 && plane == 1) return GENESIS_COMPAT_WORD_GENERIC;   // ADR 0314: plane B is left to the VDP-derived extension
+  if (m->word_mode == 4 && plane == 1) return 3;                              // an undefined result is an unanswered cell, never "generic"
+  if (m->word_mode == 2 || m->word_mode == 3 || m->word_mode == 4) {
     const unsigned px = (unsigned)(x - hscroll) & 511U, py = (unsigned)((int)row + vscroll) & 255U;
     const uint32_t base = plane == 0 ? 0xC000u : 0xE000u;
     const uint32_t a = base + ((py / 8U) * 64U + px / 8U) * 2U;
@@ -214,6 +216,16 @@ void generic_hook() {
     GenesisFrameExtension ext2{}; attach(ext2); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.word_mode = 2;
     const Out same = produce(sc, ext2);
     check(same.rc == 0 && same.surface == base.surface, "a provider returning the VDP's own cells reproduces the generic frame byte for byte");
+  }
+  // ADR 0314: a plane the provider leaves to the VDP-derived extension is not a failure; the other plane is served normally
+  {
+    GenesisFrameExtension ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.word_mode = 3;   // plane A: the VDP's own words; plane B: GENERIC
+    const Out o = produce(sc, ext);
+    check(o.rc == 0 && o.surface == base.surface && o.res.compat_reason == 0 && o.res.authored == 1, "a plane left to the generic extension: no failure, the frame equals the generic one and stays authored");
+    checkf(g_mock.cells == 2u * 2u * side * H, "a plane left to the generic extension: the provider is still asked for both planes", g_mock.cells, 2u * 2u * side * H);
+    GenesisFrameExtension ext2{}; attach(ext2); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.word_mode = 4;   // plane B answers with an undefined result
+    const Out bad = produce(sc, ext2);
+    check(bad.rc == 0 && bad.surface == base.surface && bad.res.compat_reason == GENESIS_COMPAT_FAULT && bad.res.authored == 0, "an undefined answer is an unanswered cell: generic fallback and a failed scenery claim");
   }
   // declined frame: byte-identical to generic, accurate reason, never authored
   {
