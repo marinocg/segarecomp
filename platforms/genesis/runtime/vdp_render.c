@@ -1362,6 +1362,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   char compat_scene[GENESIS_COMPAT_SCENE_MAX + 1] = {0};
   uint8_t compat_reason = 0U;
   uint32_t compat_faults = 0U;
+  uint32_t compat_words = 0U;   /* ADR 0314: cells the provider actually answered with a word (a plane left to the generic extension answers none) */
   uint8_t authored_rows[(GENESIS_FRAME_MAX_HEIGHT + 7U) / 8U] = {0};
   uint16_t authored_row_count = 0U;
   uint16_t compat_overlay_w = 0U, compat_overlay_h = 0U, compat_overlay_fx = 0U, compat_overlay_fy = 0U;
@@ -1460,6 +1461,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     GenesisVdpRowPlane plane_a, plane_b;
     unsigned backdrop = 0U;
     const uint32_t faults_before = compat_faults;
+    const uint32_t words_before = compat_words;
     int row_window_edge = 0;
     if (journaled) {
       while (applied < raster->vram_write_count && (unsigned)raster->vram_writes[applied].line < field_line) {
@@ -1496,20 +1498,24 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         } else {
           const unsigned ga = plane_a.per_column ? group : 0U;
           uint16_t word = 0U;
-          if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && target->compat->scenery_word(target->compat_state, 0U, row, (int)x, (int)plane_a.hscroll, (int)plane_a.vscroll[ga], &word) != 0)
+          const int answer = (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U ? target->compat->scenery_word(target->compat_state, 0U, row, (int)x, (int)plane_a.hscroll, (int)plane_a.vscroll[ga], &word) : 0;
+          if (answer == 1) {
+            ++compat_words;
             a = genesis_vdp_plane_candidate_from_word(&ctx, &plane_a, x, ga, row, word);
-          else {
-            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U) ++compat_faults;
+          } else {
+            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && answer != GENESIS_COMPAT_WORD_GENERIC) ++compat_faults;   /* ADR 0314: a plane left to the generic extension is not a failure */
             a = genesis_vdp_plane_candidate_at(&ctx, &plane_a, x, ga, row);
           }
         }
         {
           const unsigned gb = plane_b.per_column ? group : 0U;
           uint16_t word = 0U;
-          if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && target->compat->scenery_word(target->compat_state, 1U, row, (int)x, (int)plane_b.hscroll, (int)plane_b.vscroll[gb], &word) != 0)
+          const int answer = (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U ? target->compat->scenery_word(target->compat_state, 1U, row, (int)x, (int)plane_b.hscroll, (int)plane_b.vscroll[gb], &word) : 0;
+          if (answer == 1) {
+            ++compat_words;
             b = genesis_vdp_plane_candidate_from_word(&ctx, &plane_b, x, gb, row, word);
-          else {
-            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U) ++compat_faults;
+          } else {
+            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && answer != GENESIS_COMPAT_WORD_GENERIC) ++compat_faults;   /* ADR 0314: a plane left to the generic extension is not a failure */
             b = genesis_vdp_plane_candidate_at(&ctx, &plane_b, x, gb, row);
           }
         }
@@ -1530,7 +1536,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         }
       }
     }
-    if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && compat_faults == faults_before && !row_window_edge && row < GENESIS_FRAME_MAX_HEIGHT) { authored_rows[row >> 3U] |= (uint8_t)(1U << (row & 7U)); ++authored_row_count; }
+    if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && compat_faults == faults_before && compat_words != words_before && !row_window_edge && row < GENESIS_FRAME_MAX_HEIGHT) { authored_rows[row >> 3U] |= (uint8_t)(1U << (row & 7U)); ++authored_row_count; }
   }
   if (sprites) flags |= GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT;
   /* SEG-124: the provider's HUD overlay (a separate layer the host draws after side treatment; it never enters the extension surface). SEG-140-T004: plus its positioned layers. */
@@ -1596,7 +1602,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   memcpy(out->scene, compat_scene, sizeof out->scene);
   out->compat_reason = compat_faults != 0U ? (uint8_t)GENESIS_COMPAT_FAULT : compat_reason;
   /* Authored provenance: scenery came from the provider on every off-screen cell AND nothing degraded the frame. The sprite layer is whatever the game submitted (Level 3 stays Partial). */
-  out->authored = (uint8_t)((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && compat_faults == 0U && (flags & (GENESIS_EXT_FLAG_WINDOW_EDGE | GENESIS_EXT_FLAG_COLUMN_VSCROLL | GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)) == 0U);
+  out->authored = (uint8_t)((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && compat_faults == 0U && compat_words != 0U && (flags & (GENESIS_EXT_FLAG_WINDOW_EDGE | GENESIS_EXT_FLAG_COLUMN_VSCROLL | GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)) == 0U);
   if ((flags & (GENESIS_EXT_FLAG_COLUMN_VSCROLL | GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)) == 0U) { memcpy(out->authored_rows, authored_rows, sizeof out->authored_rows); out->authored_row_count = authored_row_count; }
   out->overlay_w = compat_overlay_w;
   out->overlay_h = compat_overlay_h;

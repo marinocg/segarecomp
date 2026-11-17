@@ -118,7 +118,12 @@ int mock_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int
   Mock *m = static_cast<Mock *>(state);
   ++m->cells;
   if (m->word_mode == 1) return 0;
-  if (m->word_mode == 2) {
+  if (m->word_mode == 3 && plane == 1) return GENESIS_COMPAT_WORD_GENERIC;   // ADR 0314: plane B is left to the VDP-derived extension
+  if (m->word_mode == 4 && plane == 1) return 3;
+  if (m->word_mode == 5) return GENESIS_COMPAT_WORD_GENERIC;                  // both planes generic: no authored word at all
+  if (m->word_mode == 6 && plane == 0) return GENESIS_COMPAT_WORD_GENERIC;    // plane A generic, plane B answers
+  if (m->word_mode == 8 && row < 100U) return GENESIS_COMPAT_WORD_GENERIC;    // generic on the first 100 rows, answers below                              // an undefined result is an unanswered cell, never "generic"
+  if (m->word_mode == 2 || m->word_mode == 3 || m->word_mode == 4 || m->word_mode == 6 || m->word_mode == 8) {
     const unsigned px = (unsigned)(x - hscroll) & 511U, py = (unsigned)((int)row + vscroll) & 255U;
     const uint32_t base = plane == 0 ? 0xC000u : 0xE000u;
     const uint32_t a = base + ((py / 8U) * 64U + px / 8U) * 2U;
@@ -214,6 +219,43 @@ void generic_hook() {
     GenesisFrameExtension ext2{}; attach(ext2); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.word_mode = 2;
     const Out same = produce(sc, ext2);
     check(same.rc == 0 && same.surface == base.surface, "a provider returning the VDP's own cells reproduces the generic frame byte for byte");
+  }
+  // ADR 0314: a plane the provider leaves to the VDP-derived extension is not a failure; the other plane is served normally
+  {
+    GenesisFrameExtension ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.word_mode = 3;   // plane A: the VDP's own words; plane B: GENERIC
+    const Out o = produce(sc, ext);
+    check(o.rc == 0 && o.surface == base.surface && o.res.compat_reason == 0 && o.res.authored == 1, "a plane left to the generic extension: no failure, the frame equals the generic one and stays authored");
+    checkf(g_mock.cells == 2u * 2u * side * H, "a plane left to the generic extension: the provider is still asked for both planes", g_mock.cells, 2u * 2u * side * H);
+    GenesisFrameExtension ext2{}; attach(ext2); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.word_mode = 4;   // plane B answers with an undefined result
+    const Out bad = produce(sc, ext2);
+    check(bad.rc == 0 && bad.surface == base.surface && bad.res.compat_reason == GENESIS_COMPAT_FAULT && bad.res.authored == 0, "an undefined answer is an unanswered cell: generic fallback and a failed scenery claim");
+  }
+  // ADR 0314 provenance: whole-frame `authored` and the row provenance are earned only by words the provider actually supplied, never by the absence of failures
+  {
+    struct Case { int mode; const char *what; bool authored; bool rows_all; bool rows_none; bool fault; bool generic_surface; };
+    const Case cases[] = {
+        {2, "both planes authored (the VDP's own words)", true, true, false, false, true},
+        {3, "plane A authored, plane B generic", true, true, false, false, true},
+        {6, "plane A generic, plane B authored", true, true, false, false, true},
+        {5, "both planes generic: no authored word, no credit", false, false, true, false, true},
+        {1, "every cell unanswered: a failure, no credit", false, false, true, true, true},
+        {4, "plane B answers with an undefined value: a failure, no credit", false, false, true, true, true},
+    };
+    for (const Case &c : cases) {
+      GenesisFrameExtension ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.word_mode = c.mode;
+      const Out o = produce(sc, ext);
+      check(o.rc == 0 && (o.res.authored == 1) == c.authored, c.what);
+      check(c.rows_all ? o.res.authored_row_count == H : (c.rows_none ? o.res.authored_row_count == 0 : true), c.what);
+      check((o.res.compat_reason == GENESIS_COMPAT_FAULT) == c.fault, c.what);
+      check(!c.generic_surface || o.surface == base.surface || c.mode == 2, c.what);
+    }
+    // row level: generic on the first 100 rows, answered below: only the answered rows are authored, and the frame (it holds authored words and no failure) is
+    GenesisFrameExtension ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.word_mode = 8;
+    const Out o = produce(sc, ext);
+    unsigned first_marked = 1000, marked = 0;
+    for (unsigned r = 0; r < H; ++r) if ((o.res.authored_rows[r >> 3] >> (r & 7)) & 1U) { ++marked; if (first_marked == 1000) first_marked = r; }
+    check(o.res.authored == 1 && o.res.authored_row_count == H - 100 && marked == H - 100 && first_marked == 100, "row provenance: generic rows are not authored, answered rows are, a mixed frame stays valid");
+    check(o.surface == base.surface, "row provenance: the words equal the VDP's own, so the frame equals the generic one");
   }
   // declined frame: byte-identical to generic, accurate reason, never authored
   {

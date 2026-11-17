@@ -99,6 +99,7 @@ typedef struct GenesisCompatFrame {
 } GenesisCompatFrame;
 
 #define GENESIS_COMPAT_SCENE_MAX 32
+#define GENESIS_COMPAT_WORD_GENERIC 2 /* ADR 0314: scenery_word result: this plane is left to the VDP-derived generic extension (no authored cell, no failure) */
 typedef struct GenesisCompatDecision {
   unsigned accepted;                    /* GENESIS_COMPAT_* components the provider serves for THIS frame (subset of `requested`; 0 = decline the whole frame) */
   uint8_t reason;                       /* GenesisCompatReason when nothing was accepted */
@@ -149,7 +150,9 @@ typedef struct GenesisNativeCompat {
   /* Validates every input the frame will use; accepts a subset of `frame->requested` (0 = decline the whole frame). Called once per produced frame. */
   void (*prepare)(void *state, const GenesisCompatFrame *frame, GenesisCompatDecision *out);
   /* Plane (GENESIS_COMPAT_PLANE_*) name-table word for the world cell under screen column `x` (outside [0, width)) of output line `row`, given the horizontal/vertical scroll the VDP
-   * applies to that line (plane_x = x - hscroll, plane_y = row + vscroll). Returns 1 with a word (0 = blank cell). Only called for a scenery component accepted by `prepare`. */
+   * applies to that line (plane_x = x - hscroll, plane_y = row + vscroll). Returns 1 with a word (0 = blank cell). Only called for a scenery component accepted by `prepare`.
+   * ADR 0314: returns GENESIS_COMPAT_WORD_GENERIC for a plane the provider deliberately leaves to the VDP-derived extension (the generic wrapped plane): that is not a failure and `word` is not read. Any other
+   * return value is an unanswered cell: the cell falls back to the generic extension and fails the frame's authored-scenery claim. */
   int (*scenery_word)(void *state, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word);
   /* Draws the overlay (RGBA8, tightly packed). Returns 1 when something is drawn. Only called for a HUD component accepted by `prepare`. */
   int (*hud)(void *state, GenesisCompatOverlay *out);
