@@ -124,7 +124,7 @@ def main():
         for label, sched in (("32:9", "5:32:9"), ("Original", "5:orig"), ("exact 4:3", "5:4:3")):
             cfg = tmp / "ind.cfg"
             cfg.write_text("video.widescreen=enhanced_gameplay\nvideo.widescreen_side_style=raw\nvideo.scale=1\nvideo.aspect=0\nvideo.widescreen_ratio=16:9\n")
-            run, lines, frame, ram = h.play(indicator, "ind-" + label.replace(" ", ""), "0 -\n", extra={"SEGARECOMP_VIEWER_SETTINGS": str(cfg), "SEGARECOMP_VIEWER_TEST_VIDEO_AT": sched}, budget=20_000_000)
+            run, lines, frame, ram = h.play(indicator, "ind-" + label.replace(" ", ""), "0 -\n", extra={"SEGARECOMP_VIEWER_SETTINGS": str(cfg), "SEGARECOMP_VIEWER_TEST_VIDEO_AT": sched, "SEGARECOMP_VIEWER_FINAL_FRAME_NO_NOTICES": "1"}, budget=20_000_000)
             bmp = read_bmp(frame)
             hits = [(x, y) for y, row in enumerate(bmp) for x, px in enumerate(row) if tuple(px[:3]) == (255, 0, 255)]
             box = (min(x for x, y in hits), max(x for x, y in hits), min(y for x, y in hits), max(y for x, y in hits)) if hits else None
