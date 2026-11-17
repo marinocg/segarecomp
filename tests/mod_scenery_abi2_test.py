@@ -210,6 +210,23 @@ def main():
         sc = rep["scenes"][0]["components"]["scenery"]
         check([(e["event"], e["status"]) for e in lines.get("VIEWER_STATE", [])] == [("rewind", "ok")] and sc["covered"] < sc["requested"] and lines["MOD_SUMMARY"][0]["faulted"] is False,
               f"a rewind across a pending submission leaves that frame generic and the mod healthy: {sc}")
+        # ---- ADR 0313: the same save / restore / rewind contract with two windows per plane (both are staged, committed and discarded together with the frame they belong to) ----
+        ident2 = identities.get("v-split-windows")
+        if ident2:
+            save2 = tmp / "save2"
+            _, ls, _, _ = play(split_windows, "t2-save", "32:9", "0 R\n12 RK\n13 R\n20 -\n", save=save2, identity=ident2)
+            check(ls["VIEWER_STATE"][0]["status"] == "ok", "two windows: a quick save succeeds with scenery in flight")
+            surf, lines, rep, ram = play(split_windows, "t2-load", "32:9", "0 -\n3 M\n4 -\n", save=save2, identity=ident2)
+            sc = rep["scenes"][0]["components"]["scenery"]
+            cam = int.from_bytes(ram[0x12:0x14], "big")
+            want = golden(side, cam)
+            wrong = sum(1 for y in range(H) for xi in range(W + 2 * side) if want[y][xi] is not None and surf[y][xi] != want[y][xi] and not (xi < 24 and y < 8))
+            check(lines["VIEWER_STATE"][0]["status"] == "ok" and sc["covered"] < sc["requested"] and wrong == 0 and lines["MOD_SUMMARY"][0]["faulted"] is False,
+                  f"two windows: after a restore the pre-load windows are never served, later frames are exact ({wrong} pixels differ, {sc})")
+            surf, lines, rep, ram = play(split_windows, "t2-rewind", "32:9", "0 R\n14 RY\n15 R\n20 -\n", save=tmp / "rewind2", identity=ident2)
+            sc = rep["scenes"][0]["components"]["scenery"]
+            check([(e["event"], e["status"]) for e in lines.get("VIEWER_STATE", [])] == [("rewind", "ok")] and sc["covered"] < sc["requested"] and lines["MOD_SUMMARY"][0]["faulted"] is False,
+                  f"two windows: a rewind across a pending submission leaves that frame generic and the mod healthy: {sc}")
         if h.failures:
             return 1
     print("mod_scenery_abi2_test: ok")
