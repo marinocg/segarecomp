@@ -299,14 +299,34 @@ static void through_host(void) {
     markers = count_marker(o, 0, o->w / 2);
     CHECK(markers == 0, "no extension pixel of the asymmetric surface is presented under a narrower aspect");
     SDL_DestroySurface(o);
-    configure(h, r219, SV_SIDE_RAW, 600);   /* 21:9 plans a smaller total (side 101) than the 32:9 surface was made for (side 238): still not a crop of it */
+    configure(h, r219, SV_SIDE_RAW, 600);   /* 21:9 plans a smaller total (side 101) than the 32:9 surface was made for (side 238): never a crop of it */
     sv_host_restyle(h);
     sv_host_visible_columns(h, &vl, &vr);
-    CHECK(vl == 0 && vr == 0, "any plan that differs from the one the surface was produced for hides an asymmetric surface");
+    CHECK(vl == 0 && vr == 0, "a narrower plan than the one the surface was produced for hides an asymmetric surface");
     configure(h, r329, SV_SIDE_RAW, NW + TOTAL);   /* back to the plan it was produced for: shown whole again, no new frame needed */
     sv_host_restyle(h);
     sv_host_visible_columns(h, &vl, &vr);
     CHECK(vl == 0 && vr == TOTAL, "the plan it was produced for shows the surface whole again");
+  }
+
+  /* ---- a surface produced for a NARROWER plan (21:9, side 101, picture 50 columns in) presented under a WIDER one (32:9): a wider request never shows more than was produced, so it is shown whole at its own total ---- */
+  {
+    const int side = 101, total = 2 * side, left = 50, shift = left - side;
+    SvExtendedSurface e;
+    int vl = -1, vr = -1;
+    for (y = 0; y < NH; ++y) for (x = 0; x < NW; ++x) native_px(x, y, g_native + ((size_t)y * NW + (size_t)x) * 3u);
+    for (y = 0; y < NH; ++y) for (x = 0; x < NW + total; ++x) surface_px(left, x, y, g_surface + ((size_t)y * (size_t)(NW + total) + (size_t)x) * 3u);
+    memset(&e, 0, sizeof e);
+    ++seq;
+    e.rgb24 = g_surface; e.size = (size_t)(NW + total) * NH * 3u; e.width = NW + total; e.height = NH; e.pitch = (NW + total) * 3; e.side = side; e.shift = shift; e.sequence = seq;
+    e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL; e.source = SV_EXTSRC_AUTHORED;
+    configure(h, r329, SV_SIDE_RAW, NW + total);
+    CHECK(sv_host_present_extended(h, g_native, NW, NH, NW * 3, seq, &e) == 0 && sv_host_extension_side(h) == side, "a 21:9 asymmetric surface is accepted under a 32:9 request");
+    sv_host_visible_columns(h, &vl, &vr);
+    CHECK(vl == left && vr == total - left, "a wider plan than produced shows the whole produced total, 50 left and 152 right");
+    o = shoot(h);
+    CHECK(o != NULL && o->w == (NW + total) * 2 && count_wrong(o, left, 0, NW + total) == 0, "and presents exactly the surface it was given");
+    if (o != NULL) SDL_DestroySurface(o);
   }
 
   /* ---- the legacy centred surface is untouched: shift 0 behaves exactly as before ---- */
