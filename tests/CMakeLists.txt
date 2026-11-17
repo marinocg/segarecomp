@@ -286,7 +286,7 @@ set_property(TEST genesis_native_compat_tests APPEND PROPERTY LABELS full fast)
 # SEG-140 (ADR 0303): authored virtual sprites. T002 differential decode against the VDP's own output; T003 layers, clipping and the original per-line budget.
 add_test(NAME genesis_vsprite_ownership_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_vsprite_ownership_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_vsprite_ownership_test APPEND PROPERTY LABELS full fast)
-foreach(_vs genesis_vsprite_decode genesis_vsprite_layers genesis_vsprite_wide)
+foreach(_vs genesis_vsprite_decode genesis_vsprite_layers genesis_vsprite_wide genesis_vsprite_priority)
   add_executable(${_vs}_tests ${_vs}_test.cpp)
   target_link_libraries(${_vs}_tests PRIVATE segarecomp::runtime_genesis_vsprite segarecomp::runtime_genesis)
   segarecomp_enable_warnings(${_vs}_tests)

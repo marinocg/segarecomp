@@ -289,6 +289,19 @@ unsigned ref_index(const Ref &r, const GenesisRasterLine &ln, const std::vector<
   return ln.registers[7] & 0x3F;
 }
 
+// ADR 0312: which class of content wins the pixel, from the documented six-layer order alone (sprite-high, plane A/window-high, plane B-high, sprite-low, plane A/window-low, plane B-low, backdrop):
+// 0 backdrop, 1 a low-priority pixel won, 2 a high-priority pixel won. Written independently of the production selector.
+unsigned ref_class(const Ref &r, const GenesisRasterLine &ln, const std::vector<uint8_t> &vram, long long x, unsigned row, bool left, unsigned groups, const Pix *spr = nullptr) {
+  const bool wedge = ref_window(r, ln, left ? 0u : r.width() - 1u, row);
+  const unsigned g = left ? 0u : groups - 1u;
+  const Pix a = wedge ? Pix{false, 0, 0, 0} : ref_plane(r, ln, vram, false, x, row, g);
+  const Pix b = ref_plane(r, ln, vram, true, x, row, g);
+  const bool s_hi = spr != nullptr && spr->opaque && spr->prio, s_lo = spr != nullptr && spr->opaque && !spr->prio;
+  if (s_hi || (a.opaque && a.prio) || (b.opaque && b.prio)) return 2;
+  if (s_lo || a.opaque || b.opaque) return 1;
+  return 0;
+}
+
 void rgb_of(const uint8_t *cram, unsigned idx, uint8_t out[3]) {
   const unsigned w = (cram[idx * 2] << 8) | cram[idx * 2 + 1];
   out[0] = (uint8_t)(((w >> 1) & 7) * 255 / 7); out[1] = (uint8_t)(((w >> 5) & 7) * 255 / 7); out[2] = (uint8_t)(((w >> 9) & 7) * 255 / 7);
@@ -310,6 +323,8 @@ int plan_fn(void *ctx, unsigned, unsigned, unsigned *side) {
 }
 
 std::vector<uint8_t> g_surface(GENESIS_EXT_SURFACE_BYTES);
+std::vector<uint8_t> g_classes(GENESIS_EXT_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT);   // ADR 0312: the producer's recorded winner class per surface pixel
+constexpr uint8_t kClassSentinel = 0xEE;
 
 struct Outcome { int rc; GenesisExtensionResult res; bool native_ok; };
 
@@ -331,6 +346,9 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true, u
   ext.plan_ctx = &pc;
   ext.pixels = g_surface.data();
   ext.capacity = g_surface.size();
+  ext.classes = g_classes.data();
+  ext.classes_capacity = g_classes.size();
+  std::memset(g_classes.data(), kClassSentinel, g_classes.size());
   std::memset(g_surface.data(), 0xA5, g_surface.size());
   out.rc = genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &out.res);
   check(std::memcmp(before.get(), native.get(), sizeof(*native)) == 0, "the native artifact is not modified by the extension call");
@@ -340,7 +358,7 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true, u
   const unsigned W = native->width, H = native->height, S = c.side, pitch = (W + 2 * S) * 3;
   checkf(out.res.native_w == W && out.res.native_h == H && out.res.side == S && out.res.pitch == pitch, "result geometry", out.res.native_w, out.res.side, out.res.pitch);
   bool window_edge = false, colvs = false;
-  unsigned bad = 0, bad_centre = 0, ref_sprite_pixels = 0;
+  unsigned bad = 0, bad_centre = 0, ref_sprite_pixels = 0, bad_class = 0, centre_touched = 0;
   const bool sprites = level >= 2 && expect_sprites;
   checkf(out.res.mode == (sprites ? GENESIS_EXT_MODE_SPRITES : GENESIS_EXT_MODE_BACKGROUNDS), "result mode is the produced content", out.res.mode);
   check(sprites || level < 2 || out.res.sprite_reason == GENESIS_EXT_REASON_SPRITE_STATE, "a Level 3 request served as Level 2 says why");
@@ -370,6 +388,11 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true, u
           const Pix b = ref_plane(ref, ln, vram, true, x, row, left ? 0u : groups - 1u);
           if (sp->prio || !((a.opaque && a.prio) || (b.opaque && b.prio))) ++ref_sprite_pixels;
         }
+        {
+          const uint8_t got_class = g_classes[(size_t)row * (W + 2 * S) + (left ? i : S + W + i)];
+          const unsigned want_class = ref_class(ref, ln, vram, x, row, left != 0, groups, sp);
+          if (got_class != want_class) { if (bad_class == 0) std::printf("  first class mismatch: row %u x %lld want %u got %u\n", row, x, want_class, (unsigned)got_class); ++bad_class; }
+        }
         const uint8_t *got = g_surface.data() + (size_t)row * pitch + (left ? i : S + W + i) * 3;
         if (std::memcmp(want, got, 3) != 0) {
           if (bad == 0) std::printf("  first mismatch: row %u x %lld want %u,%u,%u got %u,%u,%u sprite %d\n", row, x, want[0], want[1], want[2], got[0], got[1], got[2], sp != nullptr ? (int)sp->opaque : -1);
@@ -378,6 +401,7 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true, u
       }
     }
     for (unsigned x = 0; x < W; ++x) {
+      if (g_classes[(size_t)row * (W + 2 * S) + S + x] != kClassSentinel) ++centre_touched;
       uint8_t want[3];
       native_rgb(*native, x, row, want);
       if (std::memcmp(want, g_surface.data() + (size_t)row * pitch + (S + x) * 3, 3) != 0) ++bad_centre;
@@ -385,6 +409,8 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true, u
   }
   checkf(bad == 0, name, bad);
   checkf(bad_centre == 0, "the surface centre equals the native picture", bad_centre);
+  checkf(bad_class == 0, "ADR 0312: every extension pixel's recorded class equals the six-layer reference", bad_class);
+  checkf(centre_touched == 0, "ADR 0312: the picture columns of the class buffer are never written", centre_touched);
   checkf(!sprites || out.res.sprite_pixels == ref_sprite_pixels, "visible extension sprite pixels match the reference count", out.res.sprite_pixels, ref_sprite_pixels);
   const uint8_t want_flags = (uint8_t)((window_edge ? GENESIS_EXT_FLAG_WINDOW_EDGE : 0) | (colvs ? GENESIS_EXT_FLAG_COLUMN_VSCROLL : 0) |
                                        (c.journal ? 0 : GENESIS_EXT_FLAG_NO_VRAM_JOURNAL) | (sprites ? GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT : 0));

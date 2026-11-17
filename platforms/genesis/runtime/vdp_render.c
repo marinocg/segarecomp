@@ -1393,6 +1393,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   }
   pitch = ((size_t)width + 2U * side) * 3U;
   needed = pitch * height;
+  const int classes_ok = target->classes != NULL && target->classes_capacity >= ((size_t)width + 2U * side) * height;   /* ADR 0312: priority classes are recorded only into a buffer that holds the whole surface */
   if (needed > target->capacity) {
     genesis_ext_unavailable(out, GENESIS_EXT_REASON_TARGET_TOO_SMALL);
     return -1;
@@ -1455,6 +1456,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     const unsigned field_line = geometry.im2 ? row / 2U : row;
     const GenesisRasterLine *line = &raster->lines[field_line];
     uint8_t *dst = target->pixels + (size_t)row * pitch;
+    uint8_t *classes_row = classes_ok ? target->classes + (size_t)row * ((size_t)width + 2U * side) : NULL;   /* ADR 0312: this row's winner classes (extension columns only) */
     GenesisVdpRowPlane plane_a, plane_b;
     unsigned backdrop = 0U;
     const uint32_t faults_before = compat_faults;
@@ -1513,8 +1515,10 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         }
         {
           const GenesisVdpCandidatePixel *spr = sprites ? &sprite_row[left ? i : (size_t)side + width + i] : &none;
+          uint8_t winner_class = (uint8_t)GENESIS_VDP_LAYER_BACKDROP;
           if (genesis_ext_sprite_wins(&a, &b, spr)) ++sprite_pixels;
-          index = genesis_vdp_select_cram_index(&a, &b, spr, backdrop, NULL);
+          index = genesis_vdp_select_cram_index(&a, &b, spr, backdrop, &winner_class);
+          if (classes_row != NULL) classes_row[left ? (size_t)i : (size_t)side + width + i] = winner_class;   /* ADR 0312: the class of the very candidate that gave this pixel its colour */
         }
         if (genesis_vdp_decode_cram_entry(line->cram, index, &color) != 0) {
           genesis_ext_unavailable(out, GENESIS_EXT_REASON_NATIVE_GEOMETRY);
@@ -1575,7 +1579,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
    * rules, the original budget accounting), now, while the frame's raster state and VRAM are valid. Zero commands: none of this runs. */
   if (vsprite_submitted) {
     const unsigned host_flags = (target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U && target->compat_ram_valid ? GENESIS_VSPRITE_HOST_STATE_VERIFIED : 0U;
-    if (target->vsprite_compose == NULL || target->vsprite_compose(target->vsprite_ctx, target->vsprite_set, host_flags, vram, raster, native, target->pixels, side, &vsprite_outcome) != 0) {
+    if (target->vsprite_compose == NULL || target->vsprite_compose(target->vsprite_ctx, target->vsprite_set, host_flags, vram, raster, native, target->pixels, classes_ok ? target->classes : NULL, side, &vsprite_outcome) != 0) {
       memset(&vsprite_outcome, 0, sizeof vsprite_outcome);
       vsprite_outcome.status = (uint8_t)GENESIS_VSPRITE_STATUS_REJECTED;
       vsprite_outcome.reason = (uint8_t)GENESIS_VSPRITE_REJ_ARGUMENTS;

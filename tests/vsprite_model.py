@@ -33,12 +33,13 @@ POOL_TILES = {1: solid(1), 2: solid(2), 3: corners(), 6: solid(1), 7: solid(2), 
 
 
 def native_class(x, y):
-    """The fixture's native priority class of picture pixel (x, y): plane A pattern 1 on cell rows 0 (low) and 1 (high); 20 low-priority hardware sprite cells on rows 96-103 (x < 160)."""
+    """The fixture's priority class of surface pixel (x, y): plane A pattern 1 on cell rows 0 (low) and 1 (high), in every one of its 64 columns (so the margins carry the same rows, ADR 0312); 20 low-priority
+    hardware sprite cells on rows 96-103 (0 <= x < 160, inside the picture: the fixture's sprite table places none beside it)."""
     if y < 8:
         return "low"
     if y < 16:
         return "high"
-    if 96 <= y < 104 and x < 160:
+    if 96 <= y < 104 and 0 <= x < 160:
         return "low"
     return "backdrop"
 
@@ -132,14 +133,16 @@ def surface_from_bmp(bmp, side):
     return [[bmp[oy + f * y + f // 2][ox + f * x + f // 2] for x in range(ws)] for y in range(H)]
 
 
-def model_wide(base, side, sprites, budget="limit", space="presentation", visible=None):
+def model_wide(base, side, sprites, budget="limit", space="presentation", visible=None, classes=True):
     """`base`: the Vanilla surface (rows of W + 2*side RGB pixels). Returns (surface, counts, rejection): counts[origin][region] with origin 'authored'|'verified' and region 'picture'|'left'|'right';
-    rejection is the F14/ADR 0307 reason code of a whole-set rejection (the surface is then the base) or None."""
+    rejection is the F14/ADR 0307 reason code of a whole-set rejection (the surface is then the base) or None. `classes` (ADR 0312): the producer recorded the priority class of every extension pixel, which
+    the viewer always does, so a BEHIND_PLANES / BETWEEN command is ordered against the margins exactly as against the picture; with classes=False (no priority information) such a command that reaches a
+    margin rejects the whole set (SIDE_PRIORITY, ADR 0307)."""
     vis = side if visible is None else visible
     ext = space == "presentation" and vis > 0
     counts = {o: {"picture": 0, "left": 0, "right": 0} for o in ("authored", "verified")}
     lo, hi = (-vis, W + vis) if ext else (0, W)
-    if ext:
+    if ext and not classes:
         for s in sprites:
             if s["layer"] == ABOVE:
                 continue
@@ -176,10 +179,9 @@ def model_wide(base, side, sprites, budget="limit", space="presentation", visibl
                 idx = tiles[s["tile"] + cell][sy % 8][sx % 8] if (s["tile"] + cell) in tiles else 0
                 if idx == 0:
                     continue
-                if 0 <= x < W:
-                    cls = native_class(x, y)
-                    if (s["layer"] == BEHIND and cls != "backdrop") or (s["layer"] == BETWEEN and cls == "high"):
-                        continue
+                cls = native_class(x, y)   # the picture's own class, or in a margin the producer's recorded class of that very pixel
+                if (s["layer"] == BEHIND and cls != "backdrop") or (s["layer"] == BETWEEN and cls == "high"):
+                    continue
                 out[y][x + side] = rgb(palette[idx])
                 claimed.add((x, y))
                 counts[s["src"]]["left" if x < 0 else "right" if x >= W else "picture"] += 1

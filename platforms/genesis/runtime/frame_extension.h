@@ -120,6 +120,11 @@ typedef struct GenesisFrameExtension {
   void *plan_ctx;
   uint8_t *pixels;                  /* RGB24, `capacity` bytes, owned by the adapter */
   size_t capacity;
+  /* ADR 0312: optional, adapter-owned, preallocated: one byte per surface pixel ((native width + 2 * side) x native height, row-major like `pixels`). For every produced extension column the producer stores which class of
+   * content won that pixel under the VDP's own six-layer order (GENESIS_VDP_LAYER_BACKDROP / LOW / HIGH, taken from the same winner selection that picks the pixel's colour). The bytes of the picture columns are not written and not
+   * read. NULL or too small (`classes_capacity` < the surface) = no priority information: the producer passes none to the compositor (so BETWEEN / BEHIND_PLANES cannot reach an extension column) and everything else is unchanged. */
+  uint8_t *classes;
+  size_t classes_capacity;
   /* SEG-124: the optional verified native compatibility provider (NULL = none = exactly the previous behaviour). Selected statically by the build from a verified
    * package; `compat_state` is the provider's own storage. `compat_ram` (GENESIS_COMPAT_RAM_BYTES, adapter-owned) receives a work-RAM snapshot at every publication
    * and `compat_ram_stamp` the virtual frame counter it was taken at; the runtime sets `compat_ram_valid` for the frame being produced only when the stamp is exactly
@@ -139,7 +144,7 @@ typedef struct GenesisFrameExtension {
    * not part of the runtime library). Zero commands: neither runs. */
   GenesisVirtualSpriteSet *vsprite_set;
   int (*vsprite_compose)(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
-                         const GenesisFrameArtifact *native, const uint8_t *surface, unsigned side, GenesisVirtualSpriteOutcome *out);   /* surface: the produced extension, (native width + 2 * side) x height RGB24 */
+                         const GenesisFrameArtifact *native, const uint8_t *surface, const uint8_t *classes, unsigned side, GenesisVirtualSpriteOutcome *out);   /* surface: the produced extension, (native width + 2 * side) x height RGB24; classes: the winner class of each of its pixels for THIS frame, or NULL (ADR 0312) */
   void *vsprite_ctx;
   /* Runtime-written. */
   GenesisExtensionResult result;    /* the latest publication's result */
