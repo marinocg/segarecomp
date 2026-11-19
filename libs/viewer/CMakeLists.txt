@@ -17,6 +17,13 @@ if(BUILD_TESTING)
   segarecomp_enable_warnings(sv_rewind_test)
   add_test(NAME sv_rewind_test COMMAND sv_rewind_test)
   set_property(TEST sv_rewind_test APPEND PROPERTY LABELS full fast)
+  # SEG-146-T006: the shared record/replay session format (header-only, SDL-free).
+  add_executable(sv_session_test test/sv_session_test.c)
+  target_link_libraries(sv_session_test PRIVATE segarecomp::viewer_core)
+  set_target_properties(sv_session_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_session_test)
+  add_test(NAME sv_session_test COMMAND sv_session_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_property(TEST sv_session_test APPEND PROPERTY LABELS full fast)
   # SEG-139-T004: the geometry declaration parser, the declared-range decision and the stable coverage JSON (pure C).
   add_executable(sv_coverage_test test/sv_coverage_test.c)
   target_link_libraries(sv_coverage_test PRIVATE segarecomp::viewer_core)

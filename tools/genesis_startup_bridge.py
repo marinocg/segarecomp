@@ -1223,7 +1223,7 @@ def _compile_capture_executable(compile_flags: list[str], root: pathlib.Path, so
     import tempfile
     runtime_dir = root / "platforms" / "genesis" / "runtime"
     viewer_dir = root / "platforms" / "genesis" / "viewer"
-    includes = ["-I", str(runtime_dir), "-I", str(viewer_dir)]
+    includes = ["-I", str(runtime_dir), "-I", str(viewer_dir), "-I", str(root / "libs" / "viewer" / "include")]   # SEG-146-T006: header-only sv_session.h (frame_capture.c's --replay)
     hook = ([viewer_dir / "execution_coverage.c", viewer_dir / "execution_coverage_main_hook.c"] if coverage
             else [viewer_dir / "z80_epoch_probe_main_hook.c"] if z80_probe
             else [viewer_dir / "frame_capture.c", viewer_dir / "frame_capture_main_hook.c"])
@@ -2160,6 +2160,14 @@ def main() -> int:
                         help="viewer presentation policy: do not sleep between frames")
     parser.add_argument("--viewer-slice", type=instruction_budget_value,
                         help="guest dispatches per host viewer slice (> 0)")
+    # SEG-146-T006: power-on session recording / deterministic replay (shared recorder, libs/viewer/include/sv_session.h). The generated argv ABI is unchanged: the options
+    # travel as SEGARECOMP_RECORD / SEGARECOMP_REPLAY / SEGARECOMP_ALLOW_VARIANT, read by the viewer hook and by the headless capture hook.
+    parser.add_argument("--record", metavar="FILE",
+                        help="viewer: record the whole session from power-on (pad per guest frame, header hashes only; no ROM bytes) to FILE; 'Stop recording' in the pause menu or quitting ends it")
+    parser.add_argument("--replay", metavar="FILE",
+                        help="replay a recording in the viewer, or headless together with --capture-frames (same file for both); saves, states and rewind are off")
+    parser.add_argument("--allow-variant", action="store_true",
+                        help="with --replay: replay against a different effective image or package (the mismatch is reported; checkpoint digests are not enforced)")
     # SEG-021-T031: bounded headless frame capture by publication ordinal (FIRST:COUNT).
     parser.add_argument("--capture-frames", type=capture_frames_value,
                         help="capture published frames FIRST, FIRST+STRIDE, ... (COUNT frames) into <out-dir>/frames")
@@ -2186,6 +2194,26 @@ def main() -> int:
     _compile_jobs_override = args.compile_jobs
     if args.object_cache_dir:
         _object_cache_dir_override = pathlib.Path(args.object_cache_dir).resolve()
+    if args.record and args.replay:
+        sys.stderr.write("--record and --replay cannot be used together\n")
+        return 8
+    if args.allow_variant and not args.replay:
+        sys.stderr.write("--allow-variant requires --replay\n")
+        return 8
+    if args.record and not args.viewer:
+        sys.stderr.write("--record requires --viewer (a recording is a played session)\n")
+        return 8
+    if args.replay and not (args.viewer or args.capture_frames):
+        sys.stderr.write("--replay requires --viewer or --capture-frames\n")
+        return 8
+    for name in ("SEGARECOMP_RECORD", "SEGARECOMP_REPLAY", "SEGARECOMP_ALLOW_VARIANT"):
+        os.environ.pop(name, None)   # an inherited value must never turn an ordinary run into a session
+    if args.record:
+        os.environ["SEGARECOMP_RECORD"] = str(pathlib.Path(args.record).resolve())
+    if args.replay:
+        os.environ["SEGARECOMP_REPLAY"] = str(pathlib.Path(args.replay).resolve())
+        if args.allow_variant:
+            os.environ["SEGARECOMP_ALLOW_VARIANT"] = "1"
     if (args.viewer_unthrottled or args.viewer_slice is not None) and not args.viewer:
         sys.stderr.write("--viewer-unthrottled/--viewer-slice require --viewer\n")
         return 8
@@ -2245,6 +2273,8 @@ def main() -> int:
     digest = hashlib.sha256(rom_bytes).hexdigest()
     if args.expect_sha256 and args.expect_sha256 != digest:
         return 4
+    if (args.record or args.replay) and not os.environ.get("SEGARECOMP_ROM_SHA256"):
+        os.environ["SEGARECOMP_ROM_SHA256"] = digest   # SEG-146-T006: a session binds to the image it ran on (a launcher passes its own verified identity, including a patched image)
     # SEG-055: choose and export the console region before any generation/compile/run work; the default (usa) sets the
     # variable too so an inherited value can never silently change the run.
     region_profile, region_summary = configure_region(args.region, rom_bytes)

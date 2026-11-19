@@ -242,11 +242,18 @@ set_tests_properties(genesis_mod_state_tests PROPERTIES TIMEOUT 300)
 # SEG-021-T031: headless bounded live-frame capture core (host tool; not linked by runtime_genesis).
 add_executable(genesis_frame_capture_tests genesis_frame_capture_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)
-target_include_directories(genesis_frame_capture_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
+target_include_directories(genesis_frame_capture_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
 target_link_libraries(genesis_frame_capture_tests PRIVATE segarecomp::runtime_genesis)
 target_compile_features(genesis_frame_capture_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_frame_capture_tests)
 add_test(NAME genesis_frame_capture_tests COMMAND genesis_frame_capture_tests)
+# SEG-146-T006: the Genesis adapter of the shared session recorder (header-only; synthetic machine).
+add_executable(genesis_session_tests genesis_session_test.cpp)
+target_include_directories(genesis_session_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+target_link_libraries(genesis_session_tests PRIVATE segarecomp::runtime_genesis)
+target_compile_features(genesis_session_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_session_tests)
+add_test(NAME genesis_session_tests COMMAND genesis_session_tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 # SEG-026-T001: execution-PC coverage observer + frame-bounded coverage run; reachability challenger fixtures.
 add_executable(genesis_execution_coverage_tests genesis_execution_coverage_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/execution_coverage.c)

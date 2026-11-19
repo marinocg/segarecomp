@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "genesis_persistence.h"
+#include "genesis_session.h" /* SEG-146-T006: record / replay through the shared session recorder (libs/viewer/include/sv_session.h) */
 #include "genesis_viewer_state.h"
 #include "runtime.h"
 #include "vdp_render.h"
@@ -44,6 +45,9 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
                                                uint32_t dispatch_allowance);
 
 static GenesisFrameArtifact g_latest_frame;
+static GenesisSession g_session;                 /* SEG-146-T006: the record/replay adapter, installed on the runtime's frame hooks */
+static int g_session_on;                         /* a record/replay session is active for this run (saves, states and rewind are then off) */
+static int g_session_announced;
 static GenesisSdl3Viewer *g_sdl;                 /* SEG-131: the session's window (the restore hook resets its audio queue) */
 static GenesisViewerOptions g_options;
 static GenesisLiveFrameObserver *g_observer;
@@ -80,7 +84,15 @@ static uint64_t perf_clock(void) { return g_inner.now_ns(g_inner.ctx); }
 /* Slice start (the host's once-per-slice poll): the previous boundaries' pacer verdicts are settled, the observation window is established BEFORE the guest runs (so the first
  * slice is counted, and nothing from while the collector was inactive is attributed), and the emulation clock starts. */
 static int perf_window_closed(void *ctx) {
-  const int closed = g_inner.window_closed(ctx);
+  int closed = g_inner.window_closed(ctx);
+  if (g_session_on && g_session.done) {   /* SEG-146-T006: a replay that reached its end (or diverged) ends the session; a recording that ended early keeps playing */
+    if (g_session.mode == GENESIS_SESSION_REPLAY) closed = 1;
+    else if (!g_session_announced) {
+      g_session_announced = 1;
+      fprintf(stderr, "session: %s\n", g_session.message);
+      if (g_sdl != NULL) sv_host_toast(genesis_sdl3_viewer_sv_host(g_sdl), g_session.message);
+    }
+  }
   if (g_perf.active) {
     sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled);
     sv_perf_observe_begin(&g_perf, g_runtime->virtual_frame_count);
@@ -264,8 +276,35 @@ static void persist_report(const char *event, const char *status, const char *de
   fprintf(stderr, "VIEWER_PERSIST {\"event\":\"%s\",\"status\":\"%s\",\"detail\":\"%s\"}\n", event, status, detail);
 }
 
+static int g_session_on_requested(void) {
+  const char *rec = getenv("SEGARECOMP_RECORD"), *rep = getenv("SEGARECOMP_REPLAY");
+  return (rec != NULL && *rec != '\0') || (rep != NULL && *rep != '\0');
+}
+
+/* SEG-146-T006: the developer-menu entry "Stop recording" (and the quit path) end the recording through here. */
+static int session_status(void *ctx, char *text, size_t cap) {
+  (void)ctx;
+  if (g_session.mode == GENESIS_SESSION_RECORD && !g_session.done) { snprintf(text, cap, "Recording to the session file"); return 1; }
+  if (g_session.mode == GENESIS_SESSION_REPLAY && !g_session.done) { snprintf(text, cap, "Replaying a recorded session"); return 2; }
+  snprintf(text, cap, "No session is being recorded");
+  return 0;
+}
+
+static int session_stop(void *ctx, char *message, size_t cap) {
+  (void)ctx;
+  if (g_session.mode != GENESIS_SESSION_RECORD || g_session.done) { snprintf(message, cap, "No recording is in progress"); return -1; }
+  g_session.done = 1;   /* the recorder stops stamping; the end marker is written now, at the current guest frame */
+  genesis_session_finish(&g_session);
+  g_session.done = 1;
+  snprintf(message, cap, "%s", g_session.message);
+  g_session_announced = 1;
+  fprintf(stderr, "session: %s\n", g_session.message);
+  return g_session.failed ? -1 : 0;
+}
+
 static const char *persist_dir(void) {
   const char *dir = getenv("SEGARECOMP_SAVE_DIR");
+  if (g_session_on_requested()) return NULL;   /* SEG-146-T006: a recording/replay starts from power-on and never reads or writes cartridge saves */
   return dir != NULL && *dir != '\0' ? dir : NULL;
 }
 
@@ -325,6 +364,15 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   /* The scheduler attaches before the first guest instruction; a mod it refuses stops the program (a program never runs with part of its mod missing), exactly like the headless program. */
   if (segarecomp_capture_mod_begin(runtime) != 0) exit(5);
 #endif
+  {  /* SEG-146-T006: installed after the scheduler (it wraps a scheduler's hooks) and before the first guest instruction: power-on recording / replay */
+    char session_error[320];
+    const int sr = genesis_session_from_environment(&g_session, runtime, session_error, sizeof session_error);
+    if (sr < 0) {
+      fprintf(stderr, "viewer: %s\n", session_error);
+      exit(3);
+    }
+    g_session_on = sr > 0;
+  }
 #ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
   /* SEG-124 (ADR 0267): the build compiled the provider source of ONE verified package and linked it here; the capabilities it declared are a compile-time constant. A provider that
    * declines to run, has another ABI version or cannot be attached leaves the viewer generic: it never guesses. */
@@ -411,6 +459,13 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
       sv_host_set_state_provider(genesis_sdl3_viewer_sv_host(sdl), &provider);
     }
   }
+  if (g_session_on) {
+    SvSessionControl control;
+    memset(&control, 0, sizeof control);
+    control.status = session_status;
+    control.stop = session_stop;
+    sv_host_set_session_control(genesis_sdl3_viewer_sv_host(sdl), &control);
+  }
   snprintf(g_renderer, sizeof g_renderer, "%s", genesis_sdl3_viewer_renderer_name(sdl) != NULL ? genesis_sdl3_viewer_renderer_name(sdl) : "");
   if (perf_path != NULL) {
     sv_perf_enable(&g_perf);
@@ -442,6 +497,14 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   }
 #endif
   runtime->live_frame_observer = NULL;
+  if (g_session_on && g_session.mode != GENESIS_SESSION_NONE) {   /* quitting while recording writes the end at the current guest frame */
+    const int replaying = g_session.mode == GENESIS_SESSION_REPLAY;
+    const uint64_t at = g_session.frames;
+    genesis_session_finish(&g_session);
+    fprintf(stderr, "SESSION_SUMMARY {\"mode\":\"%s\",\"outcome\":\"%s\",\"frame\":%llu,\"checkpoints_checked\":%u}\n", replaying ? "replay" : "record",
+            g_session.failed ? "failed" : "complete", (unsigned long long)at, (unsigned)g_session.checkpoints_checked);
+    if (g_session.message[0] != '\0') fprintf(stderr, "session: %s\n", g_session.message);
+  }
 #ifdef SEGARECOMP_MOD_VIEWER
   segarecomp_capture_mod_end(runtime);
 #endif
@@ -520,6 +583,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     perf_write_report(perf_path, status, name, &r, runtime, &observer, &g_raster_capture, g_renderer, options.unthrottled, options.slice_dispatches, perf_privacy);
   }
   if (r.outcome == GENESIS_VIEWER_HOST_ERROR || r.outcome == GENESIS_VIEWER_INVALID_ARGUMENT) exit(4);
+  if (g_session_on && g_session.failed) exit(6);   /* a replay that diverged, or a recording that could not be written */
   if (r.outcome == GENESIS_VIEWER_WINDOW_CLOSED || r.outcome == GENESIS_VIEWER_RUNNER_EXHAUSTED) {
     GenesisControlTransfer t;
     memset(&t, 0, sizeof(t));
