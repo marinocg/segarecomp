@@ -153,7 +153,7 @@ jobs:
       - name: Windows MSVC environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
-      - name: Windows LLVM 22 (see the build-test job: STL 14.52 needs Clang >= 22)
+      - name: Windows LLVM 22 (see the build-test job, STL 14.52 needs Clang >= 22)
         if: runner.os == 'Windows'
         shell: bash
         run: |
