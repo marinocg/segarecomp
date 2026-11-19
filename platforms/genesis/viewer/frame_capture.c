@@ -354,15 +354,17 @@ GenesisControlTransfer genesis_frame_capture_run_from_environment(GenesisRuntime
   r = genesis_frame_capture_run(runtime, dispatch, &options, dispatch_allowance);
   if (g_session != NULL) {
     const int replaying = g_session->mode == GENESIS_SESSION_REPLAY;
+    const int unfinished = replaying && !g_session->done;   /* the run ended before the recording did */
+    (void)genesis_session_drain(g_session, runtime, dispatch);
     const uint64_t at = g_session->frames;
-    const int unfinished = replaying && !g_session->done;   /* the capture window ended before the recording did */
+    const int verified = g_session->verified;
     genesis_session_finish(g_session);
     if (unfinished) {
       snprintf(g_session->message, sizeof g_session->message, "the capture ended at frame %llu before the recording's end marker: nothing after it was replayed (capture more frames)", (unsigned long long)at);
       g_session->failed = 1;
     }
     fprintf(stderr, "SESSION_SUMMARY {\"mode\":\"%s\",\"outcome\":\"%s\",\"frame\":%llu,\"checkpoints_checked\":%u}\n", replaying ? "replay" : "record",
-            g_session->failed ? (unfinished ? "incomplete" : "failed") : "complete", (unsigned long long)at, (unsigned)g_session->checkpoints_checked);
+            g_session->failed ? (unfinished ? "incomplete" : "failed") : (replaying && !verified ? "complete_unverified" : "complete"), (unsigned long long)at, (unsigned)g_session->checkpoints_checked);
     if (g_session->message[0] != '\0') fprintf(stderr, "session: %s\n", g_session->message);
     if (g_session->failed) exit(6);
   }

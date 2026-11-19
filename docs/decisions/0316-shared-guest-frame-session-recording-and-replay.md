@@ -26,7 +26,8 @@ applied between runner slices, so its effect depends on the slice size, and the 
    dispatch that crossed the boundary (a resumable slice end, never a stop). A replay therefore stops on its exact end boundary whatever the slice size.
 6. Checkpoints hash the whole machine: the snapshot container digest (profile `machine-<flags>`) wherever the snapshot codec is linked, named in the recording's `digest` line;
    hosts without it use the weaker `basic` profile, and checkpoints are enforced only between identical profiles. Ordering is pads, digest, end, identically for record and replay.
-7. The launcher exposes the recorder for Genesis (details page section, `--record/--replay/--allow-variant`), through the environment of the program.
+7. The end marker always carries a checkpoint of its own frame (the loader refuses a recording without one), capacity and quit end on a boundary, and a replay is VERIFIED only when every checkpoint was compared equal; an unenforced replay (other image, other digest profile) is reported NOT VERIFIED.
+8. The launcher exposes the recorder for Genesis (details page section, `--record/--replay/--allow-variant`), through the environment of the program.
 
 ## Consequences
 

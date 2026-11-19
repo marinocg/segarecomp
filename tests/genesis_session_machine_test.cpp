@@ -140,6 +140,7 @@ void whole_machine_checkpoints_cover_every_device(bool with_mod) {
   const std::string text = read_all(file);
   check(text.find("digest machine-") != std::string::npos && text.find("digest basic") == std::string::npos, "the recording names the whole-machine digest profile");
   check(text.find("checkpoint 0 ") != std::string::npos && text.find("checkpoint 600 ") != std::string::npos, "power-on and interval checkpoints were written");
+  check(text.find("checkpoint " + std::to_string(end_frame) + " ") != std::string::npos, "and one on the end marker's own frame");
   if (with_mod) {
     // The recording stores the PHYSICAL pad: the mod forces UP on the guest's copy only, so at least one stored mask has UP released while the guest saw it pressed every frame.
     bool released_in_file = false;
@@ -163,6 +164,7 @@ void whole_machine_checkpoints_cover_every_device(bool with_mod) {
     check(rp.session.done && !rp.session.failed && rp.session.ended_cleanly, "the replay ends cleanly on its end marker");
     check(rp.rt->virtual_frame_count == end_frame, "and exactly on the recorded end boundary");
     check(rp.session.checkpoints_checked >= 2U, "checkpoints were compared");
+    check(rp.session.verified && std::strstr(rp.session.message, "VERIFIED") != nullptr && rp.session.replay.compared == rp.session.replay.checkpoint_count, "the replay is VERIFIED: every checkpoint, the end marker's included, matched");
     check(rp.digest_now() == recorded_digest, "the whole-machine digest at the end boundary equals the recorded run's");
     check(rp.rt->d[1] == recorded_d1, "and so does the guest's own folded input history");
     genesis_session_finish(&rp.session);
@@ -185,6 +187,7 @@ void whole_machine_checkpoints_cover_every_device(bool with_mod) {
     check(other.session.replay.variant_mismatch && std::strstr(other.session.replay.note, "machine digest") != nullptr, "and is told the checkpoints are not enforced");
     drive(other, 700U, 0U, false, 0U);
     check(other.session.done && !other.session.failed && other.session.ended_cleanly, "the replay completes");
+    check(!other.session.verified && other.session.checkpoints_checked == 0U && std::strstr(other.session.message, "NOT VERIFIED") != nullptr, "but it is never reported as verified: no checkpoint was compared");
     genesis_session_finish(&other.session);
   }
   set_env("SEGARECOMP_REPLAY", nullptr);

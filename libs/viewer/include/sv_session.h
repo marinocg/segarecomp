@@ -13,7 +13,7 @@
  *   variant <64 hex|vanilla>  the patch/package identity (vanilla = none)
  *   digest <profile>          which machine-state digest the checkpoints use (e.g. machine-0003); checkpoints are enforced only when the replaying machine uses the same profile
  *   <frame> <player> <mask>   player 1|2; mask 0..255 decimal: that player's pad held from <frame> on (a pad starts released)
- *   checkpoint <frame> <64 hex>
+ *   checkpoint <frame> <64 hex>  also at the END frame: the final checkpoint always lies on the end marker, so a divergence anywhere before it cannot go unseen
  *   end <frame>               the recording lasted until <frame>; a file without it is refused on replay
  *
  * The adapter stamps the pad at each guest-frame boundary, before the guest reads input; replay applies it at the same boundary, so a
@@ -169,8 +169,9 @@ typedef struct SvSessionReplay {
   uint32_t count, next;
   SvSessionCheckpoint *checkpoints;
   uint32_t checkpoint_count, checkpoint_next;
+  uint32_t compared;              /* checkpoints actually compared and equal (never counts a checkpoint that was not enforced) */
   uint64_t end_frame;
-  int variant_mismatch;           /* identity differed and --allow-variant admitted it, or the digest profile differs: checkpoints are informational only */
+  int variant_mismatch;           /* identity differed and --allow-variant admitted it, or the digest profile differs: checkpoints are NOT enforced, so the replay is never reported as verified */
   uint8_t pad[2];                 /* the pads currently held */
   char note[240];                 /* the reported mismatch when one was admitted */
 } SvSessionReplay;
@@ -275,6 +276,10 @@ static inline int sv_session_replay_load(SvSessionReplay *p, const char *path, c
   if (line_no == 0U) { snprintf(error, cap, "'%s' is not a segarecomp session recording (it is empty)", path); goto fail; }
   if (p->checkpoint_count != 0U && p->checkpoints[p->checkpoint_count - 1U].frame > p->end_frame && have_end) { snprintf(error, cap, "a checkpoint (frame %llu) lies beyond the end marker (frame %llu)", (unsigned long long)p->checkpoints[p->checkpoint_count - 1U].frame, (unsigned long long)p->end_frame); goto fail; }
   if (!have_platform || !have_image || !have_variant || !have_digest) { snprintf(error, cap, "the recording header is incomplete"); goto fail; }
+  if (have_end && (p->checkpoint_count == 0U || p->checkpoints[p->checkpoint_count - 1U].frame != p->end_frame)) {
+    snprintf(error, cap, "the recording has no checkpoint at its end marker (frame %llu): the state it ended in cannot be verified", (unsigned long long)p->end_frame);
+    goto fail;
+  }
   if (!have_end) { snprintf(error, cap, "the recording has no end marker: it was not finished (the game or the viewer stopped before 'Stop recording') and cannot be replayed"); goto fail; }
   if (strcmp(p->identity.platform, expect->platform) != 0) {
     snprintf(error, cap, "the recording is for the %s, this program is for the %s", p->identity.platform, expect->platform);
@@ -326,12 +331,13 @@ static inline int sv_session_replay_checkpoint(SvSessionReplay *p, uint64_t fram
     return 1;
   }
   if (p->checkpoint_next >= p->checkpoint_count || p->checkpoints[p->checkpoint_next].frame != frame) return 0;
-  if (p->variant_mismatch) { ++p->checkpoint_next; return 0; }
+  if (p->variant_mismatch) { ++p->checkpoint_next; return 0; }   /* not enforced: consumed, never counted as compared */
   if (memcmp(p->checkpoints[p->checkpoint_next].digest, digest, 32) != 0) {
     snprintf(error, cap, "replay diverged from the recording at frame %llu (checkpoint digest mismatch)", (unsigned long long)frame);
     return 1;
   }
   ++p->checkpoint_next;
+  ++p->compared;
   return 0;
 }
 

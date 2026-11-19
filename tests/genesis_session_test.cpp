@@ -132,6 +132,7 @@ std::vector<unsigned char> replay_session(const std::string &file, uint32_t slic
     dispatches += transfer.runner_dispatch_count;
   }
   check(t.done && !t.failed && t.ended_cleanly, (std::string("replay finishes without divergence (") + t.message + ")").c_str());
+  check(t.verified && std::strstr(t.message, "VERIFIED") != nullptr && t.replay.compared == t.replay.checkpoint_count, "a replay against the same profile is VERIFIED: every checkpoint, the one on the end marker included, was compared");
   check(t.frames == t.replay.end_frame && rp->virtual_frame_count == t.replay.end_frame, "the replay stopped exactly on the end boundary: no frame and no instruction beyond it ran");
   if (frame != nullptr) *frame = rp->virtual_frame_count;
   if (checked != nullptr) *checked = t.checkpoints_checked;
@@ -173,6 +174,7 @@ void identity_and_flags() {
   GenesisSession s;
   check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "record installs");
   run_frames(rec, &s, 500U, 30U, true, 3U);
+  check(genesis_session_drain(&s, &rec, folding_dispatch) == 0, "the recording ends on the next frame boundary");
   genesis_session_finish(&s);
 
   set_env("SEGARECOMP_RECORD", nullptr);
@@ -214,6 +216,7 @@ void divergence_is_reported_at_the_checkpoint() {
   GenesisSession s;
   check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "record installs");
   run_frames(rec, &s, 4096U, 700U, true, 11U);
+  check(genesis_session_drain(&s, &rec, folding_dispatch) == 0, "the recording ends on the next frame boundary");
   genesis_session_finish(&s);
   set_env("SEGARECOMP_RECORD", nullptr);
   set_env("SEGARECOMP_REPLAY", file.c_str());
@@ -264,6 +267,7 @@ void headless_replay_runs_to_the_end_marker() {
   GenesisSession s;
   check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "record installs");
   run_frames(rec, &s, 600U, 40U, true, 6U);
+  check(genesis_session_drain(&s, &rec, folding_dispatch) == 0, "the recording ends on the next frame boundary");
   genesis_session_finish(&s);
   const uint64_t end_frame = rec.virtual_frame_count;
   set_env("SEGARECOMP_RECORD", nullptr);
@@ -302,10 +306,65 @@ void a_wrapped_scheduler_hook_still_runs() {
   GenesisSession s;
   check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "wraps an installed scheduler");
   run_frames(rec, &s, 2000U, 12U, true, 4U);
+  check(genesis_session_drain(&s, &rec, folding_dispatch) == 0, "the recording ends on the next frame boundary");
   genesis_session_finish(&s);
   check(rec.frame_hooks == &inner, "the original hooks are restored");
   check(counter.starts >= 1 && counter.frame_ends >= 11 && counter.afters >= 11, "the wrapped hooks keep running");
   set_env("SEGARECOMP_RECORD", nullptr);
+  std::remove(file.c_str());
+}
+
+// Capacity at the adapter: the recording ends ON a boundary with its final checkpoint (replayable and verifiable), never cut mid-way.
+void capacity_ends_on_a_boundary_with_a_final_checkpoint() {
+  const std::string file = temp("capacity.rec");
+  char error[320];
+  set_env("SEGARECOMP_ROM_SHA256", kImage);
+  set_env("SEGARECOMP_SAVE_VARIANT", nullptr);
+  set_env("SEGARECOMP_REPLAY", nullptr);
+  set_env("SEGARECOMP_RECORD", file.c_str());
+  auto rec = std::make_unique<GenesisRuntime>();
+  setup(*rec);
+  GenesisSession s;
+  check(genesis_session_from_environment(&s, rec.get(), nullptr, error, sizeof error) == 1, "record installs");
+  s.recorder.max_events = 5U;
+  uint32_t n = 3U;
+  while (!s.done) {
+    n = n * 1103515245U + 12345U;
+    rec->pad1 = static_cast<uint8_t>(n >> 16);
+    (void)genesis_runtime_run(rec.get(), folding_dispatch, 700U);
+  }
+  check(!s.failed && std::strstr(s.message, "capacity was reached") != nullptr, "capacity is reported as such, not as a failure");
+  const uint64_t end_frame = s.frames;
+  genesis_session_finish(&s);
+  const std::string text = read_all(file);
+  check(text.find("checkpoint " + std::to_string(end_frame) + " ") != std::string::npos && text.find("\nend " + std::to_string(end_frame) + "\n") != std::string::npos, "the end marker carries a checkpoint of its own frame");
+  uint64_t frame = 0U;
+  (void)replay_session(file, 997U, true, &frame);
+  check(frame == end_frame, "the capped recording replays to its end boundary");
+  std::remove(file.c_str());
+}
+
+// A divergence AFTER the last periodic checkpoint and before END (no checkpoint interval boundary in between) is caught by the checkpoint on the end marker.
+GenesisControlTransfer tampering_dispatch(GenesisRuntime *runtime) {
+  if (runtime->virtual_frame_count == 650U && runtime->work_ram[60000] == 0U) runtime->work_ram[60000] = 0xAAU;   // an unrecorded difference, only after frame 650
+  return folding_dispatch(runtime);
+}
+
+void divergence_between_the_last_checkpoint_and_the_end_is_detected() {
+  const std::string file = temp("tail.rec");
+  char error[320];
+  uint64_t end_frame = 0U;
+  (void)record_session(file, 977U, 690U, 21U, &end_frame);   // checkpoints at 0 and 600; ends near 690 with a checkpoint on the end marker
+  check(end_frame > 650U && end_frame < 720U, "the recording ends after frame 650 and before the next interval");
+  set_env("SEGARECOMP_RECORD", nullptr);
+  set_env("SEGARECOMP_REPLAY", file.c_str());
+  auto rp = std::make_unique<GenesisRuntime>();
+  setup(*rp);
+  GenesisSession t;
+  check(genesis_session_from_environment(&t, rp.get(), nullptr, error, sizeof error) == 1, "replay installs");
+  while (!t.done) (void)genesis_runtime_run(rp.get(), tampering_dispatch, 997U);
+  check(t.failed && !t.verified && std::strstr(t.message, ("diverged from the recording at frame " + std::to_string(end_frame)).c_str()) != nullptr, "the end-marker checkpoint reports the tail divergence");
+  genesis_session_finish(&t);
   std::remove(file.c_str());
 }
 }  // namespace
@@ -317,6 +376,8 @@ int main() {
   an_unfinished_recording_is_refused();
   headless_replay_runs_to_the_end_marker();
   a_wrapped_scheduler_hook_still_runs();
+  capacity_ends_on_a_boundary_with_a_final_checkpoint();
+  divergence_between_the_last_checkpoint_and_the_end_is_detected();
   if (failures == 0) std::puts("genesis_session_tests: ok");
   return failures == 0 ? 0 : 1;
 }

@@ -27,7 +27,7 @@ int main(void) {
   SvSessionRecorder rec;
   SvSessionReplay rp;
   char err[400];
-  uint8_t pad[2], digest[32], wrong[32];
+  uint8_t pad[2], digest[32], wrong[32], abab[32];
   uint8_t held[2];
   ident(&a, 0x11, 0);
   ident(&b, 0x22, 0);
@@ -36,6 +36,7 @@ int main(void) {
   strcpy(other_platform.platform, "master-system");
   memset(digest, 0xAB, 32);
   memset(wrong, 0xCD, 32);
+  memset(abab, 0xAB, 32);
 
   /* record: only changes are written, checkpoints and the explicit end marker follow */
   CHECK(sv_session_record_open(&rec, path, &a, err, sizeof err) == 0, "open");
@@ -51,6 +52,7 @@ int main(void) {
   sv_session_record_checkpoint(&rec, 600, digest);
   held[0] = 0;
   CHECK(sv_session_record_pads(&rec, 700, held) == SV_SESSION_RECORD_OK, "release");
+  CHECK(sv_session_record_checkpoint(&rec, 1000, digest) == SV_SESSION_RECORD_OK, "the end boundary carries a checkpoint");
   CHECK(sv_session_record_end(&rec, 1000) == SV_SESSION_RECORD_OK, "end marker");
 
   /* replay against the same identity */
@@ -97,7 +99,7 @@ int main(void) {
   held[0] = 3;
   CHECK(sv_session_record_pads(&rec, 3, held) == SV_SESSION_RECORD_CAPACITY && strstr(rec.message, "capacity was reached") != NULL && strstr(rec.message, "frame 3") != NULL, "capacity is reported");
   CHECK(!sv_session_record_active(&rec), "recording stopped");
-  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) == 0 && rp.count == 2U && rp.end_frame == 3U, "the capped recording is complete and replayable");
+  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "no checkpoint at its end marker") != NULL, "the library-level capacity end has no checkpoint: a console adapter ends on a boundary with one instead, and the loader refuses this file");
   sv_session_replay_free(&rp);
 
   /* malformed input */
@@ -134,6 +136,22 @@ int main(void) {
   CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) == 0, "reload");
   CHECK(sv_session_replay_checkpoints_complete(&rp, err, sizeof err) == 1 && strstr(err, "frame 600") != NULL, "a replay that ends before its checkpoints were compared is reported");
   sv_session_replay_free(&rp);
+  /* the end marker must carry a checkpoint of its own frame, and an unenforced checkpoint is never counted as compared */
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n"
+                   "checkpoint 600 abababababababababababababababababababababababababababababababab\nend 900\n");
+  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "no checkpoint at its end marker") != NULL, "a recording whose end marker has no checkpoint is refused: the tail could diverge unseen");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n"
+                   "checkpoint 900 abababababababababababababababababababababababababababababababab\nend 900\n");
+  {
+    SvSessionIdentity basic = a;
+    strcpy(basic.digest_profile, "basic");
+    CHECK(sv_session_replay_load(&rp, path, &basic, 0, err, sizeof err) == 0 && rp.variant_mismatch, "another profile loads, unenforced");
+    CHECK(sv_session_replay_checkpoint(&rp, 900, wrong, err, sizeof err) == 0 && rp.compared == 0U && rp.checkpoint_next == 1U, "a checkpoint that is not enforced is consumed but never counted as compared");
+    sv_session_replay_free(&rp);
+    CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) == 0 && !rp.variant_mismatch, "the same profile loads, enforced");
+    CHECK(sv_session_replay_checkpoint(&rp, 900, abab, err, sizeof err) == 0 && rp.compared == 1U, "an enforced, equal checkpoint is counted");
+    sv_session_replay_free(&rp);
+  }
   /* a different digest profile: loads, but checkpoints are informational and the mismatch is reported */
   {
     SvSessionIdentity basic = a;

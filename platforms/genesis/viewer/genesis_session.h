@@ -63,7 +63,10 @@ typedef struct GenesisSession {
   int done;                         /* replay reached its end marker, or the recording ended */
   int failed;                       /* divergence or recording error */
   int end_requested;                /* record: end at the next boundary ("Stop recording") */
+  int capacity_end;                 /* record: the end was forced by the event capacity */
+  char capacity_message[200];
   int ended_cleanly;                /* replay: the end marker was reached (not quit early) */
+  int verified;                     /* replay: ended cleanly AND every checkpoint (including the one on the end marker) was compared equal; never set when checkpoints were not enforced */
   uint64_t frames;                  /* guest frame of the last boundary (the frame the session ended at once done) */
   uint32_t checkpoints_checked;
   uint8_t end_digest[32];           /* the state digest at the boundary where the session ended */
@@ -112,23 +115,26 @@ static inline void genesis_session_boundary(GenesisSession *s, GenesisRuntime *r
     const int due = sv_session_record_checkpoint_due(&s->recorder, frame);
     pad[0] = rt->pad1;
     pad[1] = rt->pad2;
-    r = sv_session_record_pads(&s->recorder, frame, pad);
-    if (r != SV_SESSION_RECORD_OK) {   /* capacity (the recording ended with an explicit marker; play on) or a write error */
-      snprintf(s->message, sizeof s->message, "%s", s->recorder.message);
-      s->done = 1;
-      s->failed = r != SV_SESSION_RECORD_CAPACITY;
-      if (s->failed) rt->host_yield_request = 1U;
-      return;
+    if ((pad[0] != s->recorder.last[0] || pad[1] != s->recorder.last[1]) && s->recorder.events + (pad[0] != s->recorder.last[0]) + (pad[1] != s->recorder.last[1]) > s->recorder.max_events) {
+      /* capacity: the recording ends ON this boundary, with its final checkpoint, instead of being cut mid-way (the pads of this frame are not recorded) */
+      snprintf(s->capacity_message, sizeof s->capacity_message, "recording stopped at frame %llu: the %u-event capacity was reached (the recording up to this frame is complete and replayable)",
+               (unsigned long long)frame, (unsigned)s->recorder.max_events);
+      s->end_requested = 1;
+      s->capacity_end = 1;
+    } else {
+      r = sv_session_record_pads(&s->recorder, frame, pad);
+      if (r != SV_SESSION_RECORD_OK) { genesis_session_fail(s, rt, s->recorder.message); return; }
     }
     if ((due || s->end_requested) && genesis_session_digest(s, rt, digest) != 0) { genesis_session_fail(s, rt, "the machine state could not be digested for a checkpoint"); return; }
-    if (due) {
+    if (due || s->end_requested) {   /* the end boundary always carries a checkpoint (unless one is already there) */
       r = sv_session_record_checkpoint(&s->recorder, frame, digest);
       if (r != SV_SESSION_RECORD_OK) { genesis_session_fail(s, rt, s->recorder.message); return; }
     }
     if (s->end_requested) {   /* "Stop recording": the recording ends on this boundary */
       memcpy(s->end_digest, digest, 32);
       if (sv_session_record_end(&s->recorder, frame) != SV_SESSION_RECORD_OK) { genesis_session_fail(s, rt, s->recorder.message); return; }
-      snprintf(s->message, sizeof s->message, "recording saved (%u pad change(s), %llu guest frame(s))", (unsigned)s->recorder.events, (unsigned long long)frame);
+      if (s->capacity_end) snprintf(s->message, sizeof s->message, "%s", s->capacity_message);
+      else snprintf(s->message, sizeof s->message, "recording saved (%u pad change(s), %llu guest frame(s), final checkpoint on the end marker)", (unsigned)s->recorder.events, (unsigned long long)frame);
       s->done = 1;
       rt->host_yield_request = 1U;
     }
@@ -138,11 +144,14 @@ static inline void genesis_session_boundary(GenesisSession *s, GenesisRuntime *r
     rt->pad2 = pad[1];
     if (genesis_session_digest(s, rt, digest) != 0) { genesis_session_fail(s, rt, "the machine state could not be digested for a checkpoint"); return; }
     if (sv_session_replay_checkpoint(&s->replay, frame, digest, s->message, sizeof s->message) != 0) { s->done = 1; s->failed = 1; rt->host_yield_request = 1U; return; }
-    s->checkpoints_checked = s->replay.checkpoint_next;
+    s->checkpoints_checked = s->replay.compared;
     if (sv_session_replay_finished(&s->replay, frame)) {
       if (!s->replay.variant_mismatch && sv_session_replay_checkpoints_complete(&s->replay, s->message, sizeof s->message) != 0) { s->done = 1; s->failed = 1; rt->host_yield_request = 1U; return; }
       memcpy(s->end_digest, digest, 32);
-      snprintf(s->message, sizeof s->message, "replay finished at frame %llu (%u checkpoint(s) matched)", (unsigned long long)frame, (unsigned)s->replay.checkpoint_next);
+      s->verified = !s->replay.variant_mismatch && s->replay.compared != 0U && s->replay.compared == s->replay.checkpoint_count;
+      if (s->verified) snprintf(s->message, sizeof s->message, "replay finished at frame %llu: VERIFIED, all %u checkpoint(s) (including the one on the end marker) matched the recording", (unsigned long long)frame, (unsigned)s->replay.compared);
+      else snprintf(s->message, sizeof s->message, "replay finished at frame %llu: NOT VERIFIED (%s)", (unsigned long long)frame,
+                    s->replay.note[0] != '\0' ? s->replay.note : "no checkpoint was compared");
       s->ended_cleanly = 1;
       s->done = 1;
       rt->host_yield_request = 1U;   /* no instruction beyond this boundary runs, whatever the host's slice size */
@@ -252,15 +261,31 @@ static inline int genesis_session_request_end(GenesisSession *s) {
   return 0;
 }
 
+/* A recording that is being quit ends on the NEXT guest-frame boundary, so its end marker carries a checkpoint of the exact state it ended in: runs the machine (bounded, one frame needs far
+ * fewer dispatches than the budget) until the boundary is reached. A replay needs nothing. Returns 0 when the recording ended on a boundary. */
+static inline int genesis_session_drain(GenesisSession *s, GenesisRuntime *rt, GenesisDispatchFunction dispatch) {
+  uint32_t guard;
+  if (s->mode != GENESIS_SESSION_RECORD || s->done) return 0;
+  if (genesis_session_request_end(s) != 0) return -1;
+  for (guard = 0U; guard < 4096U && !s->done; ++guard) {
+    const GenesisControlTransfer t = genesis_runtime_run(rt, dispatch, 4096U);
+    if (t.kind != GENESIS_RUNNER_RESOURCE_LIMIT) break;   /* the guest stopped: the last boundary reached stands */
+  }
+  return s->done && !s->failed ? 0 : -1;
+}
+
 /* Ends the session and removes the adapter. A recording still open (the program was quit) ends at the last boundary reached: what ran after it is not part of the recording. */
 static inline void genesis_session_finish(GenesisSession *s) {
   if (s->mode == GENESIS_SESSION_NONE) return;
   if (s->runtime != NULL && s->runtime->frame_hooks == &s->hooks) s->runtime->frame_hooks = s->inner;
   if (s->runtime != NULL && s->latched) { s->runtime->mod_pad_active = 0U; s->latched = 0; }
   if (s->mode == GENESIS_SESSION_RECORD) {
-    if (sv_session_record_active(&s->recorder)) {
-      if (sv_session_record_end(&s->recorder, s->frames) != SV_SESSION_RECORD_OK) { s->failed = 1; snprintf(s->message, sizeof s->message, "%s", s->recorder.message); }
-      else snprintf(s->message, sizeof s->message, "recording saved (%u pad change(s), %llu guest frame(s))", (unsigned)s->recorder.events, (unsigned long long)s->frames);
+    if (sv_session_record_active(&s->recorder)) {   /* never ended on a boundary (drain failed or was skipped): no end marker, so the file is refused on replay rather than trusted */
+      fclose(s->recorder.file);
+      s->recorder.file = NULL;
+      s->recorder.finished = 1;
+      s->failed = 1;
+      snprintf(s->message, sizeof s->message, "the recording could not be ended on a guest-frame boundary; it has no end marker and cannot be replayed");
     }
   } else {
     sv_session_replay_free(&s->replay);

@@ -511,13 +511,15 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   }
 #endif
   runtime->live_frame_observer = NULL;
-  if (g_session_on && g_session.mode != GENESIS_SESSION_NONE) {   /* quitting while recording writes the end at the current guest frame */
+  if (g_session_on && g_session.mode != GENESIS_SESSION_NONE) {   /* quitting while recording ends it on the next guest-frame boundary, with a final checkpoint */
     const int replaying = g_session.mode == GENESIS_SESSION_REPLAY;
-    const uint64_t at = g_session.frames;
     const int quit_early = replaying && !g_session.done;   /* the viewer was closed before the recording's end marker */
+    (void)genesis_session_drain(&g_session, runtime, dispatch);
+    const uint64_t at = g_session.frames;
+    const int verified = g_session.verified;
     genesis_session_finish(&g_session);
     fprintf(stderr, "SESSION_SUMMARY {\"mode\":\"%s\",\"outcome\":\"%s\",\"frame\":%llu,\"checkpoints_checked\":%u}\n", replaying ? "replay" : "record",
-            g_session.failed ? "failed" : (quit_early ? "incomplete" : "complete"), (unsigned long long)at, (unsigned)g_session.checkpoints_checked);
+            g_session.failed ? "failed" : (quit_early ? "incomplete" : (replaying && !verified ? "complete_unverified" : "complete")), (unsigned long long)at, (unsigned)g_session.checkpoints_checked);
     if (g_session.message[0] != '\0') fprintf(stderr, "session: %s\n", g_session.message);
   }
 #ifdef SEGARECOMP_MOD_VIEWER
