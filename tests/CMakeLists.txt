@@ -248,7 +248,7 @@ target_compile_features(genesis_frame_capture_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_frame_capture_tests)
 add_test(NAME genesis_frame_capture_tests COMMAND genesis_frame_capture_tests)
 # SEG-146-T006: the Genesis adapter of the shared session recorder (header-only; synthetic machine).
-add_executable(genesis_session_tests genesis_session_test.cpp)
+add_executable(genesis_session_tests genesis_session_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)
 target_include_directories(genesis_session_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
 target_link_libraries(genesis_session_tests PRIVATE segarecomp::runtime_genesis)
 target_compile_features(genesis_session_tests PRIVATE cxx_std_20)

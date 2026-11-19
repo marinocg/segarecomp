@@ -436,10 +436,13 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
       state_config.rewind_interval_ms = env_u32("SEGARECOMP_REWIND_INTERVAL_MS", 50U, 60000U, state_config.rewind_interval_ms);
       state_config.rewind_target_ms = env_u32("SEGARECOMP_REWIND_TARGET_MS", 500U, 3600000U, state_config.rewind_target_ms);
     }
+    if (g_session_on) state_config.rewind_budget_bytes = 0U;   /* SEG-146-T006: a restore moves the guest frame counter backwards; a session never allows it */
     state_config.latest_frame = &g_latest_frame;
     state_config.after_restore = viewer_after_restore;
     state_config.after_restore_context = runtime;
-    if (persist_dir() == NULL) {
+    if (g_session_on) {
+      reason = "States and rewind are unavailable while a session is being recorded or replayed.";
+    } else if (persist_dir() == NULL) {
       reason = "No save location is configured for this session: replays and recordings never use save states.";
     } else if (!parse_hex32(getenv("SEGARECOMP_ROM_SHA256"), state_config.identity.source_sha256)) {
       reason = "This game has no verified identity, so its states cannot be tied to it.";
@@ -500,9 +503,10 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   if (g_session_on && g_session.mode != GENESIS_SESSION_NONE) {   /* quitting while recording writes the end at the current guest frame */
     const int replaying = g_session.mode == GENESIS_SESSION_REPLAY;
     const uint64_t at = g_session.frames;
+    const int quit_early = replaying && !g_session.done;   /* the viewer was closed before the recording's end marker */
     genesis_session_finish(&g_session);
     fprintf(stderr, "SESSION_SUMMARY {\"mode\":\"%s\",\"outcome\":\"%s\",\"frame\":%llu,\"checkpoints_checked\":%u}\n", replaying ? "replay" : "record",
-            g_session.failed ? "failed" : "complete", (unsigned long long)at, (unsigned)g_session.checkpoints_checked);
+            g_session.failed ? "failed" : (quit_early ? "incomplete" : "complete"), (unsigned long long)at, (unsigned)g_session.checkpoints_checked);
     if (g_session.message[0] != '\0') fprintf(stderr, "session: %s\n", g_session.message);
   }
 #ifdef SEGARECOMP_MOD_VIEWER

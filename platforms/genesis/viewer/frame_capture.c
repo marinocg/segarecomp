@@ -118,6 +118,14 @@ static void genesis_pad_script_apply(GenesisRuntime *runtime, const GenesisFrame
 
 static GenesisSession *g_session; /* SEG-146-T006: the replay/record adapter of this run (NULL = none); only the environment driver sets it */
 
+/* The capture window is complete when its frames are captured; a replayed session is run to its end marker regardless (frames beyond the window are simply not captured), and a
+   finished session (replay end, divergence, recording ended early) ends the run. */
+static int genesis_capture_window_done(const GenesisFrameCaptureResult *r, const GenesisFrameCaptureOptions *options) {
+  if (g_session != NULL && g_session->done) return 1;
+  if (g_session != NULL && g_session->mode == GENESIS_SESSION_REPLAY) return 0;
+  return r->frames_captured == options->frame_count;
+}
+
 GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                     const GenesisFrameCaptureOptions *options,
                                                     uint64_t total_dispatch_allowance) {
@@ -176,7 +184,7 @@ GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, Gen
     uint32_t slice;
     GenesisControlTransfer t;
     if (session.io_error) return genesis_frame_capture_finish(runtime, r, GENESIS_FRAME_CAPTURE_IO_ERROR, &observer);
-    if (r.frames_captured == options->frame_count)
+    if (genesis_capture_window_done(&r, options))
       return genesis_frame_capture_finish(runtime, r, GENESIS_FRAME_CAPTURE_WINDOW_COMPLETE, &observer);
     if (remaining == 0U)
       return genesis_frame_capture_finish(runtime, r, GENESIS_FRAME_CAPTURE_INCOMPLETE_RUNNER_EXHAUSTED, &observer);
@@ -193,7 +201,7 @@ GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, Gen
     }
     r.dispatches += 1U; /* terminal slice: count is only a lower bound */
     if (session.io_error) return genesis_frame_capture_finish(runtime, r, GENESIS_FRAME_CAPTURE_IO_ERROR, &observer);
-    if (r.frames_captured == options->frame_count || (g_session != NULL && g_session->done))
+    if (genesis_capture_window_done(&r, options))
       return genesis_frame_capture_finish(runtime, r, GENESIS_FRAME_CAPTURE_WINDOW_COMPLETE, &observer);
     if (t.kind == GENESIS_STOP)
       return genesis_frame_capture_finish(runtime, r, GENESIS_FRAME_CAPTURE_INCOMPLETE_GUEST_STOP, &observer);
@@ -344,9 +352,14 @@ GenesisControlTransfer genesis_frame_capture_run_from_environment(GenesisRuntime
   if (g_session != NULL) {
     const int replaying = g_session->mode == GENESIS_SESSION_REPLAY;
     const uint64_t at = g_session->frames;
+    const int unfinished = replaying && !g_session->done;   /* the capture window ended before the recording did */
     genesis_session_finish(g_session);
+    if (unfinished) {
+      snprintf(g_session->message, sizeof g_session->message, "the capture ended at frame %llu before the recording's end marker: nothing after it was replayed (capture more frames)", (unsigned long long)at);
+      g_session->failed = 1;
+    }
     fprintf(stderr, "SESSION_SUMMARY {\"mode\":\"%s\",\"outcome\":\"%s\",\"frame\":%llu,\"checkpoints_checked\":%u}\n", replaying ? "replay" : "record",
-            g_session->failed ? "failed" : "complete", (unsigned long long)at, (unsigned)g_session->checkpoints_checked);
+            g_session->failed ? (unfinished ? "incomplete" : "failed") : "complete", (unsigned long long)at, (unsigned)g_session->checkpoints_checked);
     if (g_session->message[0] != '\0') fprintf(stderr, "session: %s\n", g_session->message);
     if (g_session->failed) exit(6);
   }

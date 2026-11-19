@@ -40,6 +40,7 @@ typedef struct GenesisSession {
   int latched;                      /* this adapter set runtime->mod_pad_active */
   int done;                         /* replay reached its end marker, or recording ended early */
   int failed;                       /* divergence or recording error */
+  int ended_cleanly;                /* replay: the end marker was reached (not quit early) */
   uint64_t frames;                  /* guest frame of the last boundary */
   uint32_t checkpoints_checked;
   uint8_t end_digest[32];           /* replay: the state digest at the boundary where it ended (identical however a host slices execution) */
@@ -62,7 +63,7 @@ static inline void genesis_session_digest(const GenesisRuntime *rt, uint8_t out[
 
 static inline void genesis_session_boundary(GenesisSession *s, GenesisRuntime *rt) {
   const uint64_t frame = rt->virtual_frame_count;
-  s->frames = frame;
+  if (!s->done) s->frames = frame;   /* the frame the session ended at, independent of how far a host's slice ran on */
   if (s->mode == GENESIS_SESSION_RECORD && !s->done) {
     uint8_t digest[32];
     uint8_t pad[2];
@@ -87,6 +88,7 @@ static inline void genesis_session_boundary(GenesisSession *s, GenesisRuntime *r
     else if (sv_session_replay_finished(&s->replay, frame)) {
       snprintf(s->message, sizeof s->message, "replay finished at frame %llu (%u checkpoint(s) not contradicted)", (unsigned long long)frame, (unsigned)s->replay.checkpoint_next);
       memcpy(s->end_digest, digest, 32);
+      s->ended_cleanly = 1;
       s->done = 1;
     }
     s->checkpoints_checked = s->replay.checkpoint_next;

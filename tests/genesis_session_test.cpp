@@ -1,6 +1,7 @@
 // SEG-146-T006: the Genesis adapter of the shared session recorder (platforms/genesis/viewer/genesis_session.h).
 // Project-authored synthetic machine only (no ROM): a program that folds the pad the guest reads into its state on every dispatch, so any difference in WHEN a pad
 // becomes visible changes the final state. Recording with one host slicing and mid-frame host polls must replay identically with another slicing and no host input.
+#include "frame_capture.h"
 #include "genesis_session.h"
 #include "runtime.h"
 
@@ -8,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -111,10 +113,11 @@ void record_then_replay_is_identical_across_slicings() {
     check(t.done && !t.failed, "replay finishes without divergence");
     check(t.replay.checkpoint_next >= 2U, "checkpoints were compared");
     const Final replayed = snapshot(rp);
+    check(t.frames == t.replay.end_frame, "the session ends exactly at the recorded end frame, whatever the slice size");
     genesis_session_finish(&t);
     // The recorder ended at the frame it observed last; the replay ends at that same frame boundary.
     check(replayed.d1 != 0U, "the program ran");
-    check(rp.virtual_frame_count == recorded.frames || replayed.frames >= recorded.frames - 1U, "replay ran to the recorded end");
+    check(replayed.frames >= recorded.frames - 1U, "replay ran to the recorded end");
   }
   std::remove(file.c_str());
 }
@@ -145,6 +148,7 @@ void exact_final_state_matches() {
   run_frames(b, &tb, 7919U, 100000U, true, 5U);   // host pads present but ignored: the replay owns the pad
   // Both stop at a boundary: A exactly at the end frame (slice 1), B within one slice of it.
   check(ta.done && tb.done && !ta.failed && !tb.failed, "both replays reached the end marker");
+  check(ta.frames == tb.frames && ta.frames != 0U, "and report the same end frame");
   check(std::memcmp(ta.end_digest, tb.end_digest, 32) == 0 && !same_zero(ta.end_digest), "the state at the end boundary is identical for slicings of 1 and 7919 dispatches, with and without host pads");
   std::remove(file.c_str());
 }
@@ -238,6 +242,39 @@ void an_unfinished_recording_is_refused() {
   std::remove(file.c_str());
 }
 
+// The headless path: frame_capture.c's environment driver replays the SAME file and runs to the end marker even though the capture window is one frame.
+void headless_replay_runs_to_the_end_marker() {
+  const std::string file = temp("headless.rec");
+  const std::string dir = temp("headless-frames");
+  char error[320];
+  set_env("SEGARECOMP_ROM_SHA256", kImage);
+  set_env("SEGARECOMP_RECORD", file.c_str());
+  set_env("SEGARECOMP_REPLAY", nullptr);
+  GenesisRuntime rec;
+  setup(rec);
+  GenesisSession s;
+  check(genesis_session_from_environment(&s, &rec, error, sizeof error) == 1, "record installs");
+  run_frames(rec, &s, 600U, 40U, true, 6U);
+  genesis_session_finish(&s);
+  const uint64_t end_frame = rec.virtual_frame_count;
+  set_env("SEGARECOMP_RECORD", nullptr);
+  set_env("SEGARECOMP_REPLAY", file.c_str());
+  set_env("SEGARECOMP_CAPTURE_DIR", dir.c_str());
+  set_env("SEGARECOMP_CAPTURE_FIRST", "1");
+  set_env("SEGARECOMP_CAPTURE_COUNT", "1");
+  set_env("SEGARECOMP_CAPTURE_SLICE", "700");
+  std::filesystem::create_directories(dir);
+  GenesisRuntime rp;
+  setup(rp);
+  const GenesisControlTransfer t = genesis_frame_capture_run_from_environment(&rp, folding_dispatch, 4000000U);
+  check(t.kind == GENESIS_RUNNER_RESOURCE_LIMIT, "the capture window completed");
+  check(rp.virtual_frame_count >= end_frame && rp.virtual_frame_count < end_frame + 20U, "the replay ran to the recording's end, past the one-frame capture window, and stopped there");
+  set_env("SEGARECOMP_REPLAY", nullptr);
+  set_env("SEGARECOMP_CAPTURE_DIR", nullptr);
+  std::filesystem::remove_all(dir);
+  std::remove(file.c_str());
+}
+
 void a_wrapped_scheduler_hook_still_runs() {
   struct Counter { int starts = 0, frame_ends = 0, afters = 0; } counter;
   GenesisFrameHooks inner{};
@@ -270,6 +307,7 @@ int main() {
   identity_and_flags();
   divergence_is_reported_at_the_checkpoint();
   an_unfinished_recording_is_refused();
+  headless_replay_runs_to_the_end_marker();
   a_wrapped_scheduler_hook_still_runs();
   if (failures == 0) std::puts("genesis_session_tests: ok");
   return failures == 0 ? 0 : 1;

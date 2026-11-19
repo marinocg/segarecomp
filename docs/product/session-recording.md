@@ -12,7 +12,8 @@ Sega CD keeps its own recorder (see [sega-cd-play.md](sega-cd-play.md)); Master 
 genesis_startup_bridge.py --rom game.bin --viewer --record session.rec
 # replay in the viewer (it closes by itself at the end of the recording)
 genesis_startup_bridge.py --rom game.bin --viewer --replay session.rec
-# replay headless with the SAME file; the checkpoint digests are compared as it runs
+# replay headless with the SAME file; the checkpoint digests are compared as it runs. The replay always runs to the end marker (the capture window only
+# selects which frames are written); if the game stops or the budget runs out first it is reported as incomplete (exit status 6)
 genesis_startup_bridge.py --rom game.bin --capture-frames 1:1 --replay session.rec
 # replay against another effective image / package: the mismatch is reported and the replay continues
 genesis_startup_bridge.py --rom patched.bin --viewer --replay session.rec --allow-variant
@@ -27,7 +28,7 @@ written: a session always starts from power-on, so no frame number can ever be r
 
 Messages you can see: `recording stopped at frame N: the 4000000-event capacity was reached (...)`, `the recording has no end marker: it was not finished ... cannot be replayed`,
 `the recording was made on a different image or version (...); pass --allow-variant to replay it anyway`, `replay diverged from the recording at frame N (checkpoint digest mismatch)`.
-A diverged or failed session makes the program exit with status 6.
+A diverged, failed or (headless) incomplete session makes the program exit with status 6.
 
 ## Format `segarecomp-session 1`
 
