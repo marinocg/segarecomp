@@ -379,6 +379,13 @@ private:
   scd::RunOptions scd_launch_options_;
   bool scd_launch_windowless_ = false;
   bool scd_record_ = false;                            // "Record this session": the next Play writes an input script
+  // SEG-146-T006: a Genesis game's input recording (the shared session recorder, libs/viewer/include/sv_session.h). The next Play records from power-on, or a Replay button replays a file once.
+  bool session_record_ = false;
+  bool session_allow_variant_ = false;                 // replay against a different effective image / package (the mismatch is reported)
+  std::filesystem::path session_replay_;               // one-shot: set by a Replay button, consumed by the next launch
+  [[nodiscard]] std::filesystem::path session_dir(const LibraryEntry &entry) const;
+  [[nodiscard]] std::vector<std::filesystem::path> session_recordings(const LibraryEntry &entry) const;
+  float draw_session_recordings(LibraryEntry &entry, const StatusInfo &info, float w);
   bool game_is_scd_ = false;
   scd::RunOptions game_scd_options_;
   std::string game_scd_note_;

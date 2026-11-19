@@ -116,6 +116,7 @@ static void genesis_pad_script_apply(GenesisRuntime *runtime, const GenesisFrame
   }
 }
 
+static const GenesisSessionDigest *g_session_digest_host; /* SEG-146-T006: the host's whole-machine checkpoint digest, if it registered one */
 static GenesisSession *g_session; /* SEG-146-T006: the replay/record adapter of this run (NULL = none); only the environment driver sets it */
 
 /* The capture window is complete when its frames are captured; a replayed session is run to its end marker regardless (frames beyond the window are simply not captured), and a
@@ -290,6 +291,8 @@ static int genesis_capture_ram_parse(const char *text, GenesisCaptureRamRegion *
   return (int)count;
 }
 
+void genesis_frame_capture_set_session_digest(const struct GenesisSessionDigest *digest) { g_session_digest_host = digest; }
+
 int genesis_frame_capture_requested(void) {
   return getenv("SEGARECOMP_CAPTURE_DIR") != NULL;
 }
@@ -341,7 +344,7 @@ GenesisControlTransfer genesis_frame_capture_run_from_environment(GenesisRuntime
   {
     static GenesisSession session;
     char session_error[320];
-    const int sr = genesis_session_from_environment(&session, runtime, session_error, sizeof session_error);
+    const int sr = genesis_session_from_environment(&session, runtime, g_session_digest_host, session_error, sizeof session_error);
     if (sr < 0) {
       fprintf(stderr, "capture: %s\n", session_error);
       exit(3);

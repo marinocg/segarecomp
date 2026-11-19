@@ -128,8 +128,7 @@ void sv_host_stop_screen(SvHost *host, const char *title, const char *detail);
 /* SEG-131 (ADR 0278): registers the adapter's whole-machine save-state / rewind capabilities (copied; NULL unregisters). Without a provider the pause menu shows
  * accurate disabled Save State / Load State / Rewind rows. The provider is called only from sv_host_service (the adapter's snapshot barrier). */
 void sv_host_set_state_provider(SvHost *host, const SvStateProvider *provider);
-/* SEG-146-T006: the adapter's session recorder (sv_session.h) as a pause-menu entry. `status` fills a short text and returns 0 idle, 1 recording, 2 replaying; `stop` ends a
- * recording at the current guest frame (0 = saved, nonzero = failed; `message` says what happened). The host calls both only from sv_host_service (the frame barrier).
+/* SEG-146-T006: the adapter's session recorder (sv_session.h) as a pause-menu entry. `status` fills a short text and returns 0 idle, 1 recording, 2 replaying, 3 recording-is-ending; `stop` asks the adapter to end the recording at its next guest-frame boundary (0 = accepted, nonzero = failed; `message` says what happened). The host calls both only from sv_host_service (the frame barrier).
  * Registering shows the "Stop recording" row (disabled with a reason unless a recording is in progress); NULL unregisters (no row). */
 typedef struct SvSessionControl {
   void *ctx;

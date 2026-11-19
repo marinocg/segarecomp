@@ -495,6 +495,7 @@ static void add_session_rows(SvHost *h, SvPage *p) {
   sv_item_set_icon(item, "storage");
   if (mode == 1 && h->session.stop != NULL) sv_item_set_hint(item, "Ends the recording at this moment and saves the session file. Quitting the game does the same.");
   else if (mode == 2) sv_item_disable(item, "A recorded session is being replayed: nothing is being recorded.");
+  else if (mode == 3) sv_item_disable(item, "The recording is ending at the next frame.");
   else sv_item_disable(item, "No recording is in progress. A recording starts at power-on (start the game with --record <file>).");
 }
 

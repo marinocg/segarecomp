@@ -10,6 +10,7 @@ static int failures;
 static void ident(SvSessionIdentity *id, uint8_t image, uint8_t variant) {
   memset(id, 0, sizeof *id);
   strcpy(id->platform, "genesis");
+  strcpy(id->digest_profile, "machine-0001");
   memset(id->image, image, 32);
   memset(id->variant, variant, 32);
 }
@@ -102,14 +103,54 @@ int main(void) {
   /* malformed input */
   write_text(path, "not a session\n");
   CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "not a segarecomp session recording") != NULL, "bad header");
-  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 11\nvariant vanilla\nend 1\n");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 11\nvariant vanilla\ndigest machine-0001\nend 1\n");
   CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "malformed image hash") != NULL, "bad hash");
-  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\n5 1 7\n4 1 0\nend 9\n");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n5 1 7\n4 1 0\nend 9\n");
   CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "goes back in time") != NULL, "events out of order");
-  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\n5 3 7\nend 9\n");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n5 3 7\nend 9\n");
   CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "malformed") != NULL, "bad player");
-  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\n   \n5 1 256\nend 9\n");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n   \n5 1 256\nend 9\n");
   CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "malformed") != NULL, "mask out of range");
+
+
+  /* checkpoints: strictly increasing, within the end marker, never skipped, all compared by the end */
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n"
+                   "checkpoint 600 abababababababababababababababababababababababababababababababab\ncheckpoint 300 abababababababababababababababababababababababababababababababab\nend 900\n");
+  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "checkpoint out of order") != NULL, "out-of-order checkpoints are refused, not skipped");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n"
+                   "checkpoint 600 abababababababababababababababababababababababababababababababab\ncheckpoint 600 abababababababababababababababababababababababababababababababab\nend 900\n");
+  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "out of order") != NULL, "a duplicate checkpoint frame is refused");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n"
+                   "checkpoint 1200 abababababababababababababababababababababababababababababababab\nend 900\n");
+  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "beyond the end marker") != NULL, "a checkpoint beyond the end marker is refused");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\nend 900\n");
+  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) != 0 && strstr(err, "header is incomplete") != NULL, "a recording without a digest profile line is refused");
+  write_text(path, SV_SESSION_FORMAT "\nplatform genesis\nimage 1111111111111111111111111111111111111111111111111111111111111111\nvariant vanilla\ndigest machine-0001\n"
+                   "checkpoint 600 abababababababababababababababababababababababababababababababab\ncheckpoint 1200 abababababababababababababababababababababababababababababababab\nend 1200\n");
+  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) == 0, "two ordered checkpoints load");
+  CHECK(sv_session_replay_checkpoint(&rp, 600, digest, err, sizeof err) == 0, "first compared");
+  CHECK(sv_session_replay_checkpoint(&rp, 1201, digest, err, sizeof err) == 1 && strstr(err, "without comparing") != NULL, "passing a checkpoint without comparing it is an error");
+  sv_session_replay_free(&rp);
+  CHECK(sv_session_replay_load(&rp, path, &a, 0, err, sizeof err) == 0, "reload");
+  CHECK(sv_session_replay_checkpoints_complete(&rp, err, sizeof err) == 1 && strstr(err, "frame 600") != NULL, "a replay that ends before its checkpoints were compared is reported");
+  sv_session_replay_free(&rp);
+  /* a different digest profile: loads, but checkpoints are informational and the mismatch is reported */
+  {
+    SvSessionIdentity basic = a;
+    strcpy(basic.digest_profile, "basic");
+    CHECK(sv_session_replay_load(&rp, path, &basic, 0, err, sizeof err) == 0 && rp.variant_mismatch && strstr(rp.note, "machine digest") != NULL, "another digest profile: not enforced, and said so");
+    sv_session_replay_free(&rp);
+  }
+#ifdef __linux__
+  /* a checkpoint that cannot be written ends the recording with an error (no end marker, so replay refuses the file) */
+  CHECK(sv_session_record_open(&rec, path, &a, err, sizeof err) == 0, "open for write failure");
+  fclose(rec.file);
+  rec.file = fopen("/dev/full", "wb");
+  if (rec.file != NULL) {
+    CHECK(sv_session_record_checkpoint(&rec, 600, digest) == SV_SESSION_RECORD_ERROR, "checkpoint write failure is reported");
+    CHECK(!sv_session_record_active(&rec) && strstr(rec.message, "checkpoint could not be written") != NULL, "and the recording is over, with the reason");
+  }
+#endif
 
   /* privacy: a recording holds the header hashes, masks and frames only */
   CHECK(sv_session_record_open(&rec, path, &a, err, sizeof err) == 0, "open privacy");

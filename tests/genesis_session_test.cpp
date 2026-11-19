@@ -12,6 +12,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
+#include <vector>
 #include <string>
 
 namespace {
@@ -55,7 +57,7 @@ void setup(GenesisRuntime &r) {
 // Runs until `frames` guest frames elapsed. host_pads: when true the host changes the physical pads every slice (the viewer's behaviour), at a rate unrelated to frames.
 void run_frames(GenesisRuntime &r, GenesisSession *session, uint32_t slice, uint64_t frames, bool host_pads, uint32_t seed) {
   uint32_t n = seed;
-  while (r.virtual_frame_count < frames && !(session != nullptr && session->done && session->mode == GENESIS_SESSION_REPLAY)) {
+  while (r.virtual_frame_count < frames && !(session != nullptr && session->done)) {
     if (host_pads) {
       n = n * 1103515245U + 12345U;
       r.pad1 = static_cast<uint8_t>((n >> 16) & ((n >> 24) & 1U ? 0xFFU : 0U));
@@ -72,84 +74,91 @@ std::string read_all(const std::string &path) {
   return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
-bool same_zero(const uint8_t *d) { for (int i = 0; i < 32; ++i) if (d[i] != 0U) return false; return true; }
-struct Final { uint32_t d1; uint8_t digest[32]; uint64_t frames; };
-Final snapshot(const GenesisRuntime &r) {
-  Final f{};
-  f.d1 = r.d[1];
-  genesis_session_digest(&r, f.digest);
-  f.frames = r.virtual_frame_count;
-  return f;
+// The machine as the guest sees it: everything except the host-owned pad latches and hook pointers (they are not machine state).
+std::vector<unsigned char> machine_bytes(const GenesisRuntime &r) {
+  std::vector<unsigned char> bytes(sizeof r);
+  std::memcpy(bytes.data(), &r, sizeof r);
+  auto *c = reinterpret_cast<GenesisRuntime *>(bytes.data());
+  c->pad1 = c->pad2 = c->mod_pad_active = c->mod_pad1 = c->mod_pad2 = c->host_yield_request = 0U;
+  c->frame_hooks = nullptr;
+  return bytes;
 }
 
-void record_then_replay_is_identical_across_slicings() {
-  const std::string file = temp("session.rec");
+// Records `frames` guest frames with mid-frame host pads at `slice`, then stops ON the next boundary ("Stop recording"). Returns the machine exactly where the recording ended.
+std::vector<unsigned char> record_session(const std::string &file, uint32_t slice, uint64_t frames, uint32_t seed, uint64_t *end_frame, bool host_pads = true) {
   char error[320];
   set_env("SEGARECOMP_ROM_SHA256", kImage);
   set_env("SEGARECOMP_SAVE_VARIANT", nullptr);
   set_env("SEGARECOMP_REPLAY", nullptr);
   set_env("SEGARECOMP_RECORD", file.c_str());
-  GenesisRuntime rec;
-  setup(rec);
+  auto rec = std::make_unique<GenesisRuntime>();
+  setup(*rec);
   GenesisSession s;
-  check(genesis_session_from_environment(&s, &rec, error, sizeof error) == 1, "record session installs");
-  run_frames(rec, &s, 977U, 1300U, true, 1U);   // mid-frame host polls at an odd slice size, across two checkpoint intervals
-  const Final recorded = snapshot(rec);
-  genesis_session_finish(&s);
-  check(!s.failed && std::strstr(s.message, "recording saved") != nullptr, "recording finishes with a summary");
-  check(rec.frame_hooks == nullptr && rec.mod_pad_active == 0U, "the adapter removes itself");
-  const std::string text = read_all(file);
-  check(text.find("segarecomp-session 1") == 0 && text.find("\nend ") != std::string::npos && text.find("checkpoint 600 ") != std::string::npos && text.find("checkpoint 1200 ") != std::string::npos,
-        "header, checkpoints and an end marker");
-
-  for (uint32_t slice : {1U, 500U, 65536U}) {
-    set_env("SEGARECOMP_RECORD", nullptr);
-    set_env("SEGARECOMP_REPLAY", file.c_str());
-    GenesisRuntime rp;
-    setup(rp);
-    GenesisSession t;
-    check(genesis_session_from_environment(&t, &rp, error, sizeof error) == 1, "replay session installs");
-    run_frames(rp, &t, slice, 100000U, false, 0U);
-    check(t.done && !t.failed, "replay finishes without divergence");
-    check(t.replay.checkpoint_next >= 2U, "checkpoints were compared");
-    const Final replayed = snapshot(rp);
-    check(t.frames == t.replay.end_frame, "the session ends exactly at the recorded end frame, whatever the slice size");
-    genesis_session_finish(&t);
-    // The recorder ended at the frame it observed last; the replay ends at that same frame boundary.
-    check(replayed.d1 != 0U, "the program ran");
-    check(replayed.frames >= recorded.frames - 1U, "replay ran to the recorded end");
+  check(genesis_session_from_environment(&s, rec.get(), nullptr, error, sizeof error) == 1, "record session installs");
+  uint32_t n = seed;
+  bool requested = false;
+  while (!s.done) {
+    if (host_pads) {
+      n = n * 1103515245U + 12345U;
+      rec->pad1 = static_cast<uint8_t>((n >> 16) & ((n >> 24) & 1U ? 0xFFU : 0U));
+      rec->pad2 = static_cast<uint8_t>((n >> 8) & ((n >> 20) & 1U ? 0x3FU : 0U));
+    }
+    if (!requested && rec->virtual_frame_count >= frames) { requested = true; check(genesis_session_request_end(&s) == 0, "stop recording is accepted"); }
+    (void)genesis_runtime_run(rec.get(), folding_dispatch, slice);
   }
-  std::remove(file.c_str());
+  check(!s.failed && std::strstr(s.message, "recording saved") != nullptr, "recording finishes with a summary");
+  *end_frame = rec->virtual_frame_count;
+  check(s.frames == *end_frame, "the recording ended on the boundary it reports");
+  auto bytes = machine_bytes(*rec);
+  genesis_session_finish(&s);
+  check(rec->frame_hooks == nullptr && rec->mod_pad_active == 0U, "the adapter removes itself");
+  return bytes;
 }
 
-void exact_final_state_matches() {
-  // Stop both runs on the identical dispatch boundary: the recording's end frame. (Slicing may overshoot a frame boundary by a slice, so compare at the boundary state.)
-  const std::string file = temp("exact.rec");
+// Replays at `slice`; returns the machine at the moment the runner yielded.
+std::vector<unsigned char> replay_session(const std::string &file, uint32_t slice, bool host_pads, uint64_t *frame, uint32_t *checked = nullptr) {
   char error[320];
-  set_env("SEGARECOMP_ROM_SHA256", kImage);
-  set_env("SEGARECOMP_RECORD", file.c_str());
-  set_env("SEGARECOMP_REPLAY", nullptr);
-  GenesisRuntime rec;
-  setup(rec);
-  GenesisSession s;
-  check(genesis_session_from_environment(&s, &rec, error, sizeof error) == 1, "record installs");
-  run_frames(rec, &s, 333U, 40U, true, 9U);
-  genesis_session_finish(&s);
-  // Replay in single dispatches until the first boundary at/after the end frame, and compare with the recording run stopped at its own end.
   set_env("SEGARECOMP_RECORD", nullptr);
   set_env("SEGARECOMP_REPLAY", file.c_str());
-  GenesisRuntime a, b;
-  setup(a);
-  setup(b);
-  GenesisSession ta, tb;
-  check(genesis_session_from_environment(&ta, &a, error, sizeof error) == 1, "replay A installs");
-  check(genesis_session_from_environment(&tb, &b, error, sizeof error) == 1, "replay B installs");
-  run_frames(a, &ta, 1U, 100000U, false, 0U);
-  run_frames(b, &tb, 7919U, 100000U, true, 5U);   // host pads present but ignored: the replay owns the pad
-  // Both stop at a boundary: A exactly at the end frame (slice 1), B within one slice of it.
-  check(ta.done && tb.done && !ta.failed && !tb.failed, "both replays reached the end marker");
-  check(ta.frames == tb.frames && ta.frames != 0U, "and report the same end frame");
-  check(std::memcmp(ta.end_digest, tb.end_digest, 32) == 0 && !same_zero(ta.end_digest), "the state at the end boundary is identical for slicings of 1 and 7919 dispatches, with and without host pads");
+  auto rp = std::make_unique<GenesisRuntime>();
+  setup(*rp);
+  GenesisSession t;
+  check(genesis_session_from_environment(&t, rp.get(), nullptr, error, sizeof error) == 1, "replay session installs");
+  uint32_t n = 77U;
+  uint64_t dispatches = 0U;
+  while (!t.done && dispatches < 100000000U) {
+    if (host_pads) { n = n * 1103515245U + 12345U; rp->pad1 = static_cast<uint8_t>(n >> 16); rp->pad2 = static_cast<uint8_t>(n >> 8); }
+    const auto transfer = genesis_runtime_run(rp.get(), folding_dispatch, slice);
+    dispatches += transfer.runner_dispatch_count;
+  }
+  check(t.done && !t.failed && t.ended_cleanly, (std::string("replay finishes without divergence (") + t.message + ")").c_str());
+  check(t.frames == t.replay.end_frame && rp->virtual_frame_count == t.replay.end_frame, "the replay stopped exactly on the end boundary: no frame and no instruction beyond it ran");
+  if (frame != nullptr) *frame = rp->virtual_frame_count;
+  if (checked != nullptr) *checked = t.checkpoints_checked;
+  auto bytes = machine_bytes(*rp);
+  genesis_session_finish(&t);
+  return bytes;
+}
+
+void record_then_replay_reproduces_the_whole_machine_at_the_end_boundary() {
+  const std::string file = temp("session.rec");
+  uint64_t end_frame = 0U;
+  const auto recorded = record_session(file, 977U, 1300U, 1U, &end_frame);
+  check(end_frame >= 1300U && end_frame < 1320U, "the recording ended at the first boundary after the stop request");
+  const std::string text = read_all(file);
+  check(text.find("segarecomp-session 1") == 0 && text.find("digest basic") != std::string::npos && text.find("\nend ") != std::string::npos &&
+            text.find("checkpoint 600 ") != std::string::npos && text.find("checkpoint 1200 ") != std::string::npos,
+        "header, digest profile, checkpoints and an end marker");
+  for (const uint32_t slice : {1U, 500U, 7919U, 65536U}) {
+    for (const bool host_pads : {false, true}) {
+      uint64_t frame = 0U;
+      uint32_t checked = 0U;
+      const auto replayed = replay_session(file, slice, host_pads, &frame, &checked);
+      check(frame == end_frame, "the replay ends at the recorded frame");
+      check(checked >= 3U, "every checkpoint was compared");
+      check(replayed == recorded, ("the machine at the end boundary is byte-identical to the recorded run's, at slice " + std::to_string(slice) + (host_pads ? " with host pads" : "")).c_str());
+    }
+  }
   std::remove(file.c_str());
 }
 
@@ -162,7 +171,7 @@ void identity_and_flags() {
   GenesisRuntime rec;
   setup(rec);
   GenesisSession s;
-  check(genesis_session_from_environment(&s, &rec, error, sizeof error) == 1, "record installs");
+  check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "record installs");
   run_frames(rec, &s, 500U, 30U, true, 3U);
   genesis_session_finish(&s);
 
@@ -172,10 +181,10 @@ void identity_and_flags() {
   GenesisRuntime r;
   setup(r);
   GenesisSession t;
-  check(genesis_session_from_environment(&t, &r, error, sizeof error) == -1 && std::strstr(error, "--allow-variant") != nullptr, "a different effective image is refused");
+  check(genesis_session_from_environment(&t, &r, nullptr, error, sizeof error) == -1 && std::strstr(error, "--allow-variant") != nullptr, "a different effective image is refused");
   check(r.frame_hooks == nullptr, "a refused session installs nothing");
   set_env("SEGARECOMP_ALLOW_VARIANT", "1");
-  check(genesis_session_from_environment(&t, &r, error, sizeof error) == 1 && t.replay.variant_mismatch, "--allow-variant admits it");
+  check(genesis_session_from_environment(&t, &r, nullptr, error, sizeof error) == 1 && t.replay.variant_mismatch, "--allow-variant admits it");
   run_frames(r, &t, 700U, 100000U, false, 0U);
   check(t.done && !t.failed, "a variant replay is not judged by checkpoints");
   genesis_session_finish(&t);
@@ -185,11 +194,11 @@ void identity_and_flags() {
   GenesisRuntime n;
   setup(n);
   GenesisSession u;
-  check(genesis_session_from_environment(&u, &n, error, sizeof error) == -1 && std::strstr(error, "no verified identity") != nullptr, "no identity, no session");
+  check(genesis_session_from_environment(&u, &n, nullptr, error, sizeof error) == -1 && std::strstr(error, "no verified identity") != nullptr, "no identity, no session");
   set_env("SEGARECOMP_ROM_SHA256", kImage);
   set_env("SEGARECOMP_RECORD", file.c_str());
   GenesisSession both;
-  check(genesis_session_from_environment(&both, &n, error, sizeof error) == -1 && std::strstr(error, "cannot be used together") != nullptr, "--record and --replay are exclusive");
+  check(genesis_session_from_environment(&both, &n, nullptr, error, sizeof error) == -1 && std::strstr(error, "cannot be used together") != nullptr, "--record and --replay are exclusive");
   set_env("SEGARECOMP_RECORD", nullptr);
   std::remove(file.c_str());
 }
@@ -203,7 +212,7 @@ void divergence_is_reported_at_the_checkpoint() {
   GenesisRuntime rec;
   setup(rec);
   GenesisSession s;
-  check(genesis_session_from_environment(&s, &rec, error, sizeof error) == 1, "record installs");
+  check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "record installs");
   run_frames(rec, &s, 4096U, 700U, true, 11U);
   genesis_session_finish(&s);
   set_env("SEGARECOMP_RECORD", nullptr);
@@ -213,7 +222,7 @@ void divergence_is_reported_at_the_checkpoint() {
   rp.d[1] = 1234U;   // a different program state: the machine is not the recorded one
   rp.work_ram[5000] = 1U;
   GenesisSession t;
-  check(genesis_session_from_environment(&t, &rp, error, sizeof error) == 1, "replay installs");
+  check(genesis_session_from_environment(&t, &rp, nullptr, error, sizeof error) == 1, "replay installs");
   run_frames(rp, &t, 4096U, 100000U, false, 0U);
   check(t.done && t.failed && std::strstr(t.message, "diverged") != nullptr && std::strstr(t.message, "frame 0 ") != nullptr, "a machine that is not the recorded one is reported at the power-on checkpoint");
   genesis_session_finish(&t);
@@ -229,7 +238,7 @@ void an_unfinished_recording_is_refused() {
   GenesisRuntime rec;
   setup(rec);
   GenesisSession s;
-  check(genesis_session_from_environment(&s, &rec, error, sizeof error) == 1, "record installs");
+  check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "record installs");
   run_frames(rec, &s, 4096U, 10U, true, 2U);
   // Not finished: the file is a valid prefix (streamed) but has no end marker.
   set_env("SEGARECOMP_RECORD", nullptr);
@@ -237,7 +246,7 @@ void an_unfinished_recording_is_refused() {
   GenesisRuntime rp;
   setup(rp);
   GenesisSession t;
-  check(genesis_session_from_environment(&t, &rp, error, sizeof error) == -1 && std::strstr(error, "no end marker") != nullptr, "no end marker, no replay");
+  check(genesis_session_from_environment(&t, &rp, nullptr, error, sizeof error) == -1 && std::strstr(error, "no end marker") != nullptr, "no end marker, no replay");
   genesis_session_finish(&s);
   std::remove(file.c_str());
 }
@@ -253,7 +262,7 @@ void headless_replay_runs_to_the_end_marker() {
   GenesisRuntime rec;
   setup(rec);
   GenesisSession s;
-  check(genesis_session_from_environment(&s, &rec, error, sizeof error) == 1, "record installs");
+  check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "record installs");
   run_frames(rec, &s, 600U, 40U, true, 6U);
   genesis_session_finish(&s);
   const uint64_t end_frame = rec.virtual_frame_count;
@@ -291,7 +300,7 @@ void a_wrapped_scheduler_hook_still_runs() {
   setup(rec);
   rec.frame_hooks = &inner;
   GenesisSession s;
-  check(genesis_session_from_environment(&s, &rec, error, sizeof error) == 1, "wraps an installed scheduler");
+  check(genesis_session_from_environment(&s, &rec, nullptr, error, sizeof error) == 1, "wraps an installed scheduler");
   run_frames(rec, &s, 2000U, 12U, true, 4U);
   genesis_session_finish(&s);
   check(rec.frame_hooks == &inner, "the original hooks are restored");
@@ -302,8 +311,7 @@ void a_wrapped_scheduler_hook_still_runs() {
 }  // namespace
 
 int main() {
-  record_then_replay_is_identical_across_slicings();
-  exact_final_state_matches();
+  record_then_replay_reproduces_the_whole_machine_at_the_end_boundary();
   identity_and_flags();
   divergence_is_reported_at_the_checkpoint();
   an_unfinished_recording_is_refused();

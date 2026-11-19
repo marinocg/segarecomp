@@ -31,6 +31,12 @@
 #include "frame_capture.h"
 #include "sv_perf.h"
 #include "genesis_sound.h"
+#ifdef SEGARECOMP_SESSION_MACHINE_DIGEST
+#include "genesis_session_machine.h" /* SEG-146-T006: the whole-machine checkpoint digest of --record/--replay (needs genesis_snapshot.c linked) */
+#ifdef SEGARECOMP_SESSION_MACHINE_MOD
+const GenesisSnapshotModState *segarecomp_scheduled_mod_snapshot(void);   /* mod_capture.cpp: the attached scheduler's state (NULL until attached) */
+#endif
+#endif
 
 #define C(x) (unsigned long long)(x)
 GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch, uint32_t dispatch_allowance);
@@ -221,6 +227,23 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
     fprintf(stderr, "perf: a frame-capture run is not measured; no performance report is written\n");
     perf_path = NULL;
   }
+#ifdef SEGARECOMP_SESSION_MACHINE_DIGEST
+  {
+    static GenesisSessionMachineDigest session_machine;
+    static GenesisSessionDigest session_digest;
+    GenesisSnapshotMachine snapshot_machine;
+    memset(&snapshot_machine, 0, sizeof snapshot_machine);
+    snapshot_machine.runtime = runtime;
+    snapshot_machine.z80 = genesis_sound_attach(runtime);
+    snapshot_machine.audio = genesis_sound_audio_mutable();
+#ifdef SEGARECOMP_SESSION_MACHINE_MOD
+    genesis_session_machine_digest_init(&session_digest, &session_machine, &snapshot_machine, segarecomp_scheduled_mod_snapshot);
+#else
+    genesis_session_machine_digest_init(&session_digest, &session_machine, &snapshot_machine, NULL);
+#endif
+    genesis_frame_capture_set_session_digest(&session_digest);
+  }
+#endif
   transfer = genesis_frame_capture_requested() ? genesis_frame_capture_run_from_environment(runtime, dispatch, dispatch_allowance)
              : (perf_path != NULL && *perf_path != '\0') ? run_profiled(runtime, dispatch, dispatch_allowance, perf_path)
                                                           : genesis_runtime_run(runtime, dispatch, dispatch_allowance);

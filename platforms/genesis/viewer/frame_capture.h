@@ -112,6 +112,10 @@ GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, Gen
 
 /* SEG-068-T007: nonzero when the capture environment (SEGARECOMP_CAPTURE_DIR) is present. A hook that owns another run loop
    (the sound hook) delegates to genesis_frame_capture_run_from_environment when it is. */
+/* SEG-146-T006: a host that links the snapshot codec registers its whole-machine checkpoint digest (genesis_session_machine.h) before the environment driver runs; without one a
+ * --record/--replay session uses the "basic" digest profile. The pointed-to struct must outlive the run. */
+struct GenesisSessionDigest;
+void genesis_frame_capture_set_session_digest(const struct GenesisSessionDigest *digest);
 int genesis_frame_capture_requested(void);
 
 /* The environment-driven entry used by every generated-main hook: parses SEGARECOMP_CAPTURE_DIR / _FIRST / _COUNT / _STRIDE /

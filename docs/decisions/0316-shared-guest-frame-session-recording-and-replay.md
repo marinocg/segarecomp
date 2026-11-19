@@ -22,6 +22,12 @@ applied between runner slices, so its effect depends on the slice size, and the 
 4. The Sega CD recorder is **not** migrated in this change: its grammar is tick-keyed with its own limits and tests, which must stay valid unchanged. The shared code is
    deliberately independent of it so a later change can move Sega CD or Master System onto it with a platform adapter.
 
+5. A session ends on a guest-frame boundary: the runtime gains one host-owned field, `host_yield_request`, that a frame hook sets to end the current runner slice right after the
+   dispatch that crossed the boundary (a resumable slice end, never a stop). A replay therefore stops on its exact end boundary whatever the slice size.
+6. Checkpoints hash the whole machine: the snapshot container digest (profile `machine-<flags>`) wherever the snapshot codec is linked, named in the recording's `digest` line;
+   hosts without it use the weaker `basic` profile, and checkpoints are enforced only between identical profiles. Ordering is pads, digest, end, identically for record and replay.
+7. The launcher exposes the recorder for Genesis (details page section, `--record/--replay/--allow-variant`), through the environment of the program.
+
 ## Consequences
 
 * One file replays identically in the viewer and headless, under any slicing; a divergence is located to a 600-frame checkpoint interval.

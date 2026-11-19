@@ -11,6 +11,7 @@
  *   platform genesis
  *   image <64 hex>            the effective (possibly patched) image the session ran on
  *   variant <64 hex|vanilla>  the patch/package identity (vanilla = none)
+ *   digest <profile>          which machine-state digest the checkpoints use (e.g. machine-0003); checkpoints are enforced only when the replaying machine uses the same profile
  *   <frame> <player> <mask>   player 1|2; mask 0..255 decimal: that player's pad held from <frame> on (a pad starts released)
  *   checkpoint <frame> <64 hex>
  *   end <frame>               the recording lasted until <frame>; a file without it is refused on replay
@@ -39,6 +40,7 @@ typedef struct SvSessionIdentity {
   char platform[16];       /* "genesis", "master-system", "sega-cd" */
   uint8_t image[32];       /* effective image SHA-256 */
   uint8_t variant[32];     /* package identity; all zero = vanilla */
+  char digest_profile[40]; /* the checkpoint digest profile of the machine (no spaces) */
 } SvSessionIdentity;
 
 typedef struct SvSessionEvent { uint64_t frame; uint8_t player; uint8_t mask; } SvSessionEvent;
@@ -91,7 +93,7 @@ static inline int sv_session_record_open(SvSessionRecorder *r, const char *path,
   if (r->file == NULL) { snprintf(error, cap, "cannot create the recording file '%s'", path); return -1; }
   sv_session_hex(id->image, image);
   if (sv_session_all_zero(id->variant)) strcpy(variant, "vanilla"); else sv_session_hex(id->variant, variant);
-  if (fprintf(r->file, SV_SESSION_FORMAT "\nplatform %s\nimage %s\nvariant %s\n", id->platform, image, variant) < 0 || fflush(r->file) != 0) {
+  if (fprintf(r->file, SV_SESSION_FORMAT "\nplatform %s\nimage %s\nvariant %s\ndigest %s\n", id->platform, image, variant, id->digest_profile[0] != '\0' ? id->digest_profile : "none") < 0 || fflush(r->file) != 0) {
     snprintf(error, cap, "cannot write the recording file '%s'", path);
     fclose(r->file);
     r->file = NULL;
@@ -143,12 +145,20 @@ static inline int sv_session_record_checkpoint_due(const SvSessionRecorder *r, u
   return sv_session_record_active(r) && frame >= r->next_checkpoint && frame % SV_SESSION_CHECKPOINT_INTERVAL == 0U;
 }
 
-static inline void sv_session_record_checkpoint(SvSessionRecorder *r, uint64_t frame, const uint8_t digest[32]) {
+/* A checkpoint that cannot be written ends the recording with an error (the file is closed without an end marker, so replay refuses it): never a silently gappy recording. */
+static inline SvSessionRecordResult sv_session_record_checkpoint(SvSessionRecorder *r, uint64_t frame, const uint8_t digest[32]) {
   char hex[65];
-  if (!sv_session_record_active(r)) return;
+  if (!sv_session_record_active(r)) return SV_SESSION_RECORD_CLOSED;
   sv_session_hex(digest, hex);
-  if (fprintf(r->file, "checkpoint %llu %s\n", (unsigned long long)frame, hex) < 0 || fflush(r->file) != 0) return;
+  if (fprintf(r->file, "checkpoint %llu %s\n", (unsigned long long)frame, hex) < 0 || fflush(r->file) != 0) {
+    snprintf(r->message, sizeof r->message, "recording stopped at frame %llu: a checkpoint could not be written", (unsigned long long)frame);
+    fclose(r->file);
+    r->file = NULL;
+    r->finished = 1;
+    return SV_SESSION_RECORD_ERROR;
+  }
   r->next_checkpoint = frame + 1U;
+  return SV_SESSION_RECORD_OK;
 }
 
 /* ------------------------------------------------------------------------------------------------------------------ replay */
@@ -160,7 +170,7 @@ typedef struct SvSessionReplay {
   SvSessionCheckpoint *checkpoints;
   uint32_t checkpoint_count, checkpoint_next;
   uint64_t end_frame;
-  int variant_mismatch;           /* identity differed and --allow-variant admitted it: checkpoints are informational only */
+  int variant_mismatch;           /* identity differed and --allow-variant admitted it, or the digest profile differs: checkpoints are informational only */
   uint8_t pad[2];                 /* the pads currently held */
   char note[240];                 /* the reported mismatch when one was admitted */
 } SvSessionReplay;
@@ -189,7 +199,9 @@ static inline int sv_session_replay_load(SvSessionReplay *p, const char *path, c
   FILE *f = fopen(path, "rb");
   char line[SV_SESSION_MAX_LINE + 2];
   unsigned long line_no = 0U;
-  int have_platform = 0, have_image = 0, have_variant = 0, have_end = 0;
+  int have_platform = 0, have_image = 0, have_variant = 0, have_digest = 0, have_end = 0;
+  uint64_t last_checkpoint = 0U;
+  int have_checkpoint = 0;
   uint64_t last_frame = 0U;
   memset(p, 0, sizeof *p);
   if (f == NULL) { snprintf(error, cap, "cannot open the recording '%s'", path); return -1; }
@@ -216,10 +228,16 @@ static inline int sv_session_replay_load(SvSessionReplay *p, const char *path, c
       if (sscanf(line, "variant %159s", b) != 1) { snprintf(error, cap, "recording line %lu is malformed", line_no); goto fail; }
       if (strcmp(b, "vanilla") == 0) memset(p->identity.variant, 0, 32); else if (!sv_session_unhex(b, p->identity.variant)) { snprintf(error, cap, "recording line %lu has a malformed variant hash", line_no); goto fail; }
       have_variant = 1;
+    } else if (strcmp(a, "digest") == 0) {
+      if (sscanf(line, "digest %39s", p->identity.digest_profile) != 1) { snprintf(error, cap, "recording line %lu is malformed", line_no); goto fail; }
+      have_digest = 1;
     } else if (strcmp(a, "checkpoint") == 0) {
       uint64_t frame;
       uint8_t digest[32];
       if (sscanf(line, "checkpoint %159s %159s", b, c) != 2 || !sv_session_parse_u64(b, &frame) || !sv_session_unhex(c, digest)) { snprintf(error, cap, "recording line %lu has a malformed checkpoint", line_no); goto fail; }
+      if (have_checkpoint && frame <= last_checkpoint) { snprintf(error, cap, "recording line %lu has a checkpoint out of order (frame %llu after %llu)", line_no, (unsigned long long)frame, (unsigned long long)last_checkpoint); goto fail; }
+      have_checkpoint = 1;
+      last_checkpoint = frame;
       if (p->checkpoint_count >= SV_SESSION_MAX_CHECKPOINTS) { snprintf(error, cap, "the recording has more than %u checkpoints", SV_SESSION_MAX_CHECKPOINTS); goto fail; }
       if (p->checkpoint_count % 256U == 0U) {
         void *grown = realloc(p->checkpoints, ((size_t)p->checkpoint_count + 256U) * sizeof *p->checkpoints);
@@ -255,7 +273,8 @@ static inline int sv_session_replay_load(SvSessionReplay *p, const char *path, c
   fclose(f);
   f = NULL;
   if (line_no == 0U) { snprintf(error, cap, "'%s' is not a segarecomp session recording (it is empty)", path); goto fail; }
-  if (!have_platform || !have_image || !have_variant) { snprintf(error, cap, "the recording header is incomplete"); goto fail; }
+  if (p->checkpoint_count != 0U && p->checkpoints[p->checkpoint_count - 1U].frame > p->end_frame && have_end) { snprintf(error, cap, "a checkpoint (frame %llu) lies beyond the end marker (frame %llu)", (unsigned long long)p->checkpoints[p->checkpoint_count - 1U].frame, (unsigned long long)p->end_frame); goto fail; }
+  if (!have_platform || !have_image || !have_variant || !have_digest) { snprintf(error, cap, "the recording header is incomplete"); goto fail; }
   if (!have_end) { snprintf(error, cap, "the recording has no end marker: it was not finished (the game or the viewer stopped before 'Stop recording') and cannot be replayed"); goto fail; }
   if (strcmp(p->identity.platform, expect->platform) != 0) {
     snprintf(error, cap, "the recording is for the %s, this program is for the %s", p->identity.platform, expect->platform);
@@ -275,6 +294,10 @@ static inline int sv_session_replay_load(SvSessionReplay *p, const char *path, c
     p->variant_mismatch = 1;
     snprintf(p->note, sizeof p->note, "replaying against a different image or version (recorded image %.12s variant %.12s, running image %.12s variant %.12s): checkpoint digests are not enforced",
              rec_image, rec_var, run_image, run_var);
+  }
+  if (strcmp(p->identity.digest_profile, expect->digest_profile[0] != '\0' ? expect->digest_profile : "none") != 0 && !p->variant_mismatch) {
+    p->variant_mismatch = 1;
+    snprintf(p->note, sizeof p->note, "the recording's checkpoints use the '%.39s' machine digest and this program uses '%.39s': checkpoint digests are not enforced", p->identity.digest_profile, expect->digest_profile[0] != '\0' ? expect->digest_profile : "none");
   }
   return 0;
 fail:
@@ -298,7 +321,10 @@ static inline int sv_session_replay_finished(const SvSessionReplay *p, uint64_t 
 /* Compares the digest the machine computed at `frame` with the recorded one, if the recording has a checkpoint at exactly that frame. 0 = nothing to compare / equal /
  * not enforced; 1 = divergence (`error` says where). */
 static inline int sv_session_replay_checkpoint(SvSessionReplay *p, uint64_t frame, const uint8_t digest[32], char *error, size_t cap) {
-  while (p->checkpoint_next < p->checkpoint_count && p->checkpoints[p->checkpoint_next].frame < frame) ++p->checkpoint_next;
+  if (p->checkpoint_next < p->checkpoint_count && p->checkpoints[p->checkpoint_next].frame < frame) {   /* a checkpoint that was never compared is not skipped silently */
+    snprintf(error, cap, "replay passed the checkpoint at frame %llu without comparing it", (unsigned long long)p->checkpoints[p->checkpoint_next].frame);
+    return 1;
+  }
   if (p->checkpoint_next >= p->checkpoint_count || p->checkpoints[p->checkpoint_next].frame != frame) return 0;
   if (p->variant_mismatch) { ++p->checkpoint_next; return 0; }
   if (memcmp(p->checkpoints[p->checkpoint_next].digest, digest, 32) != 0) {
@@ -306,6 +332,15 @@ static inline int sv_session_replay_checkpoint(SvSessionReplay *p, uint64_t fram
     return 1;
   }
   ++p->checkpoint_next;
+  return 0;
+}
+
+/* At the end marker every recorded checkpoint must have been compared (or deliberately not enforced). 0 = yes; 1 = one was never reached. */
+static inline int sv_session_replay_checkpoints_complete(const SvSessionReplay *p, char *error, size_t cap) {
+  if (p->checkpoint_next < p->checkpoint_count) {
+    snprintf(error, cap, "replay ended before the checkpoint at frame %llu was compared", (unsigned long long)p->checkpoints[p->checkpoint_next].frame);
+    return 1;
+  }
   return 0;
 }
 

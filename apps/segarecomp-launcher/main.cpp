@@ -66,6 +66,8 @@ int headless(int argc, char **argv) {
   std::string region_arg;              // --region <usa|japan>: console region (run time, not part of the build identity)
   std::vector<std::string> game_args;  // forwarded to the launched game (automation passes a finite bound)
   std::vector<fs::path> imports;       // --import <rom>: add to the library without building
+  fs::path record_arg, replay_arg;     // SEG-146-T006: --record / --replay <file> (Genesis, with --run): the shared session recorder, power-on to Stop recording
+  bool allow_variant_arg = false;      // --allow-variant: replay against a different effective image / package
   bool run = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -79,8 +81,14 @@ int headless(int argc, char **argv) {
     else if (arg == "--region" && i + 1 < argc && (std::string(argv[i + 1]) == "usa" || std::string(argv[i + 1]) == "japan" || std::string(argv[i + 1]) == "europe")) region_arg = argv[++i];
     else if (arg == "--hint-alias-discovery") hint_discovery_arg = true;
     else if (arg == "--game-arg" && i + 1 < argc) game_args.emplace_back(argv[++i]);
-    else { std::fprintf(stderr, "usage: Segarecomp [--import <rom>]... [--build <rom> [--mapper <sega|rom_only|lock_on|standard>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--hint-alias-discovery] [--run [--region <usa|japan|europe>] [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
+    else if (arg == "--record" && i + 1 < argc) record_arg = from_u8(argv[++i]);
+    else if (arg == "--replay" && i + 1 < argc) replay_arg = from_u8(argv[++i]);
+    else if (arg == "--allow-variant") allow_variant_arg = true;
+    else { std::fprintf(stderr, "usage: Segarecomp [--import <rom>]... [--build <rom> [--mapper <sega|rom_only|lock_on|standard>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--hint-alias-discovery] [--run [--region <usa|japan|europe>] [--game-arg <arg>]... [--record <file> | --replay <file> [--allow-variant]]] [--report <file>]]\n"); return 2; }
   }
+  if (!record_arg.empty() && !replay_arg.empty()) { std::fprintf(stderr, "--record and --replay are exclusive\n"); return 2; }
+  if (allow_variant_arg && replay_arg.empty()) { std::fprintf(stderr, "--allow-variant applies to --replay\n"); return 2; }
+  if ((!record_arg.empty() || !replay_arg.empty()) && !run) { std::fprintf(stderr, "--record/--replay apply to --run\n"); return 2; }
   if (aot_model != "v1" && aot_policy != "optimized") { std::fprintf(stderr, "--aot-model requires --aot-policy optimized\n"); return 2; }
   if (!mapper.empty() && rom_path.empty()) { std::fprintf(stderr, "--mapper applies to --build\n"); return 2; }
   std::string report;
@@ -174,13 +182,21 @@ int headless(int argc, char **argv) {
       fs::path entry = prepare(rom, "");
       if (entry.empty()) rc = 3;
       if (rom.supports_region()) emit("region=" + rom.region);
-      if (rc == 0 && run && !launch_refusal(rom).empty()) { emit("run=refused reason=" + launch_refusal(rom)); rc = 5; }
-      else if (rc == 0 && run) {
+      if (rc == 0 && (!record_arg.empty() || !replay_arg.empty()) && rom.platform_id != "genesis") { emit("result=failed problem=--record/--replay apply to Genesis games (this is " + (rom.platform_id.empty() ? std::string("unsupported") : rom.platform_id) + ")"); rc = 2; }
+      if (rc == 0 && !replay_arg.empty() && !fs::is_regular_file(replay_arg)) { emit("result=failed problem=--replay file not found: " + u8s(replay_arg)); rc = 2; }
+      if (rc != 0) {}
+      else if (run && !launch_refusal(rom).empty()) { emit("run=refused reason=" + launch_refusal(rom)); rc = 5; }
+      else if (run) {
         // Run; a Master System Optimized program that stops on the typed unadmitted_pc outcome restarts ONCE, from reset, in Compatibility.
         RomView current = rom;
         bool restarted = false;
         for (;;) {
-          GameRun game(current, layout, entry, game_args);
+          std::vector<std::pair<std::string, std::string>> session_env;   // SEG-146-T006
+          if (!record_arg.empty()) session_env.emplace_back("SEGARECOMP_RECORD", u8s(fs::absolute(record_arg)));
+          if (!replay_arg.empty()) { session_env.emplace_back("SEGARECOMP_REPLAY", u8s(fs::absolute(replay_arg))); if (allow_variant_arg) session_env.emplace_back("SEGARECOMP_ALLOW_VARIANT", "1"); }
+          const auto game_run = session_env.empty() ? std::make_unique<GameRun>(current, layout, entry, game_args)
+                                                     : std::make_unique<GameRun>(current, layout, entry_executable(entry), entry / "run.log", game_args, session_env, false);
+          GameRun &game = *game_run;
           if (!game.started()) { emit("run=failed_to_start"); rc = 4; break; }
           while (!game.poll()) SDL_Delay(50);
           emit("run=exited code=" + std::to_string(game.exit_code()));  // the historical line, unchanged

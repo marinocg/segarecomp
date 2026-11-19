@@ -3581,9 +3581,24 @@ GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispa
     return genesis_internal_dispatch_inconsistency_stop(runtime);
   if (genesis_runtime_configure_run(runtime, &result) != 0) return result;
   if (runtime->frame_hooks != 0 && runtime->frame_hooks->start != 0) runtime->frame_hooks->start(runtime->frame_hooks->ctx, runtime); /* SEG-138-T001: idempotent per machine start */
+  if (runtime->host_yield_request != 0U) {   /* SEG-146-T006: yield requested by the `start` hook itself (a replay that ends at power-on) */
+    GenesisControlTransfer yielded = {0};
+    runtime->host_yield_request = 0U;
+    yielded.kind = GENESIS_RUNNER_RESOURCE_LIMIT;
+    yielded.next_pc = runtime->pc;
+    return yielded;
+  }
   for (step = 0U; step < dispatch_allowance; ++step) {
     result = genesis_runtime_step(runtime, dispatch);
     if (result.kind != GENESIS_CONTINUE_AT_PC) return result;
+    if (runtime->host_yield_request != 0U) {   /* SEG-146-T006: a host hook asked to yield on this exact dispatch boundary: a resumable slice end, never a stop */
+      GenesisControlTransfer yielded = {0};
+      runtime->host_yield_request = 0U;
+      yielded.kind = GENESIS_RUNNER_RESOURCE_LIMIT;
+      yielded.next_pc = runtime->pc;
+      yielded.runner_dispatch_count = step + 1U;
+      return yielded;
+    }
   }
   {
     GenesisControlTransfer exhausted = {0};

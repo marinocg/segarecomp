@@ -17,6 +17,7 @@
 
 #include "genesis_persistence.h"
 #include "genesis_session.h" /* SEG-146-T006: record / replay through the shared session recorder (libs/viewer/include/sv_session.h) */
+#include "genesis_session_machine.h"
 #include "genesis_viewer_state.h"
 #include "runtime.h"
 #include "vdp_render.h"
@@ -48,6 +49,8 @@ static GenesisFrameArtifact g_latest_frame;
 static GenesisSession g_session;                 /* SEG-146-T006: the record/replay adapter, installed on the runtime's frame hooks */
 static int g_session_on;                         /* a record/replay session is active for this run (saves, states and rewind are then off) */
 static int g_session_announced;
+static GenesisSessionMachineDigest g_session_machine;
+static GenesisSessionDigest g_session_digest;   /* the whole-machine checkpoint digest (snapshot container) */
 static GenesisSdl3Viewer *g_sdl;                 /* SEG-131: the session's window (the restore hook resets its audio queue) */
 static GenesisViewerOptions g_options;
 static GenesisLiveFrameObserver *g_observer;
@@ -284,6 +287,7 @@ static int g_session_on_requested(void) {
 /* SEG-146-T006: the developer-menu entry "Stop recording" (and the quit path) end the recording through here. */
 static int session_status(void *ctx, char *text, size_t cap) {
   (void)ctx;
+  if (g_session.mode == GENESIS_SESSION_RECORD && !g_session.done && g_session.end_requested) { snprintf(text, cap, "The recording is ending"); return 3; }
   if (g_session.mode == GENESIS_SESSION_RECORD && !g_session.done) { snprintf(text, cap, "Recording to the session file"); return 1; }
   if (g_session.mode == GENESIS_SESSION_REPLAY && !g_session.done) { snprintf(text, cap, "Replaying a recorded session"); return 2; }
   snprintf(text, cap, "No session is being recorded");
@@ -292,14 +296,9 @@ static int session_status(void *ctx, char *text, size_t cap) {
 
 static int session_stop(void *ctx, char *message, size_t cap) {
   (void)ctx;
-  if (g_session.mode != GENESIS_SESSION_RECORD || g_session.done) { snprintf(message, cap, "No recording is in progress"); return -1; }
-  g_session.done = 1;   /* the recorder stops stamping; the end marker is written now, at the current guest frame */
-  genesis_session_finish(&g_session);
-  g_session.done = 1;
-  snprintf(message, cap, "%s", g_session.message);
-  g_session_announced = 1;
-  fprintf(stderr, "session: %s\n", g_session.message);
-  return g_session.failed ? -1 : 0;
+  if (genesis_session_request_end(&g_session) != 0) { snprintf(message, cap, "No recording is in progress"); return -1; }
+  snprintf(message, cap, "the file is completed at the next frame");   /* the end marker is written on the next guest-frame boundary (<= 1/60 s of guest time) */
+  return 0;
 }
 
 static const char *persist_dir(void) {
@@ -366,7 +365,19 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
 #endif
   {  /* SEG-146-T006: installed after the scheduler (it wraps a scheduler's hooks) and before the first guest instruction: power-on recording / replay */
     char session_error[320];
-    const int sr = genesis_session_from_environment(&g_session, runtime, session_error, sizeof session_error);
+    GenesisSnapshotMachine session_machine;
+    memset(&session_machine, 0, sizeof session_machine);
+    session_machine.runtime = runtime;
+#ifdef SEGARECOMP_GENESIS_SOUND
+    session_machine.z80 = genesis_sound_attach(runtime);
+    session_machine.audio = genesis_sound_audio_mutable();
+#endif
+#ifdef SEGARECOMP_MOD_VIEWER
+    genesis_session_machine_digest_init(&g_session_digest, &g_session_machine, &session_machine, segarecomp_scheduled_mod_snapshot);
+#else
+    genesis_session_machine_digest_init(&g_session_digest, &g_session_machine, &session_machine, NULL);
+#endif
+    const int sr = genesis_session_from_environment(&g_session, runtime, &g_session_digest, session_error, sizeof session_error);
     if (sr < 0) {
       fprintf(stderr, "viewer: %s\n", session_error);
       exit(3);

@@ -951,7 +951,22 @@ bool App::launch(const std::string &id, bool restarted) {
   const std::string key = u8s(dir.filename());
   if (!busy_.try_begin_run(key)) { toast("Cleanup is running; try again in a moment.", true); return false; }
   sv_diag_yield_exclusive_devices(diag_);  // a libusb-driven controller can be opened by one process only: free it for the game
-  game_ = std::make_unique<GameRun>(view, layout_, dir, std::vector<std::string>{}, older_build);
+  std::vector<std::pair<std::string, std::string>> session_env;   // SEG-146-T006: --record / --replay of the shared session recorder (Genesis only), via the environment the viewer reads
+  if (entry->platform_id == "genesis" && (session_record_ || !session_replay_.empty())) {
+    if (!session_replay_.empty()) {
+      session_env.emplace_back("SEGARECOMP_REPLAY", u8s(session_replay_));
+      if (session_allow_variant_) session_env.emplace_back("SEGARECOMP_ALLOW_VARIANT", "1");
+      trace(std::string("session=replay allow_variant=") + (session_allow_variant_ ? "1" : "0"));
+    } else {
+      std::error_code ec;
+      fs::create_directories(session_dir(*entry), ec);
+      session_env.emplace_back("SEGARECOMP_RECORD", u8s(session_dir(*entry) / ("session-" + std::to_string(static_cast<long long>(std::time(nullptr))) + ".rec")));
+      trace("session=record");
+    }
+  }
+  session_replay_.clear();
+  game_ = session_env.empty() ? std::make_unique<GameRun>(view, layout_, dir, std::vector<std::string>{}, older_build)
+                              : std::make_unique<GameRun>(view, layout_, entry_executable(dir), dir / "run.log", std::vector<std::string>{}, session_env, older_build);
   if (!game_->started()) {
     sv_diag_reclaim_exclusive_devices(diag_);
     busy_.end_run(key);
@@ -1354,6 +1369,16 @@ void App::run_script() {
     if (!detail_id_.empty()) scd_start_import(detail_id_, {}, {}, from_u8(arg));
   } else if (cmd == "scd_verify") {  // "Verify again" for the open game
     if (!detail_id_.empty()) scd_start_import(detail_id_, {}, {}, {});
+  } else if (cmd == "session_record") {  // SEG-146-T006: the Genesis "Record this session" switch
+    session_record_ = arg == "on";
+  } else if (cmd == "session_variant") {  // SEG-146-T006: "Allow another version" for replays
+    session_allow_variant_ = arg == "on";
+  } else if (cmd == "session_replay") {  // SEG-146-T006: replay the newest recording of the open Genesis game
+    if (const LibraryEntry *e = detail_id_.empty() ? nullptr : catalog_.find_id(detail_id_)) {
+      const auto recordings = session_recordings(*e);
+      if (!recordings.empty() && e->platform_id == "genesis") { session_replay_ = recordings.front(); launch(detail_id_, false); }
+      else trace("session=no_recording");
+    }
   } else if (cmd == "scd_record") {  // the "Record this session" switch
     scd_record_ = arg == "on";
   } else if (cmd == "scd_replay") {  // replay the newest recording of the open game: `viewer` or `windowless`

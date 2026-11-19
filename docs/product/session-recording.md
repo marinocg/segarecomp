@@ -7,6 +7,19 @@ Sega CD keeps its own recorder (see [sega-cd-play.md](sega-cd-play.md)); Master 
 
 ## Using it
 
+**Launcher window (Genesis games).** Open the game's Details page: *Input recording* has the switch "Record my next play session from power-on when I press Play", the list of this game's
+recordings (newest six) with a **Replay** button each, and "Replay even if the game version differs". In the game, **Esc > Stop recording** ends a recording (quitting does too).
+Recordings live under the library folder, `sessions/genesis/<first 16 digits of the image digest>/session-<time>.rec`.
+
+**Launcher command line.**
+
+```text
+Segarecomp --build game.bin --run --record session.rec
+Segarecomp --build game.bin --run --replay session.rec [--allow-variant]
+```
+
+(Genesis only; a Master System game is refused: the shared code is not wired there yet.) **Bridge tool:**
+
 ```text
 # record from power-on (viewer); finish with  Pause menu > Stop recording,  or just quit
 genesis_startup_bridge.py --rom game.bin --viewer --record session.rec
@@ -39,9 +52,10 @@ segarecomp-session 1
 platform genesis
 image <64 hex>               effective image SHA-256
 variant <64 hex | vanilla>   package identity
+digest <profile>             which machine digest the checkpoints use (see Determinism): machine-<flags hex> or basic
 <frame> <player> <mask>      player 1|2, mask 0..255 decimal; that pad is held from <frame> on (pads start released)
-checkpoint <frame> <64 hex>  every 600 guest frames (and at frame 0)
-end <frame>                  explicit end: a file without it is refused
+checkpoint <frame> <64 hex>  at power-on and every 600 guest frames; strictly increasing frames, none beyond the end
+end <frame>                  explicit end, on a guest-frame boundary: a file without it is refused
 ```
 
 * Entries are written only when a pad **changes**, in non-decreasing frame order. `<frame>` is the guest's virtual frame counter at the boundary where the pad becomes
@@ -49,6 +63,8 @@ end <frame>                  explicit end: a file without it is refused
 * Every line is streamed and flushed, so a crash leaves a valid prefix - which replay refuses because it has no end marker (the duration is unknown).
 * Capacity: at most 4,000,000 pad changes and 400,000 checkpoints. Reaching the recording cap **ends the recording with an explicit marker and an error message** (the
   prefix up to that frame is complete and replayable); nothing is truncated silently. Lines are at most 160 bytes.
+* A recording whose checkpoints are out of order, duplicated, or beyond the end marker is refused; a replay that passes a checkpoint without comparing it, or ends before all of them were
+  compared, fails. A checkpoint that cannot be written ends the recording with an error and no end marker.
 * A platform mismatch is always refused. An image or package mismatch is refused unless `--allow-variant`; with it the mismatch is printed and checkpoint digests are
   informational only (a gameplay-changing variant is expected to diverge).
 
@@ -56,9 +72,20 @@ end <frame>                  explicit end: a file without it is refused
 
 The pad is stamped / applied at the **guest-frame boundary** through the runtime's frame-hook seam, before the guest executes another instruction of the new frame, and
 the guest reads that latched value (the runtime's `mod_pad_*` override) for the whole frame. Host polls between boundaries (the viewer samples once per slice) cannot
-change what the guest sees, so one file replays identically in the viewer, headless, and under any slice size. If a native mod scheduler owns the hooks it is wrapped
-(its input phase sees the recorded physical pad, exactly as live). The checkpoint digest is SHA-256 over work RAM, the guest master tick and the frame counter taken at
-the boundary, before that boundary's pads are applied.
+change what the guest sees. If a native mod scheduler owns the hooks it is wrapped (its input phase sees the recorded physical pad, exactly as live; the file stores the physical pad).
+
+**Exact end.** A session ends on a boundary. A replay asks the runner to yield right after the dispatch that crosses its end marker (`GenesisRuntime::host_yield_request`), so no
+instruction beyond that boundary runs whatever the host's slice size. A recording made with Stop recording ends at the next boundary; a recording ended by quitting ends at the last
+boundary reached (what ran after it is not part of the recording).
+
+**Checkpoints.** At each boundary the order is: stamp/apply this frame's pads, take the digest, then (maybe) end. The digest of a viewer or a sound/mod headless program is the SHA-256 of the
+whole-machine snapshot container (`genesis_session_machine.h`): CPU, work RAM, VDP (VRAM/CRAM/VSRAM/registers), I/O latches, cartridge SRAM/EEPROM, Z80, PSG, YM2612, mixer and mod state, in the
+same build-independent encoding save states use (profile `machine-<flags>`). A host that does not link the snapshot codec (the Python bridge's plain headless build) uses the `basic`
+profile - work RAM, guest time and frame counter only; checkpoints are enforced only between identical profiles, otherwise the mismatch is reported and the replay is not judged by them.
+
+**Evidence.** `genesis_session_tests` shows the whole runtime state at the end boundary is byte-identical between the recorded run (random mid-frame host pads, one slicing) and replays at
+slices 1, 500, 7919 and 65536, with and without host pads; `genesis_session_machine_tests` shows the same under the whole-machine digest, including around a real input-intercepting mod
+scheduler, and that a single flipped VRAM bit is caught by the power-on checkpoint.
 
 ## Privacy
 

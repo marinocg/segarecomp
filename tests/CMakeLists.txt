@@ -254,6 +254,13 @@ target_link_libraries(genesis_session_tests PRIVATE segarecomp::runtime_genesis)
 target_compile_features(genesis_session_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_session_tests)
 add_test(NAME genesis_session_tests COMMAND genesis_session_tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+# SEG-146-T006: the whole-machine checkpoint digest (snapshot container) and the adapter around a real input-intercepting mod scheduler.
+add_executable(genesis_session_machine_tests genesis_session_machine_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c)
+target_include_directories(genesis_session_machine_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+target_link_libraries(genesis_session_machine_tests PRIVATE segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+target_compile_features(genesis_session_machine_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_session_machine_tests)
+add_test(NAME genesis_session_machine_tests COMMAND genesis_session_machine_tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 # SEG-026-T001: execution-PC coverage observer + frame-bounded coverage run; reachability challenger fixtures.
 add_executable(genesis_execution_coverage_tests genesis_execution_coverage_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/execution_coverage.c)

@@ -1362,7 +1362,9 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND"}));
     }
   } else {
-    add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound");
+    // SEG-146-T006: --record/--replay checkpoints hash the whole machine (the snapshot container, which also carries a scheduled mod's state when one is attached).
+    add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound",
+        options.native_mod || options.luau ? std::vector<std::string>{"-DSEGARECOMP_SESSION_MACHINE_DIGEST", "-DSEGARECOMP_SESSION_MACHINE_MOD"} : std::vector<std::string>{"-DSEGARECOMP_SESSION_MACHINE_DIGEST"});
     // SEG-068-T007: the sound hook delegates its run loop to the existing headless frame capture when SEGARECOMP_CAPTURE_DIR is
     // set (one guest execution for frames and the sound summary), so the existing renderer/exporter/capture objects are linked.
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
@@ -1385,6 +1387,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       add(final_only, options.luau_artifact_source, "luau-artifact");
       add(final_only, build.viewer / "frame_capture.c", "frame-capture", {"-DSEGARECOMP_CAPTURE_MOD=1"});
     } else {
+      add(final_only, build.runtime / "genesis_snapshot.c", "genesis-snapshot", {"-DSEGARECOMP_GENESIS_SOUND"});   // SEG-146-T006: the session checkpoint digest
       add(final_only, build.viewer / "frame_capture.c", "frame-capture");
     }
   }
