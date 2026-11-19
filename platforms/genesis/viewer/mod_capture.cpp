@@ -408,9 +408,12 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
   return 0;
 }
 
-#ifdef SEGARECOMP_MOD_VIEWER
-// SEG-138-T010: the snapshot seam of the attached scheduler (the viewer's state service points GenesisSnapshotMachine::mod at it) and the compatibility table that presents the mod's render output.
+// SEG-138-T010: the snapshot seam of the attached scheduler (the viewer's state service points GenesisSnapshotMachine::mod at it). SEG-146-T006: the headless program's session checkpoint digest uses it too,
+// so it is defined for every build of this file (it is inside the extern "C" block opened above).
 const GenesisSnapshotModState *segarecomp_scheduled_mod_snapshot(void) { return g.attached ? &g.snapshot : nullptr; }
+
+#ifdef SEGARECOMP_MOD_VIEWER
+// SEG-138-T010: the compatibility table that presents the mod's render output.
 
 namespace {
 struct Presented {

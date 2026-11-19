@@ -965,8 +965,8 @@ bool App::launch(const std::string &id, bool restarted) {
     }
   }
   session_replay_.clear();
-  game_ = session_env.empty() ? std::make_unique<GameRun>(view, layout_, dir, std::vector<std::string>{}, older_build)
-                              : std::make_unique<GameRun>(view, layout_, entry_executable(dir), dir / "run.log", std::vector<std::string>{}, session_env, older_build);
+  if (session_env.empty()) game_ = std::make_unique<GameRun>(view, layout_, dir, std::vector<std::string>{}, older_build);
+  else game_ = std::make_unique<GameRun>(view, layout_, entry_executable(dir), dir / "run.log", std::vector<std::string>{}, session_env, older_build);
   if (!game_->started()) {
     sv_diag_reclaim_exclusive_devices(diag_);
     busy_.end_run(key);
