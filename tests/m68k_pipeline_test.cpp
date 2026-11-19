@@ -30867,7 +30867,7 @@ void independent_components_commit_without_conflation() {
 
 void injected_exact_erased_graph_cycle_rolls_back() {
   auto program = make_chain_program();
-  program.adr0038_synthetic_test_control.emplace();
+  program.adr0038_synthetic_test_control = FrontendProgram::Adr0038SyntheticTestControl{};
   program.adr0038_synthetic_test_control->additional_exact_erased_unsafe_relations.push_back(
       {chain_base + 0xAU, chain_base + 0x4U});
   const auto result = analyze_m68k_frontend(program);
@@ -30895,7 +30895,7 @@ void unreachable_component_is_peeled_while_rooted_component_survives() {
   const auto rooted_a_leaf = base + 0xAU;
   const auto unreachable_b = base + second_offset + 0x4U;
   const auto unreachable_b_leaf = base + second_offset + 0xAU;
-  program.adr0038_synthetic_test_control.emplace();
+  program.adr0038_synthetic_test_control = FrontendProgram::Adr0038SyntheticTestControl{};
   program.adr0038_synthetic_test_control->additionally_unreachable_retained_entries.push_back(unreachable_b);
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
@@ -30918,7 +30918,7 @@ void unreachable_component_is_peeled_while_rooted_component_survives() {
 
 void entirely_peeled_nonempty_graph_rolls_back() {
   auto program = make_chain_program();
-  program.adr0038_synthetic_test_control.emplace();
+  program.adr0038_synthetic_test_control = FrontendProgram::Adr0038SyntheticTestControl{};
   program.adr0038_synthetic_test_control->additionally_unreachable_retained_entries.push_back(chain_base + 0x4U);
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
@@ -30936,7 +30936,7 @@ void entirely_peeled_nonempty_graph_rolls_back() {
 
 void architecture_closure_ceiling_exhaustion_rolls_back() {
   auto program = make_chain_program();
-  program.adr0038_synthetic_test_control.emplace();
+  program.adr0038_synthetic_test_control = FrontendProgram::Adr0038SyntheticTestControl{};
   program.adr0038_synthetic_test_control->closure_round_ceiling = 0U;
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
