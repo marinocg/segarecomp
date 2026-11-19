@@ -69,6 +69,10 @@ jobs:
       - name: Windows MSVC environment (for the LLVM/Clang route)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          # The runner image ships LLVM 20.1.8, and MSVC STL 14.52 (image 20261111+) refuses any Clang older than 22 (STL1000). Keep the Clang route on the
+          # STL it was green with (14.51) instead of silencing the check: select that toolset explicitly.
+          toolset: "14.51"
       - name: Select Windows compiler
         if: runner.os == 'Windows'
         shell: bash
@@ -144,6 +148,8 @@ jobs:
       - name: Windows MSVC environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          toolset: "14.51"   # see the comment in build-test: STL 14.52 needs Clang >= 22, the image's LLVM is 20.1.8
       - name: Cache vcpkg downloads and binaries
         uses: actions/cache@v4
         with:
