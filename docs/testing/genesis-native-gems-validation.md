@@ -166,5 +166,21 @@ identical after the first and the second restore, non-silent.
 unchanged (see the PR for the exact result). The commercial reference rerun for the four games (352 / 352 commands, 2,117,208 operations for Cool Spot) was **not** repeated: the replacement code and catalog are untouched and the
 third-party reference harness is not vendored; the committed synthetic tests are unchanged and pass.
 
+**Failure semantics.** A failed second pass is the build's failure (typed, propagated, no executable, no success record, no third build). `genesis_native_gems_build_test` injects one failure into the second pass only
+(a compiler wrapper keyed on the alternatives' emitted C: a unit compile, then the pass-program link) and requires a failed build, its own diagnostic in the log, no executable, no `genesis_audio` record and exactly one
+second-pass attempt. The same test covers: closable driver -> automatic alternatives (supported); unclosable (RAM-loaded value) -> degraded `no_verified_replacement`; verified faulting image -> native replacement; verified
+non-faulting image -> no replacement; working driver -> no extra pass; `--sound-driver original` -> no alternatives. Unnecessary-work review: no existing signal is complete enough to skip the pass (see ADR 0291 Decision 6); cost left as is.
+
+**One gameplay sound effect (bounded, reproducible).** The default executable, frame-keyed pad script (`SEGARECOMP_PAD_SCRIPT`, applied with `SEGARECOMP_CAPTURE_DIR`), three Start presses at frames 1800 / 2000 / 2200 reach the first level
+(frame captures show the playfield and its HUD; a further Start pauses). Control: no further input. Test: button B pressed at frame 2600 for 30 frames. Both with `SEGARECOMP_AUDIO_WRITE_LOG`, 70 M-dispatch budget:
+- 68000 side: the control's command write pointer next moves at frame 2653.9; with B it moves at frame 2601.9 (the frame after the press) by three bytes (the 68000 publishes the pointer after two bytes, then after the third), i.e. a command of the
+  `$FF id arg` shape; the command payload itself is not in the product's logging window for this driver's RAM map and the specific sound id was not extracted (not claimed).
+- Z80 side (the game's original generated-native driver): from frame 2604.9 the PSG noise channel receives a new attenuation envelope (control: a slow fade; with B: a distinct attack/decay burst, 25 vs 23 PSG writes in the window,
+  71 vs 46 PSG writes from frame 2590 to the end), the first dozen FM key-ons after the press are unchanged, and the PCM digest differs from the control (`49a759d6...` vs `33733b14...`).
+- No sound fault in any run; the B run is non-silent and bit-identical across two runs (chip-access log and PCM digest). A second input (C, a jump) produced no new command and only a timing shift of already scheduled
+  writes (a different PCM digest, no new PSG or key-on events): it is not claimed as an SFX.
+- Not verified: that the B action is identifiable as a particular named effect in the public disassembly (its sound-call sites are conditional on the current helmet and could not be tied to the exact branch within the bounded investigation).
+  The claim is therefore "a gameplay input provokes a new sound command and a corresponding new, deterministic PSG effect through the original driver", not an identified effect.
+
 **Follow-up (not in this change).** A native variant for this driver build would need: the 2.0-style RAM map as an immutable descriptor, a disassembly-level comparison of this exact image's sequence events and sample handling,
 and an independent reference for it. It is only worth doing if a game is found whose driver the structural alternatives cannot close.

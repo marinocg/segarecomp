@@ -125,9 +125,8 @@ struct Options {
   std::string sound_driver = "auto";
   bool sound_auto_second_pass = false;   // set by the build itself when the automatic policy re-runs as "gems" (the evidence below is why)
   // ADR 0291 Decision 6: set by the build itself when the automatic policy re-runs the ORIGINAL driver with its compiled structural alternatives (first pass: the original AOT isolated
-  // the sound CPU and no verified replacement applies). `sound_alt_declined` = that second pass failed to build: the first pass's configuration is built once more, unchanged.
+  // the sound CPU and no verified replacement applies). A failure of that pass is the build's failure (typed, propagated): it is never retried or replaced by another configuration.
   bool sound_alt_second_pass = false;
-  bool sound_alt_declined = false;
   struct AutoEvidence {
     bool present = false;
     std::string original_outcome;         // "structural_code_mismatch"
@@ -1542,7 +1541,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
                  " image: second pass with the native replacement");
         return kRetryWithNativeSound;
       }
-      if (summary.sound_fault && !summary.sound_fault->native_driver && !options.z80_alternatives && !options.sound_alt_second_pass && !options.sound_alt_declined) {
+      if (summary.sound_fault && !summary.sound_fault->native_driver && !options.z80_alternatives && !options.sound_alt_second_pass) {
         // ADR 0291 Decision 6: no verified replacement serves the faulting driver. The original driver's own compiled structural alternatives (ADR 0259, static analysis only) may close its
         // self-modification; whether they do is decided by one more deterministic pass whose own start-up run must meet no fault.
         options.sound_auto_evidence.present = true;
@@ -2151,16 +2150,6 @@ int run_build(Options options) {
         status_extra.clear(); sound_result.clear(); sound_degraded = false;
         rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
                                    m68k_images, executable, status_extra, sound_degraded, sound_result);
-        if (rc != 0) {   // the alternatives could not be built: the executable of the first configuration (as before this policy) is built, once, with the reason recorded
-          log.line("sound driver: the structural-alternatives pass failed to build; building the original driver without them");
-          options.z80_alternatives = false;
-          options.sound_alt_second_pass = false;
-          options.sound_alt_declined = true;
-          options.sound_auto_evidence.present = false;
-          status_extra.clear(); sound_result.clear(); sound_degraded = false;
-          rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
-                                     m68k_images, executable, status_extra, sound_degraded, sound_result);
-        }
       }
       if (rc != 0) return rc;
       if (!options.native_source.empty())

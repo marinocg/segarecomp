@@ -39,15 +39,31 @@ def check(ok, label):
         failures.append(label)
 
 
-def build(rom_bytes, out, *extra, runtime=None):
+def build(rom_bytes, out, *extra, runtime=None, compiler=None):
     out.mkdir(parents=True, exist_ok=True)
     rom = out.parent / (out.name + ".md")
     rom.write_bytes(rom_bytes)
-    command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", cc, "--cxx", cxx, "--runtime-dir", str(runtime or root / "platforms" / "genesis"),
+    command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", compiler or cc, "--cxx", cxx, "--runtime-dir", str(runtime or root / "platforms" / "genesis"),
                "--optimize", "0", "--runtime-optimize", "1", *extra]
     done = subprocess.run(command, text=True, capture_output=True, timeout=1800)
     status = json.loads((out / "status.json").read_text()) if (out / "status.json").exists() else {}
     return done, status
+
+
+def alternatives_failing_compiler(directory, mode):
+    """A POSIX wrapper around the real compiler that fails exactly ONE operation of the structural-alternatives second pass (ADR 0291 Decision 6) and nothing of the first pass: the
+    alternatives' emitted C is the only generated Z80 source that contains `z80_live_is(`. `compile` fails the compile of such a unit; `link` fails the link of the pass program
+    that contains such a unit (the materialization stage's own program)."""
+    wrapper = directory / ("cc-alt-" + mode)
+    body = ('#!/bin/sh\nmarked=0\nfor a in "$@"; do\n  case "$a" in\n    *.c) grep -q "z80_live_is(" "$a" 2>/dev/null && marked=1;;\n'
+            '    */z80-*.o) [ -f "$a" ] && grep -q "z80_live_is" "$a" 2>/dev/null && marked=1;;\n  esac\ndone\n')
+    if mode == "compile":
+        body += 'if [ $marked = 1 ]; then case " $* " in *" -c "*) echo "synthetic-alt-compile-diagnostic: scripted failure" >&2; exit 1;; esac; fi\n'
+    else:
+        body += 'if [ $marked = 1 ]; then case " $* " in *" -c "*) ;; *) echo "synthetic-alt-link-diagnostic: scripted failure" >&2; exit 1;; esac; fi\n'
+    wrapper.write_text(body + 'exec "%s" "$@"\n' % cc)
+    wrapper.chmod(0o755)
+    return str(wrapper)
 
 
 def executable(out):
@@ -86,6 +102,18 @@ def main():
               audio["structural_alternatives"].get("forms", 0) > 0 and audio.get("save_states") == "supported",
               "a self-modifying driver that the structural alternatives close is rebuilt with them automatically: supported, still the game's own driver, with the original's failure as evidence")
         check("genesis_audio=supported" in done.stdout or "genesis_audio" not in done.stdout, "the build result does not claim a degraded sound CPU")
+
+        # a failure of the second pass is the build's failure: typed, propagated, no third build, no stale executable, no successful record
+        for mode in ("compile", "link"):
+            out = tmp / ("alt_fail_" + mode)
+            done, status = build(smc, out, compiler=alternatives_failing_compiler(tmp, mode))
+            log = (out / "build.log").read_text() if (out / "build.log").exists() else ""
+            check(done.returncode != 0 and status.get("status") == "failed" and "@result failed" in done.stdout and executable(out) is None and "synthetic-alt-%s-diagnostic" % mode in (log + done.stdout + done.stderr),
+                  "a failed structural-alternatives second pass (%s) fails the build with its own diagnostic and leaves no executable" % mode)
+            check(status.get("genesis_audio") is None and status.get("z80_audio_outcome") is None and "executable_images" not in status,
+                  "and no successful or degraded sound record is written for it (%s)" % mode)
+            check(log.count("second pass with the compiled structural alternatives") == 1 and "building the original driver without them" not in log,
+                  "and it is not retried or replaced by another configuration (%s)" % mode)
 
         # ... and one they cannot close (the stored value is loaded from RAM) stays degraded, with the attempt recorded
         done, status = results["dyn"]
