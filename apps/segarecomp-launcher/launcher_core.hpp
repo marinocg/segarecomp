@@ -153,7 +153,9 @@ struct SaveOutcome {
 [[nodiscard]] SaveOutcome read_save_outcome(const std::filesystem::path &run_log);
 
 [[nodiscard]] Layout locate_layout();
-[[nodiscard]] std::filesystem::path cache_root();
+[[nodiscard]] std::filesystem::path cache_root();   // SEGARECOMP_CACHE_DIR, else the data root named by the saved data-location file (data_location.hpp), else default_cache_root()
+[[nodiscard]] std::filesystem::path default_cache_root();
+[[nodiscard]] std::filesystem::path data_bootstrap_file();
 // Per-user persistent data: the library catalog, covers, viewer settings and screenshots. It lives beside, never inside, the disposable
 // build folders (`games/`, `zig-cache/`) that cache maintenance is allowed to touch. SEGARECOMP_LIBRARY_DIR overrides it.
 [[nodiscard]] std::filesystem::path library_root();
@@ -163,6 +165,11 @@ struct SaveOutcome {
 struct EffectivePaths {
   std::filesystem::path cache, library, home;
   bool cache_overridden = false, library_overridden = false, home_overridden = false;
+  // SEG-150-T008: the data root was chosen by the saved data-location file (not the default, not an environment variable); the file's path; why a saved location is
+  // not in use (damaged, unavailable, shadowed by an environment variable), "" when nothing needs saying.
+  bool relocated = false;
+  std::filesystem::path bootstrap_file;
+  std::string data_location_notice;
 };
 [[nodiscard]] EffectivePaths effective_paths(const Layout &layout);
 [[nodiscard]] RomView inspect_rom_file(const std::filesystem::path &path, const Layout &layout);

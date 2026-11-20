@@ -116,6 +116,11 @@ Lock-on pass-through automatically, saves that with the library entry, and Game 
 `SEGARECOMP_LIBRARY_DIR` overrides the library location. Package install directory (read-only program files) and these per-user folders are
 separate; Settings > Advanced shows both. Nothing is deleted at start-up, on import or on Play.
 
+The data folder can be relocated (core contract only, no UI yet): a one-line pointer file `Segarecomp-data-location.json` beside the default folder names the active
+one, absent means the defaults above, and `SEGARECOMP_CACHE_DIR` / `SEGARECOMP_LIBRARY_DIR` always win and refuse a move. Durable data (library, settings, covers, saves,
+recordings, mods) is copied, verified and switched atomically; builds and caches are not moved (those games rebuild), nothing is removed from the old folder
+automatically, and the old folder's cleanup is a separate explicit step. Exact classes, phases and crash recovery: [ADR 0317](../decisions/0317-launcher-data-location-and-migration.md).
+
 ### `library.json` (schema 1)
 
 ```json

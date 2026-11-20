@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp cartridge_recognition.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp patch_library.cpp luau_variant.cpp storage.cpp launcher_settings.cpp sega_cd.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp cartridge_recognition.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp patch_library.cpp luau_variant.cpp storage.cpp launcher_settings.cpp sega_cd.cpp data_location.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media segarecomp::luau_host)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
@@ -418,6 +418,23 @@ segarecomp_enable_warnings(storage_test)
 if(BUILD_TESTING)
   add_test(NAME storage_test COMMAND storage_test)
   set_property(TEST storage_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-150-T008 (ADR 0317): data location bootstrap, journaled copy-verify-commit migration and old-root cleanup, on synthetic trees (no window).
+add_executable(data_location_test data_location_test.cpp)
+target_link_libraries(data_location_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(data_location_test)
+if(BUILD_TESTING)
+  add_test(NAME data_location_test COMMAND data_location_test)
+  set_property(TEST data_location_test APPEND PROPERTY LABELS full fast)
+  # Startup resolution through the real headless launcher (bootstrap, environment precedence, fallbacks).
+  find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME launcher_data_location_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_data_location_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp>)
+  add_dependencies(data_location_test segarecomp-launcher fake_segarecomp)
+  set_property(TEST launcher_data_location_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_data_location_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_data_location_test PROPERTY TIMEOUT 300)
 endif()
 
 include(${PROJECT_SOURCE_DIR}/packaging/install.cmake)
