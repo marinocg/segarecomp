@@ -19,6 +19,7 @@ This package redistributes or incorporates the following third-party components 
 * stb_image.h (launcher PNG asset decoding), public domain / MIT       -> compiled in, not redistributed as a
   separate file; see https://github.com/nothings/stb
 * Silkscreen font (launcher UI typeface), SIL Open Font License 1.1    -> Silkscreen-OFL.txt
+* Inter 4.1 Regular and SemiBold (launcher body text), SIL OFL 1.1     -> Inter-OFL.txt
 * libusb-1.0 1.0.29 (LGPL-2.1) -> libusb-LGPL-2.1.txt
   Windows: libusb-1.0.dll (the official MinGW x86-64 build from https://github.com/libusb/libusb/releases/tag/v1.0.29,
   unmodified) is shipped as a separate DLL that SDL3.dll loads at run time to talk to Nintendo Switch 2 controllers over

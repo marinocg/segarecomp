@@ -15,6 +15,7 @@ third-party inputs (`install.cmake`). `.github/workflows/release.yml` does exact
 | libusb | 1.0.29 (Windows only) | LGPL-2.1; the official MinGW `libusb-1.0.dll` (SHA-256 in `build-sdl3.sh`) is shipped unmodified beside the launcher and in `sdl3/lib`, with its license and source archive in `licenses/`; Linux/macOS use the OS libusb at run time |
 | Dear ImGui | 1.92.9b | fetched at configure time with a pinned hash (`apps/segarecomp-launcher/CMakeLists.txt`) |
 | stb_image.h | pinned commit | fetched at configure time with a pinned hash; decodes the launcher's own PNG assets only |
+| Inter 4.1 font (Regular, SemiBold) | rsms/inter release v4.1 (`Inter-4.1.zip` SHA-256 `9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e`, `extras/ttf`) | `apps/segarecomp-launcher/assets/fonts/`, SIL OFL 1.1 |
 | Silkscreen font | Google Fonts release | `apps/segarecomp-launcher/assets/fonts/`, SIL OFL 1.1 |
 
 The generated program is always compiled with an explicit Zig `-target` (`aarch64-macos`, `x86_64-macos`,

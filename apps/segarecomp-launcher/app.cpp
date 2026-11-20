@@ -273,16 +273,19 @@ void App::init_ui() {
   style.Colors[ImGuiCol_NavHighlight] = ImColor(0, 0, 0, 0);  // the widgets draw their own focus ring
   ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
   ImGui_ImplSDLRenderer3_Init(renderer_);
-  // Body text: the scalable embedded font (readable mixed case at any size). Titles and section headings: the repository's Silkscreen Bold.
-  ctx_.regular = io.Fonts->AddFontDefaultVector();
-  ctx_.bold = io.Fonts->AddFontDefaultVector();  // a second instance of the same face: draw_text draws it twice for weight
-  ui::bold_font = ctx_.bold;
-  {
-    const fs::path path = asset_path("fonts/Silkscreen-Bold.ttf");
+  // Body text: the bundled Inter Regular and Inter SemiBold (true faces, anti-aliased, rasterized by ImGui at the framebuffer density the SDL3 backend
+  // reports). Titles and section headings: the repository's Silkscreen Bold. A missing font file falls back to the embedded vector face.
+  auto load_font = [&](const char *relative) -> ImFont * {
+    const fs::path path = asset_path(relative);
     std::error_code ec;
-    if (fs::is_regular_file(path, ec)) ctx_.display = io.Fonts->AddFontFromFileTTF(path.string().c_str(), 0.0F);
-    if (ctx_.display == nullptr) ctx_.display = ctx_.regular;
-  }
+    return fs::is_regular_file(path, ec) ? io.Fonts->AddFontFromFileTTF(path.string().c_str(), 0.0F) : nullptr;
+  };
+  ctx_.regular = load_font("fonts/Inter-Regular.ttf");
+  if (ctx_.regular == nullptr) ctx_.regular = io.Fonts->AddFontDefaultVector();
+  ctx_.bold = load_font("fonts/Inter-SemiBold.ttf");
+  if (ctx_.bold == nullptr) ctx_.bold = ctx_.regular;
+  ctx_.display = load_font("fonts/Silkscreen-Bold.ttf");
+  if (ctx_.display == nullptr) ctx_.display = ctx_.regular;
   ctx_.renderer = renderer_;
 }
 

@@ -52,20 +52,25 @@ def main():
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--references", type=Path)
     p.add_argument("--comparisons", type=Path)
+    p.add_argument("--video-driver", default="dummy", help="SDL video driver; 'dummy' (default, software renderer) is a layout test, a real driver (wayland, x11, windows, cocoa) records a physical display's framebuffer")
     p.add_argument("--build-rom", type=Path, help="Optional project-authored synthetic cartridge: capture a real build in a temporary cache (never runs it)")
     a = p.parse_args()
     binary = a.launcher.resolve()
-    metadata = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "captures": []}
+    metadata = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "video_driver": a.video_driver,
+                "launcher-hidpi": "LOGICAL layout test only: SEGARECOMP_SHOT_SCALE=2 forces the UI scale at the host's pixel density; it is not physical HiDPI evidence",
+                "captures": []}
     for size, directory in [("1080x740", "launcher"), ("720x520", "launcher-small")]:
         out = a.out / directory
         out.mkdir(parents=True, exist_ok=True)
         for name, page, extra in PAGES:
             bmp = out / (name + ".bmp")
-            env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_RENDER_DRIVER="software", SDL_AUDIODRIVER="dummy",
+            env = dict(os.environ, SDL_VIDEODRIVER=a.video_driver, SDL_AUDIODRIVER="dummy",
                        SEGARECOMP_HOME=str(a.home.resolve()), SEGARECOMP_CACHE_DIR=str(a.fixture.resolve() / "cache"),
                        SEGARECOMP_LIBRARY_DIR=str(a.fixture.resolve() / "cache" / "library"),
                        SEGARECOMP_SHOT=str(bmp.resolve()), SEGARECOMP_SHOT_PAGE=page, SEGARECOMP_SHOT_SIZE=size,
                        SEGARECOMP_SHOT_FRAMES="24")
+            if a.video_driver == "dummy":
+                env["SDL_RENDER_DRIVER"] = "software"
             # Clear inherited review actions: capture must not build, play or modify storage.
             for key in ["SEGARECOMP_SHOT_BUILD", "SEGARECOMP_SHOT_ROM", "SEGARECOMP_GUI_AUTOPLAY", "SEGARECOMP_GUI_SCRIPT", "SEGARECOMP_SHOT_SELECT", "SEGARECOMP_SHOT_DROP",
                         "SEGARECOMP_SHOT_SCROLL", "SEGARECOMP_SHOT_LOG", "SEGARECOMP_SHOT_MENU", "SEGARECOMP_SHOT_SCALE"]:
@@ -143,10 +148,12 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     for name, page, extra in [("01_library_home", "library", {}), ("03_game_details", "details:0", {}), ("07_settings_library", "settings0", {})]:
         bmp = out / (name + ".bmp")
-        env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_RENDER_DRIVER="software", SDL_AUDIODRIVER="dummy",
+        env = dict(os.environ, SDL_VIDEODRIVER=a.video_driver, SDL_AUDIODRIVER="dummy",
                    SEGARECOMP_HOME=str(a.home.resolve()), SEGARECOMP_CACHE_DIR=str(a.fixture.resolve() / "cache"),
                    SEGARECOMP_LIBRARY_DIR=str(a.fixture.resolve() / "cache" / "library"), SEGARECOMP_SHOT=str(bmp.resolve()), SEGARECOMP_SHOT_PAGE=page,
                    SEGARECOMP_SHOT_SIZE="2160x1480", SEGARECOMP_SHOT_SCALE="2", SEGARECOMP_SHOT_FRAMES="24")
+        if a.video_driver == "dummy":
+            env["SDL_RENDER_DRIVER"] = "software"
         for key in ["SEGARECOMP_SHOT_BUILD", "SEGARECOMP_SHOT_ROM", "SEGARECOMP_SHOT_SELECT", "SEGARECOMP_SHOT_SCROLL", "SEGARECOMP_SHOT_LOG", "SEGARECOMP_SHOT_MENU"]:
             env.pop(key, None)
         subprocess.run([str(binary)], env=env, capture_output=True, timeout=60, check=True)

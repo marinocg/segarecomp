@@ -71,6 +71,14 @@
       "role": "UI icons (tinted, nearest-neighbour upscaled); byte-identical to the kit's textures/icons/*.png",
       "sampling": "nearest"
     },
+    "fonts/Inter-Regular.ttf": {
+      "role": "body text",
+      "license": "SIL OFL 1.1 (fonts/Inter-OFL.txt)"
+    },
+    "fonts/Inter-SemiBold.ttf": {
+      "role": "bold body text, buttons, labels",
+      "license": "SIL OFL 1.1 (fonts/Inter-OFL.txt)"
+    },
     "fonts/Silkscreen-Bold.ttf": {
       "role": "titles, section headings, platform bands and the no-cover tag",
       "license": "SIL OFL 1.1 (fonts/Silkscreen-OFL.txt)"

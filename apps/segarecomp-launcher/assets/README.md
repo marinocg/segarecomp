@@ -26,4 +26,4 @@ tag so it is never mistaken for the game's identified box art. Text is always dy
 `manifest.json` lists every runtime asset with its size, role and sampling, the removed first-kit placeholder, and the audit of the SEG-058 v2
 kit textures (which were evaluated and why its backgrounds and chrome textures do not ship). It is documentation and is not installed.
 
-The launcher draws titles and section headings with Silkscreen Bold and body text with Dear ImGui's embedded scalable face (`AddFontDefaultVector`); no other font file ships.
+The launcher draws titles and section headings with Silkscreen Bold and body text with Inter Regular / Inter SemiBold ([Inter 4.1](https://github.com/rsms/inter) by The Inter Project Authors, SIL OFL 1.1, `fonts/Inter-OFL.txt`; unmodified static TTFs from the v4.1 release). The embedded vector face is only the fallback when a font file is missing.

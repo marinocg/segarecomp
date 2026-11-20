@@ -28,8 +28,6 @@ void note_focus(const char *id, int index = -1) {
 }
 } // namespace
 
-ImFont *bold_font = nullptr;
-
 SDL_Texture *Ctx::asset(const std::string &relative) {
   const auto found = textures.find(relative);
   if (found != textures.end()) return found->second;
@@ -46,7 +44,7 @@ void Ctx::release() {
   textures.clear();
 }
 
-float text_width(ImFont *font, float px, const char *text) { return font->CalcTextSizeA(px, FLT_MAX, 0.0F, text).x + (font == bold_font ? 0.6F : 0.0F); }
+float text_width(ImFont *font, float px, const char *text) { return font->CalcTextSizeA(px, FLT_MAX, 0.0F, text).x; }
 
 std::string ellipsize(ImFont *font, float px, float max_px, const std::string &text) {
   if (text_width(font, px, text.c_str()) <= max_px) return text;
@@ -55,10 +53,7 @@ std::string ellipsize(ImFont *font, float px, float max_px, const std::string &t
   return cut + "...";
 }
 
-void draw_text(ImDrawList *dl, ImFont *font, float px, ImU32 color, ImVec2 pos, const char *text) {
-  dl->AddText(font, px, pos, color, text);
-  if (font == bold_font) dl->AddText(font, px, ImVec2(pos.x + 0.6F, pos.y), color, text);
-}
+void draw_text(ImDrawList *dl, ImFont *font, float px, ImU32 color, ImVec2 pos, const char *text) { dl->AddText(font, px, pos, color, text); }
 
 void draw_text_bold(Ctx &ctx, ImDrawList *dl, float px, ImU32 color, ImVec2 pos, const char *text) { draw_text(dl, ctx.bold, px, color, pos, text); }
 

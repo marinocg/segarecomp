@@ -40,7 +40,7 @@ extern ZoneEntry zone_first;
 extern std::string focus_id;
 
 struct Ctx {
-  ImFont *regular = nullptr, *bold = nullptr;  // body text: the scalable embedded font; `bold` draws it twice for weight
+  ImFont *regular = nullptr, *bold = nullptr;  // body text: Inter Regular; `bold` is Inter SemiBold (a real face, never a double draw)
   ImFont *display = nullptr;                  // the repository's Silkscreen Bold: titles and section headings
   float S = 1.0F;  // UI scale (display scale / pixel density, times the compact factor)
   SDL_Renderer *renderer = nullptr;
@@ -53,7 +53,6 @@ struct Ctx {
 
 enum class Style { primary, secondary, danger, ghost };
 
-extern ImFont *bold_font;  // set once by the app: draw_text draws this font twice (faux bold)
 float text_width(ImFont *font, float px, const char *text);
 // Shortens `text` with "..." to fit `max_px`.
 std::string ellipsize(ImFont *font, float px, float max_px, const std::string &text);
