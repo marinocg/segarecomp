@@ -8,6 +8,8 @@
   * the AUTOMATIC selection of the replacement: a self-modifying driver whose image signature is in the catalog is built a second time with the replacement and recorded as
     `native_driver` / `automatic` / `original_aot_failure_verified_replacement` with the original AOT's failure evidence (the catalog of a temporary copy of the runtime tree is
     given the fixture's signature; the product catalog is untouched), while the same driver without a catalog entry keeps the original path;
+  * the AUTOMATIC structural-alternatives pass (ADR 0291 Decision 6): a self-modifying driver the compiled structural alternatives close is rebuilt with them (supported, evidence
+    recorded, `original_with_structural_alternatives`), one whose images have no admissible form stays degraded and is not rebuilt (the first pass's emitter statistics decide);
   * `--z80-alternatives 1` (compiled structural alternatives of the original path) is recorded as requested and with its statistics, and is not a replacement;
   * malformed selections are rejected, and the record is deterministic across repeated builds.
 The positive case on a real driver image (replaced by the native implementation and compared with an independent reference) needs a commercial image and is
@@ -37,15 +39,31 @@ def check(ok, label):
         failures.append(label)
 
 
-def build(rom_bytes, out, *extra, runtime=None):
+def build(rom_bytes, out, *extra, runtime=None, compiler=None):
     out.mkdir(parents=True, exist_ok=True)
     rom = out.parent / (out.name + ".md")
     rom.write_bytes(rom_bytes)
-    command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", cc, "--cxx", cxx, "--runtime-dir", str(runtime or root / "platforms" / "genesis"),
+    command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", compiler or cc, "--cxx", cxx, "--runtime-dir", str(runtime or root / "platforms" / "genesis"),
                "--optimize", "0", "--runtime-optimize", "1", *extra]
     done = subprocess.run(command, text=True, capture_output=True, timeout=1800)
     status = json.loads((out / "status.json").read_text()) if (out / "status.json").exists() else {}
     return done, status
+
+
+def alternatives_failing_compiler(directory, mode):
+    """A POSIX wrapper around the real compiler that fails exactly ONE operation of the structural-alternatives second pass (ADR 0291 Decision 6) and nothing of the first pass: the
+    alternatives' emitted C is the only generated Z80 source that contains `z80_live_is(`. `compile` fails the compile of such a unit; `link` fails the link of the pass program
+    that contains such a unit (the materialization stage's own program)."""
+    wrapper = directory / ("cc-alt-" + mode)
+    body = ('#!/bin/sh\nmarked=0\nfor a in "$@"; do\n  case "$a" in\n    *.c) grep -q "z80_live_is(" "$a" 2>/dev/null && marked=1;;\n'
+            '    */z80-*.o) [ -f "$a" ] && grep -q "z80_live_is" "$a" 2>/dev/null && marked=1;;\n  esac\ndone\n')
+    if mode == "compile":
+        body += 'if [ $marked = 1 ]; then case " $* " in *" -c "*) echo "synthetic-alt-compile-diagnostic: scripted failure" >&2; exit 1;; esac; fi\n'
+    else:
+        body += 'if [ $marked = 1 ]; then case " $* " in *" -c "*) ;; *) echo "synthetic-alt-link-diagnostic: scripted failure" >&2; exit 1;; esac; fi\n'
+    wrapper.write_text(body + 'exec "%s" "$@"\n' % cc)
+    wrapper.chmod(0o755)
+    return str(wrapper)
 
 
 def executable(out):
@@ -55,10 +73,11 @@ def executable(out):
 def main():
     with tempfile.TemporaryDirectory(prefix="segarecomp-native-gems-") as directory:
         tmp = pathlib.Path(directory)
-        multi, smc = fx.build("sound_multi_epoch"), fx.build("sound_smc")
+        multi, smc, dyn = fx.build("sound_multi_epoch"), fx.build("sound_smc"), fx.build("sound_smc_dynamic")
         jobs = {"multi": (multi, ()), "multi_again": (multi, ()), "smc": (smc, ()), "smc_gems": (smc, ("--sound-driver", "gems")),
                 "multi_gems": (multi, ("--sound-driver", "gems")), "multi_alt": (multi, ("--z80-alternatives", "1")),
-                "smc_original": (smc, ("--sound-driver", "original"))}
+                "smc_original": (smc, ("--sound-driver", "original")),
+                "dyn": (dyn, ()), "dyn_original": (dyn, ("--sound-driver", "original"))}
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             futures = {name: pool.submit(build, rom, tmp / name, *extra) for name, (rom, extra) in jobs.items()}
             results = {name: f.result() for name, f in futures.items()}
@@ -74,20 +93,47 @@ def main():
         check(status.get("genesis_audio") == "supported", "the pre-existing genesis_audio status is unchanged for the original path")
         check(json.dumps(audio, sort_keys=True) == json.dumps(results["multi_again"][1].get("audio_implementation"), sort_keys=True), "the record is identical across repeated builds")
 
+        # ADR 0291 Decision 6: a self-modifying driver the compiled structural alternatives close is built a second time with them, automatically, and stays the game's own driver.
         done, status = results["smc"]
+        audio = status.get("audio_implementation", {})
+        check(done.returncode == 0 and audio.get("kind") == "original_z80_aot" and audio.get("reason") == "original_with_structural_alternatives" and audio.get("selection") == "automatic" and
+              audio.get("audio_status") == "supported" and "driver" not in audio and status.get("genesis_audio") == "supported" and "z80_audio_outcome" not in status and
+              audio.get("original_aot", {}).get("outcome") == "structural_code_mismatch" and audio.get("structural_alternatives", {}).get("requested") is True and
+              audio["structural_alternatives"].get("forms", 0) > 0 and audio.get("save_states") == "supported",
+              "a self-modifying driver that the structural alternatives close is rebuilt with them automatically: supported, still the game's own driver, with the original's failure as evidence")
+        check("genesis_audio=supported" in done.stdout or "genesis_audio" not in done.stdout, "the build result does not claim a degraded sound CPU")
+
+        # a failure of the second pass is the build's failure: typed, propagated, no third build, no stale executable, no successful record
+        for mode in (("compile", "link") if sys.platform != "win32" else ()):   # a POSIX shell-script compiler wrapper (as in genesis_z80_build_pipeline_test)
+            out = tmp / ("alt_fail_" + mode)
+            done, status = build(smc, out, compiler=alternatives_failing_compiler(tmp, mode))
+            log = (out / "build.log").read_text() if (out / "build.log").exists() else ""
+            check(done.returncode != 0 and status.get("status") == "failed" and "@result failed" in done.stdout and executable(out) is None and "synthetic-alt-%s-diagnostic" % mode in (log + done.stdout + done.stderr),
+                  "a failed structural-alternatives second pass (%s) fails the build with its own diagnostic and leaves no executable" % mode)
+            check(status.get("genesis_audio") is None and status.get("z80_audio_outcome") is None and "executable_images" not in status,
+                  "and no successful or degraded sound record is written for it (%s)" % mode)
+            check(log.count("second pass with the compiled structural alternatives") == 1 and "building the original driver without them" not in log,
+                  "and it is not retried or replaced by another configuration (%s)" % mode)
+
+        # ... and one whose images have no admissible form (the stored value is loaded from RAM) stays degraded WITHOUT a second build: the emitter's own statistics are the authority
+        done, status = results["dyn"]
         audio = status.get("audio_implementation", {})
         check(done.returncode == 0 and audio.get("kind") == "original_z80_aot" and audio.get("audio_status") == "degraded" and audio.get("degraded_reason") == "structural_code_mismatch" and
               audio.get("reason") == "no_verified_replacement" and audio.get("selection") == "automatic" and status.get("genesis_audio") == "degraded" and
-              status.get("z80_audio_outcome") == "structural_code_mismatch",
-              "a structurally self-modifying driver without a verified replacement stays the original Z80, degraded, and says why")
-        done_original, status_original = results["smc_original"]
+              status.get("z80_audio_outcome") == "structural_code_mismatch" and audio.get("structural_alternatives", {}).get("requested") is False and
+              audio["structural_alternatives"].get("second_pass") == "skipped_no_admissible_forms" and audio["structural_alternatives"].get("forms") == 0 and
+              audio.get("original_aot", {}).get("outcome") == "structural_code_mismatch",
+              "a structurally self-modifying driver without a verified replacement whose images have no admissible alternative forms stays the original Z80, degraded, and records that no second pass was made")
+        dyn_log = (tmp / "dyn" / "build.log").read_text()
+        check("no second pass" in dyn_log and "second pass with the compiled structural alternatives" not in dyn_log,
+              "the skipped second pass really did not run (the log says so and has no second-pass line)")
+        done_original, status_original = results["dyn_original"]
         original = dict(status_original.get("audio_implementation", {}))
         check(done_original.returncode == 0 and original.get("selection") == "developer_override" and original.get("reason") == "developer_override" and original.get("requested") == "original" and
-              original.get("kind") == "original_z80_aot", "--sound-driver original is recorded as a developer override")
-        for key in ("selection", "reason", "requested"):
-            original.pop(key, None)
-            audio.pop(key, None)
-        check(original == audio, "and is otherwise exactly the default")
+              original.get("kind") == "original_z80_aot" and original.get("structural_alternatives", {}).get("requested") is False and "original_aot" not in original,
+              "--sound-driver original is recorded as a developer override and never compiles the alternatives")
+        done_original, status_original = results["smc_original"]
+        check(done_original.returncode == 0 and status_original.get("genesis_audio") == "degraded", "--sound-driver original on the closable driver stays the plain original path (degraded)")
 
         for name in ("smc_gems", "multi_gems"):
             done, status = results[name]
@@ -121,7 +167,7 @@ def main():
               "a self-modifying driver with a verified image identity is built a second time with the replacement, automatically and with the original's failure as evidence")
         check("sound_driver=gems" in done.stdout and executable(tmp / "auto_native") is not None, "the build result names the replacement and produced an executable")
         # two images, the SECOND one faults: only a catalog line for the FAULTING image selects the replacement
-        second = fx.build("sound_smc_second_image")
+        second = fx.build("sound_smc_dynamic_second_image")
         done, status = build(second, tmp / "two_default")
         audio = status.get("audio_implementation", {})
         registry = (tmp / "two_default" / "generated-z80" / "genesis_z80_registry.c").read_text()

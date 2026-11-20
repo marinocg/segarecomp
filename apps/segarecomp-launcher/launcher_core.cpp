@@ -401,7 +401,8 @@ std::string native_audio_identity(const Layout &layout) {
   const fs::path runtime = layout.runtime / "runtime";
   const std::string impl = number_after(runtime / "gems_native.h", "#define GEMS_NATIVE_IMPLEMENTATION_VERSION ");
   const std::string catalog = number_after(runtime / "gems_driver_catalog.inc", "GEMS_CATALOG_REVISION(");
-  return "impl" + (impl.empty() ? std::string("-") : impl) + "/cat" + (catalog.empty() ? std::string("-") : catalog);
+  // "/alt1": the build's automatic structural-alternatives policy (ADR 0291 Decision 6); a build made before it is never reused for a game it now serves.
+  return "impl" + (impl.empty() ? std::string("-") : impl) + "/cat" + (catalog.empty() ? std::string("-") : catalog) + "/alt1";
 }
 }  // namespace
 
@@ -545,7 +546,7 @@ AudioReport read_audio_report(const fs::path &entry) {
     report.selection = policy_field(object, "selection");
     report.reason = policy_field(object, "reason");
     if (!one_of(report.selection, {"automatic", "developer_override"})) return report;
-    if (!one_of(report.reason, {"original_supported", "no_verified_replacement", "original_aot_failure_verified_replacement", "developer_override"})) return report;
+    if (!one_of(report.reason, {"original_supported", "no_verified_replacement", "original_aot_failure_verified_replacement", "original_with_structural_alternatives", "developer_override"})) return report;
     const std::string states = policy_field(object, "save_states");
     if (!states.empty() && states != "supported") return report;
     report.save_states = states;
@@ -592,6 +593,7 @@ std::string audio_headline(const AudioReport &report) {
   if (report.state == AudioReport::State::unknown) return "Unknown";
   if (report.state == AudioReport::State::not_recorded) return "Not recorded";
   if (report.kind == "native_driver") return "Native GEMS " + report.version;   // the version is the verified catalog's text ("unknown" when it was not recorded in a form this reader accepts)
+  if (report.schema == 2 && report.reason == "original_with_structural_alternatives") return "Original Z80 (generated-native, with structural alternatives)";
   return "Original Z80 (generated-native)";
 }
 
@@ -625,6 +627,9 @@ std::string audio_detail(const AudioReport &report) {
   if (report.audio_status == "degraded")
     text += std::string("Degraded: structural code mutation - the sound driver rewrites its own executable code, which is not supported, and no verified replacement applies. Music is not supported in this executable.") +
             (report.alternative_forms > 0 ? " Compiled structural alternatives did not cover it.\n" : "\n");
+  if (report.schema == 2 && report.selection == "automatic" && report.reason == "original_with_structural_alternatives")
+    text += "Automatically selected: the original sound driver rewrites its own executable code, so the build compiled the structural alternatives of that code"
+            " and its start-up run met no mismatch. ";
   if (report.alternative_forms > 0)
     text += "The game's own sound driver runs as generated native code, with " + std::to_string(report.alternative_forms) + " compiled structural alternative forms of its self-modifying code. Not a replacement driver.";
   else text += "The game's own sound driver runs as generated native code. Not a replacement driver.";

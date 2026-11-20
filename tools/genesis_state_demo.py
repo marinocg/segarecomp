@@ -43,7 +43,7 @@ def main():
         obj = work / ("demo-z80-" + pathlib.Path(unit).stem + ".o")
         subprocess.run([a.cc, "-std=c11", "-O1", "-w", *incs, "-I" + str(z80), "-c", str(z80 / unit), "-o", str(obj)], check=True)
         objects.append(str(obj))
-    keep = [o for o in sorted(glob.glob(str(out / "obj" / "*.o"))) if not pathlib.Path(o).name.startswith(("hook-", "z80-"))]
+    keep = [o for o in sorted(glob.glob(str(out / "obj" / "*.o"))) if not pathlib.Path(o).name.startswith(("hook-", "z80-", "genesis-snapshot"))]
     exe = work / "state_demo"
     subprocess.run([a.cc, "-o", str(exe), *keep, *objects, "-lm", "-lstdc++"], check=True)
     sha = hashlib.sha256(pathlib.Path(a.rom).read_bytes()).hexdigest()

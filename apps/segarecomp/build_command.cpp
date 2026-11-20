@@ -124,6 +124,10 @@ struct Options {
   // selects the replacement, "gems" requires it and fails when the uploaded image is not a verified GEMS image. There is no runtime fallback in any mode.
   std::string sound_driver = "auto";
   bool sound_auto_second_pass = false;   // set by the build itself when the automatic policy re-runs as "gems" (the evidence below is why)
+  // ADR 0291 Decision 6: set by the build itself when the automatic policy re-runs the ORIGINAL driver with its compiled structural alternatives (first pass: the original AOT isolated
+  // the sound CPU and no verified replacement applies). A failure of that pass is the build's failure (typed, propagated): it is never retried or replaced by another configuration.
+  bool sound_alt_second_pass = false;
+  bool sound_alt_skipped = false;   // the first pass's own emitter reported zero admissible alternative forms for every registered image: the second pass would be identical, so it is not made
   struct AutoEvidence {
     bool present = false;
     std::string original_outcome;         // "structural_code_mismatch"
@@ -1062,6 +1066,8 @@ unsigned read_native_implementation_version(const fs::path &header) {
 
 // Returned by build_genesis_program in the automatic mode when its first pass produced the evidence that selects the native replacement; the caller runs the one second pass.
 constexpr int kRetryWithNativeSound = 1000;
+// Returned in the automatic mode when the first pass isolated the sound CPU by a structural code mismatch, no verified replacement applies, and the structural alternatives were not yet compiled.
+constexpr int kRetryWithStructuralAlternatives = 1001;
 
 // The machine-readable record of the audio implementation of THIS executable (status.json `audio_implementation`). Every value is a build fact:
 // what was requested, what was compiled in, how the driver identity was established, what the build's own start-up run observed. It never says
@@ -1101,8 +1107,11 @@ std::string audio_implementation_json(const Options &options, const GenesisSound
   } else {
     out << ",\"audio_status\":\"" << (fault ? "degraded" : "supported") << "\"";
     if (fault) out << ",\"degraded_reason\":\"structural_code_mismatch\"";
+    if ((options.sound_alt_second_pass || options.sound_alt_skipped) && options.sound_auto_evidence.present)   // the first pass's failure that selected the alternatives (a build whose second pass failed to build has none)
+      out << ",\"original_aot\":{\"outcome\":\"" << options.sound_auto_evidence.original_outcome << "\",\"fault_frame\":" << options.sound_auto_evidence.fault_frame << "}";
     out << ",\"structural_alternatives\":{\"requested\":" << (options.z80_alternatives ? "true" : "false") << ",\"images\":" << build.alt_images << ",\"bytes\":" << build.alt_bytes
-        << ",\"entries\":" << build.alt_entries << ",\"forms\":" << build.alt_forms << ",\"images_dropped\":" << build.alt_dropped << "}";
+        << ",\"entries\":" << build.alt_entries << ",\"forms\":" << build.alt_forms << ",\"images_dropped\":" << build.alt_dropped
+        << (options.sound_alt_skipped ? ",\"second_pass\":\"skipped_no_admissible_forms\"" : "") << "}";
   }
   out << "}";
   return out.str();
@@ -1534,7 +1543,32 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
                  " image: second pass with the native replacement");
         return kRetryWithNativeSound;
       }
-      audio_record.reason = summary.sound_fault ? "no_verified_replacement" : "original_supported";
+      if (summary.sound_fault && !summary.sound_fault->native_driver && !options.z80_alternatives && !options.sound_alt_second_pass && !options.sound_alt_skipped) {
+        // ADR 0291 Decision 6: no verified replacement serves the faulting driver. The original driver's own compiled structural alternatives (ADR 0259, static analysis only) may close its
+        // self-modification; whether they do is decided by one more deterministic pass whose own start-up run must meet no fault.
+        options.sound_auto_evidence.present = true;
+        options.sound_auto_evidence.original_outcome = "structural_code_mismatch";
+        options.sound_auto_evidence.fault_frame = summary.sound_fault->master_ticks / (3420U * 262U /* NTSC master ticks per frame */);
+        // Authoritative pre-check (no new analysis): the very emitter a second pass would use, run on this pass's final registry. Alternatives are decided per image, so zero admissible
+        // forms for every registered image means the second pass would emit, compile and observe exactly what this pass did: it is skipped and the degraded result stands.
+        // An emitter failure or any form at all is not a reason to skip.
+        gz80::EmitRequest probe;
+        probe.directory = options.output / "obj" / "z80-alternatives-probe";
+        probe.structural_alternatives = true;
+        std::error_code probe_ec;
+        fs::remove_all(probe.directory, probe_ec);
+        const gz80::EmitOutcome probed = gz80::emit_registry(registry, probe);
+        fs::remove_all(probe.directory, probe_ec);
+        if (probed.ok() && probed.stats.alternative_forms == 0 && probed.stats.alternative_entries == 0 && probed.stats.alternative_images_dropped == 0) {
+          options.sound_alt_skipped = true;
+          log.line("sound driver: the original AOT isolated the sound CPU (structural_code_mismatch), no verified replacement applies and the structural alternatives of its images are empty: no second pass");
+        } else {
+          log.line("sound driver: the original AOT isolated the sound CPU (structural_code_mismatch) and no verified replacement applies: second pass with the compiled structural alternatives");
+          return kRetryWithStructuralAlternatives;
+        }
+      }
+      if (options.sound_alt_second_pass && !summary.sound_fault) audio_record.reason = "original_with_structural_alternatives";
+      else audio_record.reason = summary.sound_fault ? "no_verified_replacement" : "original_supported";
     } else if (options.sound_driver == "gems") {
       if (audio_record.native_images == 0 || (options.sound_auto_second_pass && !options.sound_auto_evidence.present)) {
         log.line("sound driver: the native replacement was required but no uploaded Z80 image is a verified GEMS image");
@@ -2123,6 +2157,13 @@ int run_build(Options options) {
       if (rc == kRetryWithNativeSound) {   // the bounded, deterministic second pass: the same program with the replacement the first pass's evidence selected
         options.sound_driver = "gems";
         options.sound_auto_second_pass = true;
+        status_extra.clear(); sound_result.clear(); sound_degraded = false;
+        rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
+                                   m68k_images, executable, status_extra, sound_degraded, sound_result);
+      }
+      if (rc == kRetryWithStructuralAlternatives) {   // the bounded, deterministic second pass: the original driver with its compiled structural alternatives
+        options.z80_alternatives = true;
+        options.sound_alt_second_pass = true;
         status_extra.clear(); sound_result.clear(); sound_degraded = false;
         rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
                                    m68k_images, executable, status_extra, sound_degraded, sound_result);

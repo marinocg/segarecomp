@@ -406,6 +406,13 @@ int main(int argc, char **argv) {
         R"({"audio_implementation":{"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"original_supported","audio_status":"supported","structural_alternatives":{"requested":true,"images":1,"bytes":11,"entries":7,"forms":13,"images_dropped":0}}})"));
     expect(audio_headline(alternatives) == "Original Z80 (generated-native)" && audio_detail(alternatives).find("13 compiled structural alternative forms") != std::string::npos,
            "compiled structural alternatives are disclosed on the original path");
+    const auto auto_alt = read_audio_report(write_status(dir, "audio_auto_alt",
+        R"({"audio_implementation":{"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"original_with_structural_alternatives","save_states":"supported","audio_status":"supported","original_aot":{"outcome":"structural_code_mismatch","fault_frame":190},"structural_alternatives":{"requested":true,"images":1,"bytes":2,"entries":4,"forms":4,"images_dropped":0}}})"));
+    expect(auto_alt.state == AudioReport::State::known && audio_headline(auto_alt) == "Original Z80 (generated-native, with structural alternatives)" &&
+               audio_detail(auto_alt).find("Automatically selected") != std::string::npos && audio_detail(auto_alt).find("4 compiled structural alternative forms") != std::string::npos &&
+               audio_detail(auto_alt).find("Not a replacement driver") != std::string::npos && audio_detail(auto_alt).find("Degraded") == std::string::npos &&
+               audio_detail(auto_alt).find("Independently reimplemented") == std::string::npos,
+           "automatically selected structural alternatives are disclosed, not described as a replacement driver or as degraded");
     const auto degraded = read_audio_report(write_status(dir, "audio_degraded",
         R"({"audio_implementation":{"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"no_verified_replacement","audio_status":"degraded","degraded_reason":"structural_code_mismatch","structural_alternatives":{"requested":false,"forms":0}}})"));
     expect(audio_headline(degraded) == "Original Z80 (generated-native)" && audio_detail(degraded).find("Degraded: structural code mutation") != std::string::npos &&
