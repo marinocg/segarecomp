@@ -427,4 +427,10 @@ if(BUILD_TESTING)
   set_property(TEST launcher_schema3_gui_test APPEND PROPERTY LABELS full)
   set_property(TEST launcher_schema3_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_schema3_gui_test PROPERTY TIMEOUT 900)
+  # SEG-150-T006 (delivery F30): the per-game Mods tab (status vocabulary, declined consent, refusal next step, single selection, blocked switching, platform availability).
+  add_test(NAME launcher_mods_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_mods_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
+  set_property(TEST launcher_mods_gui_test APPEND PROPERTY LABELS full)
+  set_property(TEST launcher_mods_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_mods_gui_test PROPERTY TIMEOUT 900)
 endif()

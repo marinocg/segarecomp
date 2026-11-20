@@ -4,7 +4,8 @@
 // single primary action: Play, Prepare & play, Retry, Find game file, Choose mapper, Cancel or Unqueue; everything else is in "More"). Below it the tabs
 // (ordinary view state, `details_tab_`):
 //   Overview       notices, what happened after a failure (reason, next step, log), and the rows that open the other tabs ("Advanced details").
-//   Mods           the Patches / Variants card (Genesis only: a tab exists only where it has content).
+//   Mods           the per-game Mods card: No mod (original game) and the installed mods, one selected variant, typed status, install / select / prepare / play / remove
+//                  (Genesis only: other platforms get an honest "not available" card).
 //   Game settings  per-game preparation options (mapper, mode, region, cartridge hardware, advanced build options), input recording, display and audio
 //                  (where they live), the library entry (favorite, cover, remove); every card says its scope.
 //   Advanced       build provenance and identity, older versions, the build log, the game file row with Locate, the storage card, diagnostics.
@@ -126,7 +127,7 @@ std::string App::prepare_label(const LibraryEntry &entry, const StatusInfo &info
       case GameStatus::stale:
       case GameStatus::playable_older: return "Prepare again";
       case GameStatus::failed: return "Retry";
-      default: return "Prepare patched";
+      default: return "Prepare selected mod";
     }
   }
   switch (info.status) {
@@ -316,7 +317,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     else { line = "Not prepared yet. Prepare & play makes the native program (" + mode + ") on this computer, then starts the game."; }
     if (!entry.patches.empty() && !info.sega_cd && !is_running && !is_building) {   // SEG-122: always say which version Play starts
       const InstalledPatch *sel = entry.selected_patch();
-      line += sel == nullptr ? " Play starts Vanilla." : " Play starts Patched.";
+      line += sel == nullptr ? " Play starts the original game." : " Play starts the selected mod.";
     }
     const auto lines = wrap(ctx_.regular, ctx_.u(12.5F), tw, line);
     for (std::size_t i = 0; i < lines.size() && i < 3; ++i) { draw_text(dl, ctx_.regular, ctx_.u(12.5F), color, ImVec2(x0, y), lines[i].c_str()); y += ctx_.u(16.0F); }
@@ -854,81 +855,177 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
   return h;
 }
 
-// ---------------------------------------------------------------- B2. patches / variants (SEG-122, ADR 0266)
+// ---------------------------------------------------------------- B2. Mods (SEG-122 ADR 0266, SEG-150-T006)
+// The per-game Mods tab: "No mod (original game)" and every installed mod as a row, ONE selected variant (composition is not implemented, so nothing here toggles two
+// mods), the typed status of each (Installed / Selected / Needs preparation / Prepared / Needs approval / Incompatible) and the actions of the existing flow: install
+// (chooser -> verified preview sheet -> identity-bound approval where code is carried), select, prepare, play, remove. Only recorded facts are shown.
 
 float App::draw_variants(LibraryEntry &entry, const StatusInfo &info, float w) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetCursorScreenPos();
   const float pad = ctx_.u(16.0F), inner = w - 2 * pad;
   const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_running_;
+  const std::string unavailable = mods_unavailable_reason(entry.platform_id);
   dl->ChannelsSplit(2);
   dl->ChannelsSetCurrent(1);
   float y = a.y + ctx_.u(40.0F);
   const InstalledPatch *selected = entry.selected_patch();
+  const auto tone_color = [](ModTone t) { return t == ModTone::ok ? col::ok : t == ModTone::warn ? col::warn : t == ModTone::err ? col::err : col::text2; };
   const auto built_of = [&](const std::string &identity) {
     for (const auto &p : info.patches) if (p.identity == identity) return p.built;
     return false;
   };
-  // ---- the choice: Vanilla or one installed patch ----
-  if (!entry.patches.empty()) {
-    std::vector<std::string> titles{"Vanilla"}, descriptions{info.vanilla_ready ? "Original verified game. Built." : "Original verified game. Not built."};
-    int sel = 0;
-    for (std::size_t i = 0; i < entry.patches.size(); ++i) {
-      const InstalledPatch &p = entry.patches[i];
-      titles.push_back(entry.patches.size() == 1 ? std::string("Patched") : "Patched " + std::to_string(i + 1));   // the name goes in the description: tile titles must never truncate
-      descriptions.push_back(patch_label(p) + (built_of(p.identity) ? ". Built." : ". Not built."));
-      if (selected != nullptr && selected->identity == p.identity) sel = static_cast<int>(i) + 1;
-    }
+  std::string header_state = "Original game selected";
+  ImU32 header_color = col::text2;
+  if (!unavailable.empty()) {
+    header_state = "Not available for this platform";
+    header_color = col::warn;
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-    ImGui::BeginDisabled(busy_now);
-    if (option_tiles(ctx_, "variant_tiles", titles, descriptions, &sel, inner, ctx_.u(58.0F))) select_variant(entry.id(), sel == 0 ? std::string() : entry.patches[static_cast<std::size_t>(sel - 1)].identity);
-    ImGui::EndDisabled();
-    y += ctx_.u(66.0F);
-    // SEG-124: a native-only package compiles the unchanged original image together with an audited native widescreen component; a combined package does both
-    const bool patched_image = selected != nullptr && selected->target_sha256 != entry.sha256;
-    std::string line = selected == nullptr ? "Selected: Vanilla - the original game and its existing program."
-                       : "Selected: Patched - " + patch_label(*selected) + (selected->has_native() ? (patched_image ? ", a separate program built from the patched image with a native widescreen component." : ", a separate program with a native widescreen component (the game image is unchanged).")
-                                                                                              : ", a separate program built from the patched image.");
+    y += paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, unavailable) + ctx_.u(6.0F);
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-    y += paragraph(ctx_, ctx_.bold, ctx_.u(12.0F), col::text, inner, line) + ctx_.u(4.0F);
-    if (selected != nullptr) {
-      std::string note = built_of(selected->identity) ? "The patched program is built. Play Patched starts it; Play Vanilla stays available by selecting Vanilla above."
-                                                      : "The patched version is not built yet: use Build patched version. Vanilla stays playable meanwhile; nothing falls back silently.";
-      if (selected->width_max >= 0) note += " The package states a validated Widescreen Width of up to " + std::to_string(selected->width_max) + ".";
-      ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, note) + ctx_.u(4.0F);
-    }
+    y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Mod packages are verified and played for Genesis games only; Master System and Sega CD games keep their own preparation and play flow on the Overview.") + ctx_.u(4.0F);
   } else {
+    if (selected != nullptr) { header_state = "Mod selected: " + selected->name; header_color = col::info; }
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-    y += paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, "No patch is installed. A patch package (.segapatch) adds an optional, separately built version of this game; the original game and its program are never changed.") + ctx_.u(6.0F);
-  }
-  // ---- actions ----
-  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-  const float bh = ctx_.u(32.0F);
-  ImGui::BeginDisabled(busy_now || info.rom_missing);
-  if (button(ctx_, "patch_install", "Install patch...", ImVec2(ctx_.u(170.0F), bh), Style::secondary, true, ctx_.icon("import"))) browse_patch(entry.id());
-  ImGui::EndDisabled();
-  if (ImGui::IsItemHovered()) tooltip(ctx_, info.rom_missing ? "The original ROM file is needed to verify a patch. Locate it first." : "Choose a .segapatch package. It is verified against your original game before anything is installed.");
-  if (!entry.patches.empty()) {   // one button for the SELECTED patch: it never outgrows the card, whatever the names are
-    ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    ImGui::BeginDisabled(busy_now || selected == nullptr);
-    if (button(ctx_, "patch_remove", "Remove patch", ImVec2(ctx_.u(150.0F), bh), Style::ghost, true, ctx_.icon("trash"))) ask_remove_patch(entry, selected->identity);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered()) tooltip(ctx_, selected == nullptr ? "Select the patched version above to remove its patch. Vanilla is never removed." : "Remove the selected patch. The original game and Vanilla are untouched.");
-  }
-  y = ImGui::GetCursorScreenPos().y + ctx_.u(8.0F);
-  if (const auto note = patch_notices_.find(entry.id()); note != patch_notices_.end() && !note->second.empty()) {
+    y += paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner,
+                   "Mods are optional packages (.segapatch) made for this exact game. Each one is verified against your original game before anything is installed, and is prepared as its own separate program. The original game, its program and its save data are never changed.") + ctx_.u(8.0F);
+    const std::string block = mod_switch_block(entry);
+    // ---- the actions first, so they are in view without scrolling: Install mod, and for the selected version Prepare selected mod until built, then Play ----
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-    y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::info, inner, note->second) + ctx_.u(4.0F);
+    const float bh = ctx_.u(34.0F);
+    const bool needs_prep = selected != nullptr && !built_of(selected->identity);
+    const ModStatus sel_status = selected != nullptr ? mod_status_of(entry, info, *selected) : ModStatus{};
+    const bool selectable_mod = selected != nullptr && sel_status.code != "needs_approval" && sel_status.code != "incompatible_package_missing";
+    if (button(ctx_, "patch_install", "Install mod...", ImVec2(ctx_.u(150.0F), bh), Style::secondary, !(busy_now || info.rom_missing), ctx_.icon("import"))) browse_patch(entry.id());
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) tooltip(ctx_, info.rom_missing ? "The original ROM file is needed to verify a mod. Locate it first." : "Choose a .segapatch package. It is verified against your original game and previewed before anything is installed. Nothing is downloaded.");
+    if (selected != nullptr) {
+      ImGui::SameLine(0.0F, ctx_.u(8.0F));
+      const bool preparing = is_building(entry.id());
+      const char *prep_label = preparing ? "Preparing..." : (info.status == GameStatus::failed ? "Retry preparing" : (needs_prep ? "Prepare selected mod" : "Prepare again"));
+      if (button(ctx_, "mods_prepare", prep_label, ImVec2(ctx_.u(190.0F), bh), needs_prep && !preparing ? Style::primary : Style::secondary, selectable_mod && can_build(entry, info) && !maintenance_running_, ctx_.icon("reset"))) { notices_.erase(entry.id()); request_build(entry.id()); }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) tooltip(ctx_, selectable_mod ? "Prepare the selected mod as its own program on this computer. The original game's program is not touched." : "This mod cannot be prepared until the problem shown on its row is resolved.");
+      ImGui::SameLine(0.0F, ctx_.u(8.0F));
+      if (button(ctx_, "mods_play", "Play modded game", ImVec2(ctx_.u(170.0F), bh), needs_prep || !selectable_mod ? Style::secondary : Style::primary, can_play(info) && !needs_prep && selectable_mod, ctx_.icon("play"))) play(entry.id());
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) tooltip(ctx_, needs_prep ? "Play is available once the selected mod is prepared. Nothing falls back to the original game silently." : "Start the selected mod.");
+    } else {
+      ImGui::SameLine(0.0F, ctx_.u(8.0F));
+      if (button(ctx_, "mods_play", "Play original game", ImVec2(ctx_.u(180.0F), bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
+    }
+    y = ImGui::GetCursorScreenPos().y + ctx_.u(8.0F);
+    if (selected != nullptr && needs_prep && selectable_mod) {
+      ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, inner, "Needs preparation: Play stays disabled until the selected mod is prepared. The original game stays playable by selecting No mod (original game).") + ctx_.u(4.0F);
+    }
+    if (!block.empty() && !entry.patches.empty()) {   // the disabled switch / remove buttons below say why, in text as well as in the tooltip
+      ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, inner, "Switching and removing are paused: " + block) + ctx_.u(4.0F);
+    }
+    // the outcome of the last install / select / remove (a refusal in the error tone, with its next step) sits right under the actions it answers
+    if (const auto note = patch_notices_.find(entry.id()); note != patch_notices_.end() && !note->second.empty()) {
+      const bool refused = patch_refused_.count(entry.id()) != 0;
+      ImGui::SetCursorScreenPos(ImVec2(a.x + pad + (refused ? ctx_.u(22.0F) : 0.0F), y));
+      const ImU32 nc = refused ? col::err : col::info;
+      if (refused) tone_mark(ctx_, dl, ImVec2(a.x + pad + ctx_.u(8.0F), y + ctx_.u(8.0F)), ctx_.u(15.0F), nc);
+      y += paragraph(ctx_, refused ? ctx_.bold : ctx_.regular, ctx_.u(12.0F), nc, inner - (refused ? ctx_.u(22.0F) : 0.0F), note->second) + ctx_.u(2.0F);
+      if (refused) {
+        ImGui::SetCursorScreenPos(ImVec2(a.x + pad + ctx_.u(22.0F), y));
+        y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner - ctx_.u(22.0F), "Next step: " + mod_refusal_next_step(note->second) + " Nothing was installed or approved.") + ctx_.u(4.0F);
+      }
+      note_layout("mod_notice", ImVec2(a.x + pad, y - ctx_.u(8.0F)), ImVec2(a.x + pad + inner, y));
+    }
+    // ---- the rows: the original game first (always one click away), then every installed mod; exactly one is selected ----
+    const float btn_w = ctx_.u(128.0F), gap = ctx_.u(10.0F);
+    const float text_w = inner - btn_w - 3 * gap - ctx_.u(8.0F);
+    struct Row { bool original = false; const InstalledPatch *patch = nullptr; std::size_t index = 0; };
+    std::vector<Row> rows{Row{true, nullptr, 0}};
+    for (std::size_t i = 0; i < entry.patches.size(); ++i) rows.push_back(Row{false, &entry.patches[i], i});
+    std::string pending_select;
+    bool select_requested = false;
+    for (const Row &row : rows) {
+      const bool is_sel = row.original ? selected == nullptr : selected != nullptr && selected->identity == row.patch->identity;
+      std::string title, kind_line, target_line, status_label, reason;
+      ModTone tone = ModTone::neutral;
+      ModStatus st;
+      if (row.original) {
+        title = "No mod (original game)";
+        kind_line = "The original verified game and its existing program. Its saves are separate from every mod's.";
+        const bool vanilla_selected_state = is_sel;
+        status_label = vanilla_selected_state ? (info.vanilla_ready ? "Selected - Prepared" : "Selected - Needs preparation") : (info.vanilla_ready ? "Prepared" : "Not prepared");
+        tone = is_sel ? (info.vanilla_ready ? ModTone::ok : ModTone::warn) : ModTone::neutral;
+      } else {
+        const InstalledPatch &p = *row.patch;
+        st = mod_status_of(entry, info, p);
+        title = patch_label(p);
+        kind_line = mod_kind_label(p) + (p.author.empty() ? std::string(". Author not recorded.") : " - by " + p.author);
+        target_line = "Target: " + entry.title() + ", exact original image " + (entry.sha256.size() >= 12 ? entry.sha256.substr(0, 12) + "..." : entry.sha256) + ". " +
+                      (p.schema3 ? std::string("Schema 3 mod") : std::string("Schema 1/2 patch package")) + ". " +
+                      (mod_capabilities_label(p).empty() ? std::string("Capabilities: not recorded here.") : "Reads: " + mod_capabilities_label(p) + ".");
+        status_label = st.label;
+        tone = st.tone;
+        reason = st.reason.empty() ? std::string() : st.reason + " Next step: " + st.next;
+        if (st.reason.empty() && !st.next.empty()) reason = "Next step: " + st.next;
+      }
+      const float fpx = ctx_.u(12.0F), spx = ctx_.u(11.5F);
+      const auto kind_lines = wrap(ctx_.regular, fpx, text_w, kind_line);
+      const auto target_lines = target_line.empty() ? std::vector<std::string>{} : wrap(ctx_.regular, spx, text_w, target_line);
+      const auto reason_lines = reason.empty() ? std::vector<std::string>{} : wrap(ctx_.regular, spx, text_w, reason);
+      const float line_h = ctx_.u(16.0F), small_h = ctx_.u(15.0F);
+      const float rh = std::max(ctx_.u(86.0F), ctx_.u(14.0F) + ctx_.u(20.0F) + static_cast<float>(kind_lines.size()) * line_h + static_cast<float>(target_lines.size()) * small_h + ctx_.u(22.0F) + static_cast<float>(reason_lines.size()) * small_h + ctx_.u(10.0F));
+      const ImVec2 r0(a.x + pad, y), r1(a.x + pad + inner, y + rh);
+      card(ctx_, dl, r0, r1, is_sel, false, rgba(11, 27, 62, 250));
+      float ty = r0.y + ctx_.u(12.0F);
+      const float tx = r0.x + ctx_.u(14.0F);
+      draw_text(dl, ctx_.bold, ctx_.u(13.5F), col::text, ImVec2(tx, ty), ellipsize(ctx_.bold, ctx_.u(13.5F), text_w, title).c_str());
+      ty += ctx_.u(20.0F);
+      for (const auto &l : kind_lines) { draw_text(dl, ctx_.regular, fpx, col::text2, ImVec2(tx, ty), l.c_str()); ty += line_h; }
+      for (const auto &l : target_lines) { draw_text(dl, ctx_.regular, spx, col::text2, ImVec2(tx, ty), l.c_str()); ty += small_h; }
+      ty += ctx_.u(4.0F);
+      const ImU32 color = tone_color(tone);
+      tone_mark(ctx_, dl, ImVec2(tx + ctx_.u(7.0F), ty + ctx_.u(8.0F)), ctx_.u(15.0F), color);   // symbol + text + color: never color alone
+      draw_text(dl, ctx_.bold, ctx_.u(12.5F), color, ImVec2(tx + ctx_.u(20.0F), ty + ctx_.u(1.0F)), status_label.c_str());
+      ty += ctx_.u(20.0F);
+      for (const auto &l : reason_lines) { draw_text(dl, ctx_.regular, spx, color, ImVec2(tx, ty), l.c_str()); ty += small_h; }
+      // the right column: Selected tag / Use this mod, then Remove (a mod only)
+      const float bx = r1.x - gap - btn_w;
+      const std::string tag = row.original ? "orig" : std::to_string(row.index);
+      float by = r0.y + ctx_.u(12.0F);
+      if (is_sel) {
+        ImVec2 sz;
+        pill(ctx_, dl, ImVec2(bx, by + ctx_.u(4.0F)), "Selected", col::info, ctx_.icon("check"), ctx_.u(12.0F), &sz);
+      } else {
+        const bool blocked_state = !row.original && (st.code == "needs_approval" || st.code == "incompatible_package_missing");
+        const char *label = row.original ? "Use original game" : (selected != nullptr ? "Switch to this mod" : "Use this mod");
+        ImGui::SetCursorScreenPos(ImVec2(bx, by));
+        if (button(ctx_, ("mod_select_" + tag).c_str(), label, ImVec2(btn_w, ctx_.u(30.0F)), row.original ? Style::primary : Style::secondary, block.empty() && !blocked_state)) {
+          select_requested = true;
+          pending_select = row.original ? std::string() : row.patch->identity;
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) tooltip(ctx_, !block.empty() ? block.c_str() : blocked_state ? "This mod cannot be selected until the problem shown on its row is resolved." : row.original ? "Return to the original game. Your mods stay installed." : "Select this mod. Only one mod is used at a time; it replaces the selected one.");
+      }
+      if (!row.original) {
+        ImGui::SetCursorScreenPos(ImVec2(bx, by + ctx_.u(38.0F)));
+        if (button(ctx_, ("mod_remove_" + tag).c_str(), "Remove", ImVec2(btn_w, ctx_.u(28.0F)), Style::ghost, block.empty(), ctx_.icon("trash"))) ask_remove_patch(entry, row.patch->identity);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) tooltip(ctx_, !block.empty() ? block.c_str() : "Remove this mod's package after a confirmation. The original game and its Vanilla version are untouched.");
+      }
+      note_layout(row.original ? "mod_row_original" : "mod_row", r0, r1);
+      y += rh + ctx_.u(8.0F);
+    }
+    if (select_requested) select_variant(entry.id(), pending_select);
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+    if (entry.patches.empty()) {
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, "No mod is installed on this game yet. Install mod verifies a package and shows what it is, who made it and what it needs before anything is added.") + ctx_.u(6.0F);
+    } else {
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, "One mod at a time: selecting another mod replaces the selected one, and combining mods is not supported. Each mod is its own program with its own save data; No mod (original game) is always one click away.") + ctx_.u(6.0F);
+    }
   }
   ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-  y += paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, inner, "Installing a patch does not by itself make the picture authored widescreen: the Widescreen settings (mode, width, side style) apply unchanged, and Vanilla keeps the generic widescreen. A patch changes the game's own behaviour in the patched program only.") + ctx_.u(4.0F);
+  if (unavailable.empty()) y += paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, inner, "Installing a mod does not by itself make the picture authored widescreen: the Widescreen settings apply unchanged and Vanilla keeps the generic widescreen. A mod changes the game's own behaviour in its own program only.") + ctx_.u(4.0F);
   const float h = y - a.y + ctx_.u(10.0F);
   dl->ChannelsSetCurrent(0);
-  section_card(ctx_, dl, a, ImVec2(a.x + w, a.y + h), "PATCHES / VARIANTS", rgba(9, 22, 54, 245));
+  section_card(ctx_, dl, a, ImVec2(a.x + w, a.y + h), "MODS", rgba(9, 22, 54, 245));
   note_layout("variants", a, ImVec2(a.x + w, a.y + h));
   dl->AddRectFilled(ImVec2(a.x + ctx_.u(1.0F), a.y + ctx_.u(2.0F)), ImVec2(a.x + ctx_.u(4.0F), a.y + h - ctx_.u(2.0F)), col::btn_top, ctx_.u(2.0F));
-  state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), selected == nullptr ? std::string("Vanilla selected") : "Patched selected: " + selected->name, selected == nullptr ? col::text2 : col::info, w * 0.5F);
+  state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), header_state, header_color, w * 0.5F);
   dl->ChannelsMerge();
   ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + h));
   ImGui::Dummy(ImVec2(w, 0.0F));
@@ -1437,9 +1534,11 @@ void App::draw_details_overview(LibraryEntry &entry, const StatusInfo &info, flo
   // the way into the other tabs
   if (details_has_mods(entry)) {
     const InstalledPatch *sel = entry.selected_patch();
-    const std::string sub = entry.patches.empty() ? std::string("No patch installed. Install one from a .segapatch package.")
-                                                  : std::to_string(entry.patches.size()) + (entry.patches.size() == 1 ? " patch installed" : " patches installed") + "  -  " + (sel == nullptr ? "Vanilla selected" : "Patched selected");
-    if (link_row(ctx_, "ov_mods", "Mods and patches", sub, w, &focus_label_)) set_details_tab(DetailsTab::mods);
+    const std::string unavailable = mods_unavailable_reason(entry.platform_id);
+    const std::string sub = !unavailable.empty() ? std::string("Not available for this platform: mods are for Genesis games only.")
+                            : entry.patches.empty() ? std::string("No mod installed  -  original game selected. Install one from a .segapatch package.")
+                                                    : std::to_string(entry.patches.size()) + (entry.patches.size() == 1 ? " mod installed" : " mods installed") + "  -  " + (sel == nullptr ? "original game selected" : "mod selected: " + sel->name);
+    if (link_row(ctx_, "ov_mods", "Mods", sub, w, &focus_label_)) set_details_tab(DetailsTab::mods);
   }
   {
     std::string sub = selected_mode_label(entry) + " mode";
@@ -1537,7 +1636,7 @@ void App::draw_details(float w, float h) {
   draw_details_tabs(*entry, w);
   switch (details_tab_) {
     case DetailsTab::overview: draw_details_overview(*entry, info, w); break;
-    case DetailsTab::mods: draw_variants(*entry, info, w); break;   // SEG-122: the patches / variants card, unchanged (T006 reworks its content)
+    case DetailsTab::mods: draw_variants(*entry, info, w); break;   // SEG-150-T006: the per-game Mods card
     case DetailsTab::settings: {
       draw_build_config(*entry, info, w);
       ImGui::Dummy(ImVec2(1, ctx_.u(12.0F)));

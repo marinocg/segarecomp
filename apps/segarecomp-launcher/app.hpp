@@ -240,7 +240,7 @@ private:
   // The Details page's build-identity facts and sections.
   void draw_details_identity(LibraryEntry &entry, const StatusInfo &info, float w, float cover_w);
   // T004: Game > Overview / Mods / Game settings / Advanced. The tab strip, the Overview's notices and link rows, the Game settings cards, the build log panel.
-  [[nodiscard]] bool details_has_mods(const LibraryEntry &entry) const { return entry.platform_id == "genesis"; }
+  [[nodiscard]] bool details_has_mods(const LibraryEntry &) const { return true; }   // the Mods tab is there for every game: where mods are not admitted (not Genesis) it says so honestly
   void set_details_tab(DetailsTab tab);                                  // switches the tab, remembering the scroll of the one it leaves
   void draw_details_tabs(const LibraryEntry &entry, float w);
   void draw_details_overview(LibraryEntry &entry, const StatusInfo &info, float w);
@@ -265,6 +265,11 @@ private:
   void patch_remove_confirmed(const Modal &sheet);     // the confirmed "Remove patch" sheet (also what the GUI script runs)
   void patch_modal_confirm();                          // the confirm button of whichever patch sheet is open (also what the GUI script runs)
   std::map<std::string, std::string> patch_notices_;   // id -> the last patch install / removal outcome (plain language)
+  std::set<std::string> patch_refused_;                // ids whose notice is a refusal (shown with its next step, in the error tone)
+  // SEG-150-T006: the Mods tab's vocabulary for one installed mod of `entry` (installed / selected / needs preparation / prepared / needs approval / incompatible) and what blocks switching.
+  [[nodiscard]] ModStatus mod_status_of(const LibraryEntry &entry, const StatusInfo &info, const InstalledPatch &patch) const;
+  [[nodiscard]] std::string mod_switch_block(const LibraryEntry &entry) const;   // "" = the selection may change now, otherwise the plain-language reason
+  void refuse_patch(const std::string &id, const std::string &error);
   std::string patch_expected_identity_;               // the identity the open install sheet showed
   std::filesystem::path patch_pending_;                // the package the open "Install patch" sheet is about
   float draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, ImVec2 a, float w);

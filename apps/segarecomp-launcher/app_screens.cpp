@@ -897,24 +897,31 @@ void App::draw_modal(float w, float h) {
     keeps = {"The library and builds", "Viewer controls and video settings"};
   } else if (modal_.kind == Modal::Kind::install_patch) {
     subtitle = modal_.code_bearing
-                   ? "WARNING: this patch contains executable C source code that will run, unsandboxed, with this program's permissions once you build it. Approve it only if you trust where it came from."
-                   : "The package was verified against your original game. Installing it only adds the patch to this game; nothing is built or switched yet.";
-    keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences for this game"};
-    notes = modal_.lines;   // what was verified: compatibility, purpose, validated width, identity
-    notes.push_back("The patched version is a separate program built from the patched image. Choose Patched, then Build patched version, when you want it.");
+                   ? "This mod contains executable C source code. Once you prepare it, it runs with your user account's permissions and is NOT sandboxed. Approve it only if you trust where it came from."
+                   : "The package was verified against your original game. Installing it only adds the mod to this game; nothing is prepared or switched yet.";
+    keeps = {"Your original ROM file (never modified)", "The Vanilla build, its settings and its save data", "Your widescreen preferences for this game"};
+    notes = modal_.lines;   // what was verified, who made it, what it targets and reads, the exact identity
+    notes.push_back("The mod is a separate program prepared from this package. Choose Use this mod, then Prepare selected mod, when you want it; Cancel installs and approves nothing.");
   } else if (modal_.kind == Modal::Kind::remove_patch) {
-    subtitle = "The patch package is removed from this game. Vanilla stays exactly as it is.";
+    subtitle = "The mod package is removed from this game. The original game (Vanilla) stays exactly as it is.";
     keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences, recordings and saves"};
   }
   const std::vector<std::string> wrapped_sub = modal_.kind == Modal::Kind::message ? std::vector<std::string>{} : wrap(ctx_.regular, px, inner - ctx_.u(54.0F), subtitle);
-  std::vector<std::string> msg_lines, note_lines;
+  std::vector<std::string> msg_lines;
+  std::vector<std::pair<std::string, ImU32>> note_lines;   // wrapped note text and its color
+  const bool install_sheet = modal_.kind == Modal::Kind::install_patch;   // SEG-150-T006: verification facts first, what stays untouched after them, the executable-code warning in the warning tone
   for (const auto &l : body) for (const auto &x : wrap(ctx_.regular, px, inner, l)) msg_lines.push_back(x);
-  for (const auto &l : notes) for (const auto &x : wrap(ctx_.regular, ctx_.u(11.5F), inner, l)) note_lines.push_back(x);
+  for (const auto &l : notes) {
+    const ImU32 color = install_sheet ? (l.rfind("Executable code", 0) == 0 ? col::warn : col::text2) : col::dim;
+    for (const auto &x : wrap(ctx_.regular, ctx_.u(install_sheet ? 12.0F : 11.5F), inner - ctx_.u(18.0F), l)) note_lines.push_back({x, color});
+    if (install_sheet && !note_lines.empty()) note_lines.push_back({std::string(), color});   // an empty line separates the facts
+  }
   const float line_h = px + ctx_.u(5.0F);
   float ph = ctx_.u(30.0F) + ctx_.u(52.0F) + static_cast<float>(wrapped_sub.size()) * line_h + static_cast<float>(msg_lines.size()) * line_h;
   if (!cats.empty()) ph += static_cast<float>(cats.size()) * ctx_.u(26.0F) + ctx_.u(14.0F);
   if (!keeps.empty()) ph += ctx_.u(28.0F) + static_cast<float>(keeps.size()) * ctx_.u(21.0F);
-  ph += static_cast<float>(note_lines.size()) * (ctx_.u(11.5F) + ctx_.u(4.0F)) + ctx_.u(8.0F);
+  const float note_step = ctx_.u(install_sheet ? 12.0F : 11.5F) + ctx_.u(4.0F);
+  ph += static_cast<float>(note_lines.size()) * note_step + ctx_.u(8.0F) + (install_sheet ? ctx_.u(26.0F) : 0.0F);
   if (modal_.kind == Modal::Kind::remove_entries || modal_.kind == Modal::Kind::remove_patch || (is_plan && modal_.plan.kind == PlanKind::failed_partial)) ph += ctx_.u(34.0F);
   if (is_plan) ph += ctx_.u(46.0F);
   ph += ctx_.u(70.0F);
@@ -933,11 +940,12 @@ void App::draw_modal(float w, float h) {
   if (modal_.kind != Modal::Kind::message) {
     const bool destructive = is_plan || modal_.kind == Modal::Kind::remove_entries || modal_.kind == Modal::Kind::clear_library || modal_.kind == Modal::Kind::remove_patch;
     const float isz = ctx_.u(40.0F);
-    dl->AddRectFilled(ImVec2(lx, y), ImVec2(lx + isz, y + isz), destructive ? rgba(60, 20, 30) : rgba(14, 40, 92), ctx_.u(6.0F));
-    icon_image(dl, ctx_.icon(destructive ? "trash" : "info"), ImVec2(lx + ctx_.u(8.0F), y + ctx_.u(8.0F)), ctx_.u(24.0F), destructive ? col::err : col::info);
+    const bool code_warning = modal_.kind == Modal::Kind::install_patch && modal_.code_bearing;   // executable code: the warning symbol and tone, never the neutral info mark
+    dl->AddRectFilled(ImVec2(lx, y), ImVec2(lx + isz, y + isz), destructive ? rgba(60, 20, 30) : (code_warning ? rgba(70, 50, 14) : rgba(14, 40, 92)), ctx_.u(6.0F));
+    icon_image(dl, ctx_.icon(destructive ? "trash" : (code_warning ? "warning" : "info")), ImVec2(lx + ctx_.u(8.0F), y + ctx_.u(8.0F)), ctx_.u(24.0F), destructive ? col::err : (code_warning ? col::warn : col::info));
     draw_text(dl, ctx_.bold, ctx_.u(17.0F), col::text, ImVec2(lx + isz + ctx_.u(14.0F), y), ellipsize(ctx_.bold, ctx_.u(17.0F), inner - isz - ctx_.u(40.0F), modal_.title).c_str());
     float sy = y + ctx_.u(24.0F);
-    for (const auto &l : wrapped_sub) { draw_text(dl, ctx_.regular, px, col::text2, ImVec2(lx + isz + ctx_.u(14.0F), sy), l.c_str()); sy += line_h; }
+    for (const auto &l : wrapped_sub) { draw_text(dl, ctx_.regular, px, code_warning ? col::warn : col::text2, ImVec2(lx + isz + ctx_.u(14.0F), sy), l.c_str()); sy += line_h; }
     y = std::max(sy, y + isz) + ctx_.u(12.0F);
   } else {
     draw_text(dl, ctx_.bold, ctx_.u(16.0F), col::text, ImVec2(lx, y), ellipsize(ctx_.bold, ctx_.u(16.0F), inner, modal_.title).c_str());
@@ -956,6 +964,11 @@ void App::draw_modal(float w, float h) {
     }
     y += ctx_.u(14.0F);
   }
+  const auto draw_notes = [&] {
+    if (install_sheet) { draw_text(dl, ctx_.bold, px, col::text, ImVec2(lx, y), "What was checked, before you decide"); y += ctx_.u(26.0F); }
+    for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(install_sheet ? 12.0F : 11.5F), l.second, ImVec2(lx, y), l.first.c_str()); y += l.first.empty() ? ctx_.u(5.0F) : note_step; }
+  };
+  const auto draw_keeps = [&] {
   if (!keeps.empty()) {
     draw_text(dl, ctx_.bold, px, col::text, ImVec2(lx, y), "Keep the following (not removed):");
     y += ctx_.u(26.0F);
@@ -965,10 +978,11 @@ void App::draw_modal(float w, float h) {
       y += ctx_.u(21.0F);
     }
   }
-  for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::dim, ImVec2(lx, y), l.c_str()); y += ctx_.u(11.5F) + ctx_.u(4.0F); }
+  };
+  if (install_sheet) { draw_notes(); draw_keeps(); } else { draw_keeps(); draw_notes(); }
   y += ctx_.u(6.0F);
   if (modal_.kind == Modal::Kind::remove_entries) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete their generated build folders", &modal_.delete_cache); y += ctx_.u(34.0F); }
-  if (modal_.kind == Modal::Kind::remove_patch) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete the patched build (generated files only)", &modal_.delete_cache); y += ctx_.u(34.0F); }
+  if (modal_.kind == Modal::Kind::remove_patch) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete this mod's prepared build (generated files only)", &modal_.delete_cache); y += ctx_.u(34.0F); }
   if (is_plan && modal_.plan.kind == PlanKind::failed_partial) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_logs", "Keep build.log and status.json of failed builds", &modal_.keep_logs); y += ctx_.u(34.0F); }
   if (is_plan) {
     draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text2, ImVec2(lx, y + ctx_.u(10.0F)), "Total space to free:");
@@ -991,7 +1005,7 @@ void App::draw_modal(float w, float h) {
     choose_remove = button(ctx_, "mod_remove", "Remove after builds", ImVec2(bw, bh), Style::secondary);
   } else if (modal_.kind != Modal::Kind::message) {
     const bool primary_confirm = modal_.kind == Modal::Kind::restore_defaults || modal_.kind == Modal::Kind::install_patch;
-    const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : (modal_.kind == Modal::Kind::install_patch ? (modal_.code_bearing ? "Approve and install" : "Install patch") : "Remove"));
+    const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : (modal_.kind == Modal::Kind::install_patch ? (modal_.code_bearing ? "Approve and install" : "Install mod") : "Remove"));
     ImGui::SetCursorScreenPos(ImVec2(lx, by));
     cancel = button(ctx_, "mod_cancel", "Cancel", ImVec2(bw, bh), Style::secondary);
     ImGui::SetCursorScreenPos(ImVec2(lx + bw + ctx_.u(12.0F), by));
@@ -1059,6 +1073,7 @@ void App::draw_modal(float w, float h) {
       toast("Launcher preferences restored.");
     }
   } else if (cancel) {
+    if (modal_.kind == Modal::Kind::install_patch) trace(modal_.code_bearing ? "patch=declined_approval" : "patch=declined");   // nothing was installed or approved
     modal_ = Modal{};
   }
 }

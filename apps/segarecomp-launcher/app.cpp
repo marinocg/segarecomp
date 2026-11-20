@@ -1631,6 +1631,7 @@ void App::run_script() {
     if (modal_.kind == Modal::Kind::remove_patch && arg == "delete") modal_.delete_cache = true;
     patch_modal_confirm();
   } else if (cmd == "patch_cancel") {   // the Cancel button of the open patch sheet
+    if (modal_.kind == Modal::Kind::install_patch) trace(modal_.code_bearing ? "patch=declined_approval" : "patch=declined");
     if (modal_.kind == Modal::Kind::install_patch || modal_.kind == Modal::Kind::remove_patch) modal_ = Modal{};
   } else if (cmd == "patch_install_open") {   // the "Install patch..." button: opens the chooser
     if (!detail_id_.empty()) browse_patch(detail_id_);
@@ -1760,6 +1761,14 @@ void App::run_script() {
     else if (key == "ws_width") actual = std::to_string(viewer_settings_.video.widescreen_width);
     else if (key == "side_style") actual = viewer_settings_.video.widescreen_side_style == SV_SIDE_BORDERS ? "borders" : (viewer_settings_.video.widescreen_side_style == SV_SIDE_RAW ? "raw" : "comfort");
     else if (key == "variant") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : (e->selected_patch() != nullptr ? "patched" : "vanilla"); }
+    else if (key == "mod_status") {   // SEG-150-T006: the status code of each installed mod of the open game, in order (installed, selected_needs_preparation, ...)
+      const LibraryEntry *e = catalog_.find_id(detail_id_);
+      if (e == nullptr || e->patches.empty()) actual = "-";
+      else for (const auto &p : e->patches) actual += (actual.empty() ? "" : ",") + mod_status_of(*e, status_of(detail_id_), p).code;
+    }
+    else if (key == "mods_available") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : (mods_unavailable_reason(e->platform_id).empty() ? "1" : "0"); }
+    else if (key == "mod_switch") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : (mod_switch_block(*e).empty() ? "enabled" : "blocked"); }
+    else if (key == "refusal") actual = !detail_id_.empty() && patch_refused_.count(detail_id_) != 0 ? "1" : "0";
     else if (key == "patches") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : std::to_string(e->patches.size()); }
     else if (key == "patch_built") { const StatusInfo &si = status_of(detail_id_); actual = si.patches.empty() ? "-" : (si.patches.front().built ? "1" : "0"); }
     else if (key == "vanilla_ready") actual = !detail_id_.empty() && status_of(detail_id_).vanilla_ready ? "1" : "0";
