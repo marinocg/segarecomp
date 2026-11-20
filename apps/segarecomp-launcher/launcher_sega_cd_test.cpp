@@ -811,6 +811,8 @@ void test_review_core(const fs::path &base) {
     expect(scd::load_bios_profiles(file).empty(), "store: a newer schema is ignored, not misread");
     spit(file, "not json");
     expect(scd::load_bios_profiles(file).empty(), "store: a damaged file is empty, never fatal");
+    spit(file, "{\"schema\":1,\"profiles\":[],\"pad\":\"" + std::string((1U << 20U) + 16U, 'x') + "\"}");
+    expect(scd::load_bios_profiles(file).empty(), "store: a file over 1 MiB is treated as empty");
   }
 }
 

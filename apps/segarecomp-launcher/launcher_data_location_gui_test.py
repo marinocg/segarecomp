@@ -314,9 +314,10 @@ def main():
         p = Profile(tmp, "unplugged", exe, fake_cli, fake_game, files=2)
         gone = p.dir / "unplugged-drive" / "Segarecomp"
         p.bootstrap.write_text(json.dumps({"schema": 1, "root": str(gone)}))
-        p.check("unplugged", ["frames 8", f"expect data_root={p.root}/", "expect library_size=2", "expect data_notice=The saved data location", "settings_tab 2", "frames 8", "expect dm_change=enabled", "quit"])
+        p.check("unplugged", ["frames 8", f"expect data_root={p.root}/", "expect library_size=2", "expect data_notice=The saved data location", "settings_tab 2", "frames 8", "expect dm_change=disabled", "dm_change", "frames 6", "expect page=settings", "quit"])
         expect(not gone.exists() and not gone.parent.exists(), "unplugged: nothing was created at the unavailable location")
         expect(json.loads(p.bootstrap.read_text())["root"] == str(gone), "unplugged: the saved location was not rewritten")
+        expect(not p.bootstrap.with_name(p.bootstrap.name + ".journal").exists(), "unplugged: no migration journal was started")
 
         # ------------------------------------------------------------------ 7. a controller alone: plan, then decline
         for size in ("1080x740", "720x520"):

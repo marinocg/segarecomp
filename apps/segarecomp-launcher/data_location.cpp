@@ -220,6 +220,8 @@ bool rollback_destination(const Journal &j, const std::vector<ManifestEntry> &en
   std::set<fs::path> dirs;
   const auto drop = [&](const fs::path &rel) {
     const fs::path p = j.dest / rel;
+    for (fs::path d = rel.parent_path(); !d.empty(); d = d.parent_path())   // never follow a link that replaced an intermediate directory
+      if (fs::is_symlink(fs::symlink_status(j.dest / d, ec))) { clean = false; return; }
     const fs::file_status st = fs::symlink_status(p, ec);
     if (fs::is_regular_file(st) || fs::is_symlink(st)) { if (!fs::remove(p, ec) || ec) clean = false; }
     else if (fs::exists(st)) clean = false;   // a directory or special file where a file was recorded: not ours to remove
@@ -485,6 +487,7 @@ const char *refusal_name(MigrationRefusal r) {
     case MigrationRefusal::env_override_cache: return "env_override_cache";
     case MigrationRefusal::env_override_library: return "env_override_library";
     case MigrationRefusal::bootstrap_unusable: return "bootstrap_unusable";
+    case MigrationRefusal::saved_location_unavailable: return "saved_location_unavailable";
     case MigrationRefusal::journal_present: return "journal_present";
     case MigrationRefusal::previous_migration_pending_cleanup: return "previous_migration_pending_cleanup";
     case MigrationRefusal::source_missing: return "source_missing";
@@ -524,6 +527,7 @@ PlainText refusal_text(MigrationRefusal r) {
     case MigrationRefusal::env_override_cache: return {"The data folder is set by the SEGARECOMP_CACHE_DIR environment variable, so it cannot be moved from here.", "Remove that variable from the environment that starts Segarecomp, restart, and choose a location here."};
     case MigrationRefusal::env_override_library: return {"The library folder is set by the SEGARECOMP_LIBRARY_DIR environment variable, so it cannot be moved from here.", "Remove that variable from the environment that starts Segarecomp, restart, and choose a location here."};
     case MigrationRefusal::bootstrap_unusable: return {"The saved data location file cannot be used (it is damaged or was written by a newer version).", "Keep using the current location. To choose another one, fix or remove the file named in the details, then restart."};
+    case MigrationRefusal::saved_location_unavailable: return {"Your saved data location is not available (is its drive connected?). Segarecomp is using the default location until it is, so a move from here would leave your real library behind.", "Reconnect the drive that holds your data and restart Segarecomp, then try again. Nothing was changed."};
     case MigrationRefusal::journal_present: return {"An earlier move did not finish.", "Restart Segarecomp: the unfinished move is rolled back or completed when it starts. Then try again."};
     case MigrationRefusal::previous_migration_pending_cleanup: return {"A previous move is complete and its old folder has not been dealt with yet.", "Under Storage & Data, clean up the previous location or choose Keep it, then try again."};
     case MigrationRefusal::source_missing: return {"The current data folder was not found.", "Check that its drive is connected, then try again."};
@@ -550,7 +554,7 @@ PlainText failure_text(const std::string &reason) {
     if (reason == refusal_name(static_cast<MigrationRefusal>(i))) return refusal_text(static_cast<MigrationRefusal>(i));
   if (reason == "busy") return {"A game, a preparation, an import or a cleanup is running.", "Wait for it to finish (or cancel it), then try again."};
   if (reason == "cancelled") return {"The move was cancelled.", "Nothing was changed; the current location stays in use. Start again whenever you like."};
-  if (reason == "interrupted") return {"The move was interrupted.", "Restart Segarecomp: the unfinished move is rolled back when it starts."};
+  if (reason == "interrupted") return {"The move was interrupted.", "Restart Segarecomp: the unfinished move is rolled back at the next start. Nothing was switched."};
   if (reason == "copy_failed") return {"A file could not be copied to the new location.", "Check that the destination has room and is writable, then try again. The current location is unchanged."};
   if (reason == "source_changed") return {"A file in your data changed while it was being moved.", "Try again when nothing else is using Segarecomp. The current location is unchanged."};
   if (reason == "rebase_failed") return {"The copied library could not be updated for the new location.", "Try again. The current location is unchanged."};
@@ -585,6 +589,8 @@ MigrationPlan build_migration_plan(const MigrationOptions &o, const std::atomic<
   const Bootstrap boot = read_bootstrap(o.bootstrap_file);
   if (boot.state == BootstrapState::damaged || boot.state == BootstrapState::newer_schema)
     plan.refusals.push_back({MigrationRefusal::bootstrap_unusable, "the saved data location file cannot be used (" + boot.detail + ")"});
+  else if (boot.state == BootstrapState::valid && !fs::is_directory(boot.root, ec))
+    plan.refusals.push_back({MigrationRefusal::saved_location_unavailable, "the saved data location " + u8(boot.root) + " is not available; the pointer is never re-pointed while it is unavailable"});
   Journal j;
   switch (read_journal(o.bootstrap_file, j)) {
     case JournalState::absent: break;
@@ -958,6 +964,9 @@ CleanupPlan plan_old_root_cleanup(const fs::path &bootstrap_file, const DataEnvi
         if (!fs::is_regular_file(new_file, ec) || path_is_link(new_file)) { note("no copy at the new location; kept"); continue; }
         const scd::Digest d = scd::hash_file(old_file, hash_limit);
         if (!d.ok || d.size != e.size || d.sha256 != e.sha) { note("changed since the move; kept"); continue; }
+        // The new copy must still match what was verified at the move (the catalog is the one file the move rewrites by design: it only has to exist and be non-empty).
+        if (e.rel == fs::path("library") / "library.json") { if (fs::file_size(new_file, ec) == 0 || ec) { note("the new copy is empty or unreadable; kept"); continue; } }
+        else { const scd::Digest nd = scd::hash_file(new_file, hash_limit); if (!nd.ok || nd.size != e.size || nd.sha256 != e.sha) { note("the new copy differs from what was verified at the move; kept"); continue; } }
         plan.items.push_back({old_file, e.size, false, CleanupKind::migrated_copy, "migrated_copy"});
         plan.bytes += e.size;
       }

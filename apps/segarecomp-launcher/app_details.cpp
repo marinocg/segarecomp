@@ -299,7 +299,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       else if (is_building) { line = "Preparing with " + mode + ". This can take several minutes the first time."; color = col::warn; }
       else if (info.status == GameStatus::metadata_only) { line = "The prepared version was removed on purpose: history, saves and recordings are kept. Prepare it again to play."; color = col::info; }
       else if (scd_launch_job_.valid() && scd_launch_id_ == entry.id()) { line = "Checking the BIOS, the program and the disc files before launch..."; color = col::warn; }
-      else if (info.scd.state == scd::State::ready) { line = "Ready to play. Last played " + fmt_relative(entry.last_played_at, std::time(nullptr)) + "."; color = col::text2; }
+      else if (info.scd.state == scd::State::ready) { line = "Ready to play. Last played " + fmt_relative(entry.last_played_at, std::time(nullptr)) + ". Sega CD support is experimental: a disc may not run correctly."; color = col::text2; }
       else { line = scd_hint(info); color = col::warn; }
     }
     else if (is_running) { line = running_label(game_report_, restarted_this_play_) + (game_view_.patched() ? " Version: Patched - " + game_view_.patch_label + "." : (entry.patches.empty() ? std::string() : std::string(" Version: Vanilla."))); color = col::ok; }

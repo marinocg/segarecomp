@@ -614,6 +614,65 @@ void test_plain_text_for_every_reason() {
     expect(!t.what.empty() && !t.next.empty() && t.what != "The cleanup was refused.", std::string("cleanup refusal text for ") + reason);
   }
 }
+
+// F1 (validation round 1): a valid saved location whose folder is missing (unplugged drive) must never be re-pointed by a move planned from the default location.
+void test_saved_location_unavailable_refusal() {
+  const World w = make_world("unavailable");
+  const fs::path gone = w.base / "unplugged" / "Segarecomp";
+  expect(write_bootstrap(w.bootstrap, gone), "a saved location is recorded");
+  const std::string boot_before = slurp(w.bootstrap);
+  const Snapshot old_before = snapshot(w.S), dest_before = snapshot(w.D);
+  MigrationOptions o = options_for(w);
+  MigrationPlan plan = build_migration_plan(o);
+  expect(!plan.ok() && has_refusal(plan.refusals, MigrationRefusal::saved_location_unavailable), "an unavailable saved location refuses the plan");
+  BusyGuard busy;
+  const MigrationResult r = run_migration(o, busy);
+  expect(r.outcome == MigrationOutcome::refused && r.reason == "saved_location_unavailable" && !busy.maintenance(), "run_migration refuses with the typed reason and releases the guard");
+  expect(slurp(w.bootstrap) == boot_before, "the saved location file is byte-identical afterwards");
+  expect(snapshot(w.S) == old_before && snapshot(w.D) == dest_before && !fs::exists(gone.parent_path()), "nothing was created or changed");
+  expect(!fs::exists(fs::path(w.bootstrap).concat(".journal")) && !fs::exists(fs::path(w.bootstrap).concat(".manifest")), "no journal or manifest");
+  const PlainText t = refusal_text(MigrationRefusal::saved_location_unavailable);
+  expect(t.what.find("not available") != std::string::npos && t.what.find("drive") != std::string::npos && t.next.find("Reconnect") != std::string::npos, "the typed text names the cause and the way out");
+  expect(std::string(refusal_name(MigrationRefusal::saved_location_unavailable)) == "saved_location_unavailable", "stable code");
+  // reconnecting (the folder exists again) clears the state: the move is planned from the saved location
+  fs::create_directories(gone);
+  expect(!has_refusal(build_migration_plan(o).refusals, MigrationRefusal::saved_location_unavailable), "once the folder is back the refusal clears");
+  fs::remove_all(w.base);
+}
+
+// F2/F6: a new copy that no longer matches what was verified keeps the old file; an intermediate directory replaced by a link is never followed by rollback.
+void test_cleanup_verifies_new_copy_and_rollback_links() {
+  {
+    const World w = make_world("newcopy");
+    BusyGuard busy;
+    expect(run_migration(options_for(w), busy).ok(), "migration");
+    DataEnvironment none;
+    spit(w.D / "library" / "covers" / "a.png", "trunc");
+    const CleanupPlan copies = plan_old_root_cleanup(w.bootstrap, none, true);
+    bool offered_cover = false, offered_save = false;
+    for (const auto &item : copies.items) { offered_cover |= item.path.filename() == "a.png"; offered_save |= item.path.filename() == "save.srm"; }
+    expect(!offered_cover && offered_save, "a truncated new copy keeps the old file; intact ones are still offered");
+    expect(run_old_root_cleanup(w.bootstrap, none, true, busy).ok() && fs::exists(w.S / "library" / "covers" / "a.png"), "run keeps the old file whose new copy differs");
+    fs::remove_all(w.base);
+  }
+  {
+    const World w = make_world("rollback_link");
+    BusyGuard busy;
+    MigrationHooks hooks;
+    hooks.crash_at = [](const char *point, std::size_t) { return std::string(point) == "verify"; };
+    expect(run_migration(options_for(w), busy, nullptr, {}, &hooks).outcome == MigrationOutcome::interrupted, "crash during verify");
+    const fs::path real = w.base / "decoy";
+    std::error_code ec;
+    fs::rename(w.D / "library", real, ec);
+    fs::create_directory_symlink(real, w.D / "library", ec);
+    if (!ec) {
+      const Snapshot decoy = snapshot(real);
+      const RecoveryResult rec = recover_pending_migration(w.bootstrap);
+      expect(rec.action == RecoveryAction::rollback_incomplete && snapshot(real) == decoy, "rollback never follows a link that replaced an intermediate directory");
+    }
+    fs::remove_all(w.base);
+  }
+}
 } // namespace
 
 int main() {
@@ -621,6 +680,8 @@ int main() {
   test_bootstrap_and_resolution();
   test_upgrade_noop_and_plan();
   test_env_override_refusal();
+  test_saved_location_unavailable_refusal();
+  test_cleanup_verifies_new_copy_and_rollback_links();
   test_success_restart_and_cleanup();
   test_cleanup_refusals();
   test_destination_refusals();

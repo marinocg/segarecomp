@@ -35,7 +35,7 @@ const char *area_title(const std::string &area) {
   if (area == "compiler_cache") return "Compiler cache";
   if (area == "downloads") return "Cover lookup downloads";
   if (area == "catalog_backup") return "Library backup copy";
-  if (area == "migrated_copy") return "Old copies of moved data";
+  if (area == "migrated_copy") return "Saves, recordings, mods and catalog copies at the previous location";
   return "Other";
 }
 
@@ -395,6 +395,21 @@ void App::draw_data_location(float w, float h) {
     return;
   }
 
+  // ---- the saved location is not available (unplugged drive): a move would re-point the saved location away from the real library, so the page only explains ----
+  if (ep.saved_location_unavailable && !data_move_running()) {
+    card_begin("SAVED DATA LOCATION IS NOT AVAILABLE");
+    const PlainText t = refusal_text(MigrationRefusal::saved_location_unavailable);
+    text(col::warn, t.what);
+    text(col::text2, t.next);
+    gap(4.0F);
+    kv("Data folder in use now", u8s(ep.cache));
+    row_begin();
+    if (row_button("dm_env_back", "Back to Settings", Style::primary)) { data_move_back(); card_end(); return; }
+    note_move_focus_default();
+    card_end();
+    return;
+  }
+
   const bool busy_now = build_running() || game_ != nullptr || maintenance_running_ || scd_import_job_.valid() || (busy_.any_activity() && !data_move_running());
   const MigrationPlan &plan = move_.plan;
 
@@ -595,7 +610,7 @@ void App::draw_data_location(float w, float h) {
         if (!r.detail.empty() && !cancelled) text(col::dim, r.detail, 11.0F);
         for (const auto &n : r.notes) text(col::warn, n, 11.5F);
         gap(2.0F);
-        text(col::ok, "Your current location is unchanged and still in use. Nothing was switched; any partial copy was removed.", 12.0F);
+        text(col::ok, r.outcome == MigrationOutcome::interrupted ? "Your current location is still the one in use. Any partial copy is removed at the next start of Segarecomp." : "Your current location is unchanged and still in use. Nothing was switched; any partial copy was removed.", 12.0F);
         gap(4.0F);
         row_begin();
         if (row_button("dm_done", "Done", Style::primary)) data_move_back();
@@ -684,8 +699,8 @@ void App::draw_data_location(float w, float h) {
       kv("Total", format_bytes(cp.bytes), groups.empty() ? col::text2 : col::warn);
       gap(2.0F);
       bool copies = move_.include_copies;
-      if (checkbox(ctx_, "dm_c_copies", "Also remove the old copies of the data that was moved", &copies)) { move_.include_copies = copies; data_cleanup_replan(); }
-      text(col::text2, move_.include_copies ? "Listed: files still identical to what was moved and present at the new location. Anything changed since the move, unknown files and the library backup stay." : "Off: only prepared games and caches, which can be made again. Your library, saves, recordings, mods and settings are not touched; tick this to also remove their old copies.", 11.0F);
+      if (checkbox(ctx_, "dm_c_copies", "Also remove the saves, recordings, mods and catalog copies left at the previous location", &copies)) { move_.include_copies = copies; data_cleanup_replan(); }
+      text(col::text2, move_.include_copies ? "Listed: only copies at the previous location that were already moved and are verified identical at the new location (size and checksum). Anything changed since the move, unknown files and the library backup stay." : "Off: only prepared games and caches, which can be made again. Your library, saves, recordings, mods and settings are not touched; tick this to also remove their old copies at the previous location (never the ones at the new location).", 11.0F);
       card_end();
       card_begin("CONFIRM");
       text(col::warn, "This permanently removes the listed items from the previous location. It cannot be undone.", 12.0F);

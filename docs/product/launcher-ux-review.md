@@ -309,3 +309,13 @@ confusing, not how a person would fare. No timing is claimed.** Start state, goa
 
 HiDPI and fractional-scale hosts (Windows, macOS, native Linux), mixed-DPI switching, a physical gamepad, the unmodified clean-archive smoke on a release-pinned SDL, the open P2 findings F7-F11, the product decision F12 and the independent image-aware
 review. The milestone must not be marked done while a host-specific crispness claim lacks evidence.
+
+### Validation round 1 (combined delivery F30)
+
+An independent validator found, and this round fixed: F1 (P1) a move planned while the saved data location was unavailable (unplugged drive) would have re-pointed the saved location at the new folder; planning and the run now
+refuse with the typed `saved_location_unavailable`, the Settings "Change data location..." control is disabled with the reason and the file is left byte-identical (the only way out is reconnecting the drive; no reset action exists or was
+added). F2 the old-copies cleanup option is now named for what it removes (saves, recordings, mods and catalog copies at the previous location, only copies already moved and verified identical), the "never touched" sentence is scoped, and
+the cleanup plan re-verifies the new copy (size and digest; the catalog, rewritten by design, must exist and be non-empty) before listing an old file. F3 the Sega CD BIOS note no longer says "verified": it states what was measured
+(size, checksum, header region) and that the file is not tested as a working BIOS. F4 the Sega CD "Ready to play" line on the game page carries the experimental caveat. F5 the Interrupted screen says the rollback happens at the next
+start. F6 rollback no longer follows a link that replaced an intermediate directory. Also: a BIOS profile file over 1 MiB is read as empty. Not fixed: F7 and F8 (documented follow-ups); from F6, keeping the journal when the ownership
+marker is absent was NOT done (a completed rollback also leaves no marker, so keeping the journal would block every later move; it needs a distinct "rolled back" record).

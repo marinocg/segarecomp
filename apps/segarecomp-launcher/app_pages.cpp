@@ -648,7 +648,7 @@ void App::draw_settings(float full_w, float h) {
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     section("CLEAN UP");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Clear the shared compiler cache, remove build intermediates or old builds, clean failed or abandoned builds, or keep a game's metadata only. Every plan shows what it will delete and the bytes it frees before anything happens, and nothing is deleted without your confirmation.");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::ok, w, "Never touched by any cleanup: your ROM and disc files, save data and save states, input recordings, covers, mod approvals, the library and these settings.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::ok, w, "Never touched by ordinary cleanup, and never at your current location: your ROM and disc files, save data and save states, input recordings, covers, mod approvals, the library and these settings. The only exception is the optional removal of already-moved, verified old copies at a previous location after a data move.");
     ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
     if (button(ctx_, "go_storage", "Review usage and clean up", ImVec2(ctx_.u(250.0F), ctx_.u(32.0F)), Style::primary, true, ctx_.icon("storage"))) go(Page::storage);
     if (settings_focus_storage_) {   // Back from the cleanup page lands here again
@@ -662,6 +662,7 @@ void App::draw_settings(float full_w, float h) {
     section("DATA LOCATION");
     // SEG-150-T009 (ADR 0317): where the data lives, how much of it is kept versus rebuildable, and the control that moves it (disabled, with the reason, under an environment override).
     const bool env_governed = ep.cache_overridden || ep.library_overridden;
+    const bool unavailable_saved = ep.saved_location_unavailable && !env_governed;
     const bool move_active = data_move_running();
     if (recovery_.action != RecoveryAction::none && recovery_.action != RecoveryAction::kept_completed && !recovery_dismissed_) {   // shown once, never blocking
       paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), recovery_.action == RecoveryAction::completed ? col::ok : col::warn, w, recovery_message_text(recovery_.action));
@@ -691,15 +692,19 @@ void App::draw_settings(float full_w, float h) {
     label_value(ctx_, lw, vw, "Installation", u8s(ep.home) + (ep.home_overridden ? "  - set by SEGARECOMP_HOME" : "  - where this program runs from") + (layout_.problem.empty() ? "" : "  (incomplete)"), layout_.problem.empty() ? col::text : col::err);
     if (!layout_.problem.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::err, w, layout_.problem);
     ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
-    dm_change_state_ = move_active ? "progress" : (env_governed ? "disabled" : "enabled");
+    dm_change_state_ = move_active ? "progress" : ((env_governed || unavailable_saved) ? "disabled" : "enabled");
     if (env_governed) {
       const PlainText t = refusal_text(ep.cache_overridden ? MigrationRefusal::env_override_cache : MigrationRefusal::env_override_library);
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, t.what);
+      paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w, t.next);
+    } else if (unavailable_saved) {
+      const PlainText t = refusal_text(MigrationRefusal::saved_location_unavailable);
       paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, t.what);
       paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w, t.next);
     } else {
       paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w, "Move your library, saves, mods and settings to another folder or drive. You see exactly what moves and what it needs first, your current data is kept, and nothing is deleted automatically.");
     }
-    if (button(ctx_, "dm_change", move_active ? "Show progress" : "Change data location...", ImVec2(ctx_.u(250.0F), ctx_.u(32.0F)), Style::secondary, env_governed ? false : true, ctx_.icon("folder"))) go(Page::data_location);
+    if (button(ctx_, "dm_change", move_active ? "Show progress" : "Change data location...", ImVec2(ctx_.u(250.0F), ctx_.u(32.0F)), Style::secondary, (env_governed || unavailable_saved) ? false : true, ctx_.icon("folder"))) go(Page::data_location);
     if (settings_focus_move_) {   // Back from the data-location page lands here again
       settings_focus_move_ = false;
       ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());

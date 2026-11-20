@@ -175,6 +175,7 @@ struct EffectivePaths {
   // SEG-150-T008: the data root was chosen by the saved data-location file (not the default, not an environment variable); the file's path; why a saved location is
   // not in use (damaged, unavailable, shadowed by an environment variable), "" when nothing needs saying.
   bool relocated = false;
+  bool saved_location_unavailable = false;   // a valid saved location whose folder is missing (unplugged drive): the default is used and a move is refused
   std::filesystem::path bootstrap_file;
   std::string data_location_notice;
 };

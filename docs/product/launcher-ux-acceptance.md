@@ -104,3 +104,9 @@ All on the final T010 code (the tree at `18d3bd3` plus the T010 working-tree cha
 - Not run locally: the fast preset, `full` / `extended` (CI-owned), Windows and macOS packaging.
 - Before the fix of finding F2 the keyboard trap was observed directly (the traced focus stayed on the vanished review button while Tab was pressed 8 times); the regression case asserts the Tab order after the sheet.
 
+
+## Validation round 1 (F30)
+
+Findings F1-F6 above were fixed on the same branch; evidence: `data_location_test` (unavailable saved location: plan and run refused, saved-location file byte-identical, typed text; truncated new copy keeps the old file; rollback does not
+follow a link), `launcher_data_location_gui_test.py` (unplugged drive: the Change control is disabled, pressing it does nothing, no journal, pointer unchanged), `launcher_sega_cd_test` (oversized BIOS profile file is empty). Counts: see the
+round-1 handoff. Still open: F7, F8, F9-F12 and the host rows above.

@@ -1753,7 +1753,7 @@ void App::run_script() {
     recovery_dismissed_ = true;
   } else if (cmd == "dm_change") {          // the Change data location button of Storage & Data (disabled under an environment override)
     const EffectivePaths ep = effective_paths(layout_);
-    if (ep.cache_overridden || ep.library_overridden) trace("data_move=control_disabled");
+    if (ep.cache_overridden || ep.library_overridden || ep.saved_location_unavailable) trace("data_move=control_disabled");
     else go(Page::data_location);
   } else if (cmd == "settings_tab") {
     settings_tab_ = std::clamp(std::atoi(arg.c_str()), 0, 3);

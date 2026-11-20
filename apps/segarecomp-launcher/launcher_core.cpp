@@ -204,6 +204,7 @@ EffectivePaths effective_paths(const Layout &layout) {
   const ResolvedRoots roots = resolve_roots(data_environment(), out.cache_overridden ? out.cache : default_cache_root(), out.bootstrap_file);
   out.relocated = roots.cache_source == RootSource::bootstrap && roots.cache == out.cache;   // the saved root is the one this process resolved at start (a move made in this session is only used from the next start)
   out.data_location_notice = roots.notice;
+  out.saved_location_unavailable = roots.bootstrap_ignored && !out.cache_overridden;
   return out;
 }
 

@@ -589,7 +589,7 @@ void App::scd_review_choose_bios(std::size_t index, const fs::path &file, const 
   r.bios_sha256 = check.sha256;
   r.bios_region = check.region;
   r.note_error = false;
-  r.note = "BIOS verified: " + file_name_of(r.bios_path) + " (" + region_word(check.region) + ", " + format_bytes(check.size) + "). It is remembered on this computer as a reference only and checked again every time it is used.";
+  r.note = (expected_sha256.empty() ? "BIOS file measured: " : "Matches the remembered BIOS: ") + file_name_of(r.bios_path) + " (" + format_bytes(check.size) + ", header region: " + region_word(check.region) + "). Only its size, checksum and header were read; it is not tested as a working BIOS. It is remembered on this computer as a reference only and checked again every time it is used.";
   if (region_conflicts(check.region, r.disc.region)) r.note += " Its header declares a different region than this disc.";
   for (auto &o : r.options)   // a located remembered BIOS is valid again
     if (o.profile.sha256 == check.sha256) { o.state = scd::BiosCheckState::ok; o.profile.path = r.bios_path; }

@@ -49,7 +49,7 @@ struct ResolvedRoots {
 
 // ---- plan ----
 enum class MigrationRefusal {
-  env_override_cache, env_override_library, bootstrap_unusable, journal_present, previous_migration_pending_cleanup, source_missing, source_symlink,
+  env_override_cache, env_override_library, bootstrap_unusable, saved_location_unavailable, journal_present, previous_migration_pending_cleanup, source_missing, source_symlink,
   source_unsupported_entry, source_unsafe_name, source_too_large, destination_not_absolute, destination_unsafe, destination_same, destination_inside_source,
   source_inside_destination, destination_symlink, destination_not_directory, destination_not_empty, destination_not_writable, insufficient_space
 };

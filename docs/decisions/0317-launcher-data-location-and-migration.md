@@ -75,7 +75,7 @@ Journal files sit beside the bootstrap: `<bootstrap>.journal` (id, phase, source
 | 6 | `done` | journal `done` (kept as the completion record), marker removed |
 
 Refusals (typed, nothing written, old root and destination untouched): `env_override_cache`, `env_override_library` (the detail names the effective path; nothing else is
-examined), `bootstrap_unusable`, `journal_present`, `previous_migration_pending_cleanup`, `source_missing`, `source_symlink`, `source_unsupported_entry`,
+examined), `bootstrap_unusable`, `saved_location_unavailable` (a valid saved location whose folder is missing, e.g. an unplugged drive: the default location is in use, so a move planned from it would re-point the saved location and orphan the real library; planning and `run_migration` both refuse, the saved-location file is never rewritten, and the way out is reconnecting the drive), `journal_present`, `previous_migration_pending_cleanup`, `source_missing`, `source_symlink`, `source_unsupported_entry`,
 `source_unsafe_name`, `source_too_large` (more than 100000 files), `destination_not_absolute`, `destination_unsafe` (`.`/`..`, a filesystem root, inside a protected path
 such as the installation), `destination_same` (another spelling, case or alias of the source, decided with `equivalent()`), `destination_inside_source`,
 `source_inside_destination`, `destination_symlink` (any existing component that is a link), `destination_not_directory`, `destination_not_empty` (foreign content),

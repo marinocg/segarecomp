@@ -805,6 +805,10 @@ std::vector<BiosProfile> load_bios_profiles(const fs::path &file) {
   std::vector<BiosProfile> out;
   std::ifstream in(file, std::ios::binary);
   if (!in) return out;
+  in.seekg(0, std::ios::end);
+  const std::streamoff size = in.tellg();
+  if (size < 0 || size > (1 << 20)) return out;   // a profile list is a few hundred bytes; an oversized file is treated as empty
+  in.seekg(0, std::ios::beg);
   const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
   const auto root = json::parse(text);
   if (!root || !root->is_object() || root->num("schema", 0) != 1) return out;   // damaged or from a newer release: ignored, never fatal
