@@ -278,6 +278,24 @@ def smoke_sdk(package_root, compiler, env, tmp):
     require(result.returncode == 0 and out.is_file(), f"the packaged SDK sample must compile with the bundled compiler: {result.stderr}")
 
 
+def smoke_cxx_runtime(compiler, env, tmp):
+    """A game with a mod links Luau and the mod host as C++ with exceptions and RTTI, so the bundled compiler must be able to BUILD libc++ / libc++abi / libunwind itself at link time. Those sources
+    must therefore stay in the trimmed Zig tree (a link that lacked them failed with `sub-compilation of libunwind failed ... FileNotFound` on Windows). This links and RUNS a minimal such program
+    with the bundled compiler; the ordinary (C-only) game never needed them, so nothing else in this smoke test would notice."""
+    source = tmp / "cxx_runtime.cpp"
+    source.write_text("#include <stdexcept>\n#include <string>\n#include <typeinfo>\n#include <vector>\n"
+                      "struct Base { virtual ~Base() {} };\nstruct Derived : Base {};\n"
+                      "int main() {\n  std::vector<std::string> v{\"a\", \"b\"};\n  try { throw std::runtime_error(v[1]); }\n"
+                      "  catch (const std::exception &e) { Base *b = new Derived; const bool ok = std::string(e.what()) == \"b\" && dynamic_cast<Derived *>(b) != nullptr && typeid(*b) == typeid(Derived); delete b; return ok ? 0 : 3; }\n"
+                      "  return 4;\n}\n", encoding="utf-8")
+    exe = tmp / ("cxx_runtime" + (".exe" if os.name == "nt" else ""))
+    cxx_env = dict(env, ZIG_GLOBAL_CACHE_DIR=str(tmp / "zig-global-cxx"), ZIG_LOCAL_CACHE_DIR=str(tmp / "zig-local-cxx"))
+    built = subprocess.run([str(compiler), "c++", "-std=c++20", "-fexceptions", "-frtti", "-O2", "-target", zig_target(), str(source), "-o", str(exe)], env=cxx_env, text=True, capture_output=True, timeout=900)
+    require(built.returncode == 0 and exe.is_file(), f"the bundled compiler must link a C++ program with exceptions and RTTI (libc++, libc++abi and libunwind sources must be packaged): {built.stderr[-1500:]}")
+    ran = subprocess.run([str(exe)], env=cxx_env, text=True, capture_output=True, timeout=60)
+    require(ran.returncode == 0, f"the linked C++ exception/RTTI program must run correctly (exit {ran.returncode}): {ran.stderr[-500:]}")
+
+
 def main():
     launcher = pathlib.Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="segarecomp-smoke-") as directory:
@@ -322,6 +340,7 @@ def main():
         require(f"cc={compiler}" in build_log, "build.log must show the bundled compiler was configured")
         require(hermetic_compile_lines(build_log, compiler), "every compile command must invoke the bundled compiler")
         smoke_sdk(package_root, compiler, env, tmp)
+        smoke_cxx_runtime(compiler, env, tmp)
         # SEG-058: the launcher's headless `--import` adds a ROM with a recognisable header to the persistent library (a reference, never a copy);
         # the same content again is a duplicate, and a file the classifier does not accept is refused with a reason.
         lib_rom = tmp / "library-game.md"

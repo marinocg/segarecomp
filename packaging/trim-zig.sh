@@ -8,8 +8,8 @@
 # Zig's own lib/ ships complete cross-compilation support for every OS/libc/architecture it can target,
 # which is most of a pinned release's size (lib/libc/include alone holds a full header set per target
 # triple). A package only ever invokes zig for its own single host, so every other OS family's libc/
-# headers, plus Zig's own C++ runtime support (never used: we compile no C++) and documentation, are
-# dead weight. `lib/std` is the one directory that looks safe to remove but is not: zig uses it to find
+# headers, plus documentation, are
+# dead weight (Zig's C++ runtime sources are NOT: see the end of this script). `lib/std` is the one directory that looks safe to remove but is not: zig uses it to find
 # its own installation directory and fails outright without it, even for a plain C compile.
 #
 # This split (categorical OS-family removal only, never touching a kept OS's own per-architecture
@@ -53,13 +53,8 @@ case "$keep" in
     ;;
 esac
 # Never used: neither the sanitizer runtime, the web playground tool, nor `zig init`'s templates are reachable from a
-# plain `zig cc` invocation. SEG-032-T007 (ADR 0074): the vendored YM2612 core is C++ and is compiled by the package with
-# `zig c++` WITHOUT a C++ runtime (the C-driver link uses src/cxx_runtime_shim.c), so ONLY the libc++/libc++abi HEADERS are
-# kept (lib/libcxx/include, lib/libcxxabi/include); their sources, tests and the unwinder stay removed.
-rm -rf "$lib/docs" "$lib/libtsan" "$lib/libunwind" "$lib/build-web" "$lib/init"
-for d in libcxx libcxxabi; do
-  if [ -d "$lib/$d" ]; then
-    find "$lib/$d" -mindepth 1 -maxdepth 1 ! -name include -exec rm -rf {} +
-  fi
-done
+# plain `zig cc` invocation. libc++, libc++abi and libunwind are KEPT WHOLE (headers AND sources): the vendored YM2612 core (SEG-032-T007, ADR 0074) is linked without a C++ runtime (the
+# C-driver link uses src/cxx_runtime_shim.c), but a game with a Luau / native mod (SEG-137/138) links the Luau VM and the mod host as C++ with exceptions and RTTI, and Zig then builds libc++,
+# libc++abi and libunwind from these sources at link time ("sub-compilation of libunwind failed ... FileNotFound" when they were removed). packaging/smoke_test.py links and runs such a program.
+rm -rf "$lib/docs" "$lib/libtsan" "$lib/build-web" "$lib/init"
 du -sh "$lib"

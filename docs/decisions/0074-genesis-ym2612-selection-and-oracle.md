@@ -66,3 +66,10 @@
 - **Packaging.** `packaging/trim-zig.sh` now keeps only `lib/libcxx/include` and `lib/libcxxabi/include` (libc++ headers); sources, tests,
   modules, libunwind stay removed. `tests/packaging_trim_zig_test.py` checks all three host families on a fake tree. The release-workflow
   package smoke test remains the real-toolchain check.
+
+## Addendum (SEG-146, packaging)
+
+The packaged Zig keeps `lib/libcxx`, `lib/libcxxabi` and `lib/libunwind` **whole** (headers and sources) from now on. The YM2612 core still links without a C++ runtime (the C-driver link uses the
+shim), but a game with a Luau or native mod links the Luau VM and the mod host as C++ with exceptions and RTTI, and Zig builds those three libraries from their sources at link time. With the sources
+removed that link failed on Windows with `sub-compilation of libunwind failed ... FileNotFound`. `packaging/smoke_test.py` now links and runs a minimal exceptions/RTTI C++ program with the bundled compiler.
+
