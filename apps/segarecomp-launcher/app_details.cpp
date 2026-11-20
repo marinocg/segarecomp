@@ -238,7 +238,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     p.x += size.x + ctx_.u(8.0F);
     const ImU32 sc = is_building ? col::warn : (is_running ? col::ok : status_color(info));
     const std::string state = is_building ? "Building..." : (is_running ? (info.sega_cd ? "Running" : "Playing") : status_label(info));
-    pill(ctx_, dl, p, state.c_str(), sc, nullptr, ctx_.u(12.0F), &size);
+    pill(ctx_, dl, p, state.c_str(), sc, tone_icon(sc) != nullptr ? ctx_.icon(tone_icon(sc)) : nullptr, ctx_.u(12.0F), &size);
     p.x += size.x + ctx_.u(8.0F);
     const bool linked = !info.rom_missing;
     const char *rom_text = info.sega_cd ? (linked ? "BIOS and disc linked" : "BIOS or disc missing") : (linked ? "ROM linked" : (entry.rom_path_unknown ? "ROM path not recorded" : "ROM missing"));
@@ -1170,7 +1170,7 @@ void App::draw_details(float w, float h) {
   {  // breadcrumb: Back returns to the exact library state it came from
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const Page back_to = previous_page_ == Page::details ? Page::library : previous_page_;
-    const char *back_label = back_to == Page::import_page ? "Import ROMs" : (back_to == Page::storage ? "Storage" : (back_to == Page::settings ? "Settings" : "Library"));
+    const char *back_label = back_to == Page::import_page ? "Add game" : (back_to == Page::storage ? "Storage" : (back_to == Page::settings ? "Settings" : "Library"));
     const float bw = text_width(ctx_.bold, ctx_.u(13.0F), back_label) + ctx_.u(46.0F);
     if (button(ctx_, "back", back_label, ImVec2(bw, ctx_.u(30.0F)), Style::ghost, true, ctx_.icon("back"))) { close_details(); return; }
     if (ImGui::IsItemFocused()) focus_label_ = "Back";

@@ -101,6 +101,20 @@ void icon_image(ImDrawList *dl, SDL_Texture *tex, ImVec2 a, float size, ImU32 ti
   dl->AddImage(reinterpret_cast<ImTextureID>(tex), a, ImVec2(a.x + size, a.y + size), ImVec2(0, 0), ImVec2(1, 1), tint);
 }
 
+const char *tone_icon(ImU32 color) {
+  if (color == col::ok) return "check";
+  if (color == col::warn || color == col::err) return "warning";
+  if (color == col::info) return "info";
+  return nullptr;
+}
+
+void tone_mark(Ctx &ctx, ImDrawList *dl, ImVec2 c, float size, ImU32 color) {
+  const char *name = tone_icon(color);
+  SDL_Texture *tex = name != nullptr ? ctx.icon(name) : nullptr;
+  if (tex != nullptr) icon_image(dl, tex, ImVec2(c.x - size * 0.5F, c.y - size * 0.5F), size, color);
+  else dl->AddCircleFilled(c, size * 0.3F, color);
+}
+
 void pill(Ctx &ctx, ImDrawList *dl, ImVec2 pos, const char *text, ImU32 color, SDL_Texture *icon, float px, ImVec2 *size_out) {
   if (px <= 0.0F) px = ctx.u(11.0F);
   const float isz = icon != nullptr ? px + ctx.u(3.0F) : 0.0F, gap = icon != nullptr ? ctx.u(5.0F) : 0.0F;

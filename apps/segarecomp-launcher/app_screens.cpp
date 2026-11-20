@@ -116,8 +116,9 @@ void App::draw() {
   ImGui::PopStyleColor();
   draw_background(win_w_, win_h_);
   ImDrawList *dl = ImGui::GetWindowDrawList();
+  compact_shell_ = win_w_ < ctx_.u(900.0F);
   const float hero = hero_height(win_w_, win_h_);
-  const float m = ctx_.u(12.0F);
+  const float m = ctx_.u(sp::s3);
   {
     float wm_h = 0.0F, wm_w = 0.0F;
     if (SDL_Texture *wm = ctx_.asset("wordmark.png")) {
@@ -145,11 +146,12 @@ void App::draw() {
   const float top = hero;
   const ImVec2 pa(m, top), pb(win_w_ - m, win_h_ - m);
   panel(ctx_, dl, pa, pb);
-  const float sw = win_w_ < ctx_.u(900.0F) ? ctx_.u(62.0F) : ctx_.u(196.0F);
+  const float sw = compact_shell_ ? ctx_.u(72.0F) : ctx_.u(188.0F);
   draw_sidebar(pa.x, pa.y, sw, pb.y - pa.y);
   const float cx = pa.x + sw + ctx_.u(6.0F), cw = pb.x - cx - ctx_.u(4.0F), cy = pa.y + ctx_.u(4.0F), ch = pb.y - cy - ctx_.u(4.0F);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ctx_.u(18.0F), ctx_.u(14.0F)));
+  const float pad_x = ctx_.u(compact_shell_ ? sp::s3 + 2.0F : sp::s5 + 2.0F), pad_y = ctx_.u(compact_shell_ ? sp::s3 : sp::s4);  // content padding: narrow 12-16, normal 20-24
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad_x, pad_y));
   ImGui::SetCursorScreenPos(ImVec2(cx, cy));
   ui::zone_capture = true;
   ui::zone_first = ui::ZoneEntry{};
@@ -157,7 +159,7 @@ void App::draw() {
   ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
   if (SDL_getenv("SEGARECOMP_SHOT_SCROLL") && page_ != Page::settings) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid: lower part of a long page
   if (script_page_scroll_ >= 0.0F) { ImGui::SetScrollY(script_page_scroll_ > 1e8F ? ImGui::GetScrollMaxY() : script_page_scroll_); script_page_scroll_ = -1.0F; }
-  const float inner_w = cw - ctx_.u(36.0F) - ctx_.u(8.0F);
+  const float inner_w = cw - 2.0F * pad_x - ctx_.u(8.0F);
   switch (page_) {
     case Page::library: draw_library(inner_w, ch); break;
     case Page::details: draw_details(inner_w, ch); break;
@@ -179,6 +181,7 @@ void App::draw() {
   draw_toasts(win_w_, win_h_);
   if (!sheet_was_open && modal_.kind == Modal::Kind::none && !picker_.open && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
     if (page_ == Page::details) close_details();
+    else if (page_ == Page::storage) go(storage_return_);
     else if (page_ != Page::library) go(Page::library);
   }
   if (!ImGui::GetIO().WantTextInput && modal_.kind == Modal::Kind::none && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) { if (page_ == Page::details) close_details(); go(Page::library); focus_search_ = true; }
@@ -199,7 +202,7 @@ void App::draw_toasts(float w, float h) {
     const ImVec2 a((w - bw) * 0.5F, y - bh);
     dl->AddRectFilled(a, ImVec2(a.x + bw, a.y + bh), col::panel_dark, ctx_.u(6.0F));
     dl->AddRect(a, ImVec2(a.x + bw, a.y + bh), it->error ? col::err : col::glow, ctx_.u(6.0F), 0, std::max(1.0F, ctx_.u(1.4F)));
-    icon_image(dl, ctx_.icon(it->error ? "warning" : "info"), ImVec2(a.x + ctx_.u(12.0F), a.y + (bh - ctx_.u(16.0F)) * 0.5F), ctx_.u(16.0F), it->error ? col::err : col::info);
+    icon_image(dl, ctx_.icon(tone_icon(it->error ? col::err : col::info)), ImVec2(a.x + ctx_.u(12.0F), a.y + (bh - ctx_.u(16.0F)) * 0.5F), ctx_.u(16.0F), it->error ? col::err : col::info);
     float ly = a.y + ctx_.u(9.0F);
     for (const auto &l : lines) { draw_text(dl, ctx_.regular, px, col::text, ImVec2(a.x + ctx_.u(36.0F), ly), l.c_str()); ly += px + ctx_.u(3.0F); }
     y = a.y - ctx_.u(6.0F);
@@ -210,15 +213,17 @@ void App::draw_toasts(float w, float h) {
 
 void App::draw_sidebar(float x, float y, float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool wide = w > ctx_.u(100.0F);
-  const float pad = ctx_.u(10.0F);
+  const bool wide = !compact_shell_;
+  const float pad = ctx_.u(sp::s2 + 2.0F);
   float cy = y + pad + ctx_.u(2.0F);
-  // The primary navigation is exactly the four application areas. Game Details is contextual (a card, a row action or a context menu opens it)
-  // and never a sidebar entry; while it is open, the area it was opened from stays highlighted.
-  struct Nav { Page page; const char *label; const char *icon; };
-  constexpr int kNav = 4;
-  const Nav items[kNav] = {{Page::library, "Library", "library"}, {Page::import_page, "Import ROMs", "import"}, {Page::storage, "Storage", "storage"}, {Page::settings, "Settings", "settings"}};
-  const Page highlighted = page_ == Page::details ? (previous_page_ == Page::details ? Page::library : previous_page_) : page_;
+  // Two destinations (Library, Settings) plus one primary action: Add game opens the Import page. Game Details is contextual (a card, a row action or a
+  // context menu opens it) and never a sidebar entry; Storage is reached from Settings, so while either is open Settings stays highlighted, and while
+  // Details is open the area it was opened from stays highlighted. The Page enum is the route seam for any later destination.
+  struct Nav { Page page; const char *label; const char *icon; bool primary; };
+  constexpr int kNav = 3;
+  const Nav items[kNav] = {{Page::library, "Library", "library", false}, {Page::settings, "Settings", "settings", false}, {Page::import_page, "Add game", "import", true}};
+  const Page origin = page_ == Page::details ? (previous_page_ == Page::details ? Page::library : previous_page_) : page_;
+  const Page highlighted = origin == Page::storage ? Page::settings : origin;
   ImGuiID nav_ids[kNav]{};
   ImRect nav_rects[kNav];
   int nav_target = -1;
@@ -227,6 +232,7 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     const auto &item = items[index];
     nav_items_ += (index == 0 ? "" : ",") + std::string(item.label);
     const bool active = highlighted == item.page;
+    if (item.primary) cy += ctx_.u(sp::s3);  // the primary action stands apart from the two destinations
     ImGui::SetCursorScreenPos(ImVec2(x + pad, cy));
     const ImVec2 size(w - 2 * pad, ctx_.u(46.0F));  // contiguous hit boxes: Down/Up stay inside the sidebar instead of jumping to the content beside it
     ImGui::PushID(item.label);
@@ -247,13 +253,27 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     ImGui::PopID();
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImVec2(ImGui::GetItemRectMax().x, ImGui::GetItemRectMin().y + ctx_.u(38.0F));
     const bool current = page_ == item.page;  // on Details the origin area is marked, but not as the open page
-    dl->AddRectFilled(a, b, current ? rgba(52, 128, 238) : (active ? rgba(20, 52, 112) : (hovered ? col::panel_hover : rgba(10, 24, 56))), ctx_.u(5.0F));
-    dl->AddRect(a, b, current ? rgba(120, 190, 255) : (active ? rgba(64, 140, 230) : rgba(34, 70, 140)), ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.2F)));
-    if (current) dl->AddLine(ImVec2(a.x + ctx_.u(5.0F), a.y + ctx_.u(1.5F)), ImVec2(b.x - ctx_.u(5.0F), a.y + ctx_.u(1.5F)), rgba(170, 225, 255, 130), 1.0F);
+    const float r = ctx_.u(rad::control);
+    // The filled blue belongs to the primary action alone; the open destination is a raised navy tile with a bright edge and an accent bar.
+    ImU32 fill = current ? rgba(24, 60, 128) : (active ? rgba(20, 52, 112) : (hovered ? col::panel_hover : rgba(10, 24, 56)));
+    ImU32 edge = current ? col::btn_top : (active ? rgba(64, 140, 230) : rgba(34, 70, 140));
+    if (item.primary) { fill = current || hovered ? col::btn_hover : col::btn; edge = current ? col::focus : col::btn_top; }  // the one filled primary: always blue
+    dl->AddRectFilled(a, b, fill, r);
+    dl->AddRect(a, b, edge, r, 0, std::max(1.0F, ctx_.u(1.2F)));
+    if (item.primary) dl->AddLine(ImVec2(a.x + ctx_.u(5.0F), a.y + ctx_.u(1.5F)), ImVec2(b.x - ctx_.u(5.0F), a.y + ctx_.u(1.5F)), rgba(170, 225, 255, 130), 1.0F);
+    if (current && !item.primary) dl->AddRectFilled(ImVec2(a.x, a.y + ctx_.u(6.0F)), ImVec2(a.x + ctx_.u(3.0F), b.y - ctx_.u(6.0F)), col::btn_top, ctx_.u(1.5F));
     const float isz = ctx_.u(16.0F);
-    icon_image(dl, ctx_.icon(item.icon), ImVec2(wide ? a.x + ctx_.u(12.0F) : (a.x + b.x) * 0.5F - isz * 0.5F, (a.y + b.y) * 0.5F - isz * 0.5F), isz);
-    if (wide) draw_text(dl, ctx_.bold, ctx_.u(13.0F), current ? col::btn_text : col::text, ImVec2(a.x + ctx_.u(40.0F), (a.y + b.y) * 0.5F - ctx_.u(13.0F) * 0.55F), item.label);
-    if (!wide && hovered) tooltip(ctx_, item.label);
+    const ImU32 label_col = current || item.primary ? col::btn_text : col::text;
+    if (wide) {
+      icon_image(dl, ctx_.icon(item.icon), ImVec2(a.x + ctx_.u(12.0F), (a.y + b.y) * 0.5F - isz * 0.5F), isz);
+      draw_text(dl, ctx_.bold, ctx_.u(type::body), label_col, ImVec2(a.x + ctx_.u(40.0F), (a.y + b.y) * 0.5F - ctx_.u(type::body) * 0.55F), item.label);
+    } else {  // compact: the icon over a short label, so no entry depends on a tooltip alone
+      const float lpx = ctx_.u(10.5F);
+      icon_image(dl, ctx_.icon(item.icon), ImVec2((a.x + b.x) * 0.5F - isz * 0.5F, a.y + ctx_.u(sp::s1)), isz);
+      const std::string shown = ellipsize(ctx_.bold, lpx, b.x - a.x - ctx_.u(sp::s1), item.label);
+      draw_text(dl, ctx_.bold, lpx, label_col, ImVec2((a.x + b.x) * 0.5F - text_width(ctx_.bold, lpx, shown.c_str()) * 0.5F, b.y - lpx - ctx_.u(sp::s1)), shown.c_str());
+      if (hovered) tooltip(ctx_, item.label);
+    }
     if (focused) focus_ring(ctx_, dl, a, b);
     if (pressed) go(item.page);
     cy += ctx_.u(46.0F);
@@ -469,7 +489,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::info, ImVec2(tx, y + ctx_.u(29.0F)), platform_region(entry).c_str());
     const Badge short_badge = badge_for(entry, info);
     if (short_badge.spinner) spinner(ctx_, dl, ImVec2(tx + ctx_.u(5.0F), y + ctx_.u(53.0F)), ctx_.u(4.5F), short_badge.color);
-    else dl->AddCircleFilled(ImVec2(tx + ctx_.u(4.0F), y + ctx_.u(53.0F)), ctx_.u(4.0F), short_badge.color);
+    else tone_mark(ctx_, dl, ImVec2(tx + ctx_.u(5.0F), y + ctx_.u(53.0F)), ctx_.u(11.0F), short_badge.color);
     draw_text(dl, ctx_.bold, ctx_.u(12.0F), short_badge.color, ImVec2(tx + ctx_.u(13.0F), y + ctx_.u(46.0F)), short_badge.label.c_str());
     draw_text(dl, ctx_.regular, ctx_.u(11.0F), info.rom_missing ? col::warn : col::dim, ImVec2(tx, y + ctx_.u(64.0F)), info.rom_missing ? "ROM file missing" : activity_line(entry, now).c_str());
     if (focused) focus_ring(ctx_, dl, a, b);
@@ -511,7 +531,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), rgba(4, 10, 26, 225), ctx_.u(4.0F));
     dl->AddRect(p0, ImVec2(p0.x + bw, p0.y + bh), (c & 0x00FFFFFFU) | 0x90000000U, ctx_.u(4.0F));
     if (badge.spinner) spinner(ctx_, dl, ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(4.0F), c);
-    else dl->AddCircleFilled(ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(3.5F), c);
+    else tone_mark(ctx_, dl, ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(11.0F), c);
     draw_text(dl, ctx_.bold, px, c, ImVec2(p0.x + ctx_.u(18.0F), p0.y + (bh - px) * 0.5F - ctx_.u(1.0F)), label.c_str());
   }
   const float tpx = ctx_.u(14.0F), spx = ctx_.u(11.5F);
@@ -581,7 +601,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   const std::string &label = row_badge.label;
   const ImU32 sc = row_badge.color;
   if (row_badge.spinner) spinner(ctx_, dl, ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(5.0F), sc);
-  else dl->AddCircleFilled(ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(4.5F), sc);
+  else tone_mark(ctx_, dl, ImVec2(x + ctx_.u(6.0F), a.y + h * 0.5F), ctx_.u(12.0F), sc);
   draw_text(dl, ctx_.bold, ctx_.u(12.5F), sc, ImVec2(x + ctx_.u(15.0F), a.y + h * 0.5F - ctx_.u(12.5F) * 0.55F), label.c_str());
   x += ctx_.u(150.0F);
   if (wide_row) {
@@ -648,7 +668,7 @@ void App::draw_library(float w, float h) {
     input_text(ctx_, "search", search_, sizeof search_, std::max(ctx_.u(140.0F), w - import_w - ctx_.u(12.0F) - (narrow ? tools + ctx_.u(10.0F) : 0.0F)), ImGui::GetIO().ConfigMacOSXBehaviors ? "Search games...  (Cmd+F)" : "Search games...  (Ctrl+F)");
     if (narrow) { ImGui::SameLine(0.0F, ctx_.u(10.0F)); view_tools(); }
     ImGui::SameLine(0.0F, ctx_.u(narrow ? 8.0F : 12.0F));
-    if (button(ctx_, "lib_import", "Import ROMs", ImVec2(import_w, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
+    if (button(ctx_, "lib_import", "Add game", ImVec2(import_w, ctx_.u(36.0F)), Style::secondary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
   }
   ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
   {

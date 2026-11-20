@@ -304,6 +304,8 @@ private:
   // ---- navigation / library view ----
   Page page_ = Page::library;
   Page previous_page_ = Page::library;
+  Page storage_return_ = Page::library;  // where Back / Escape on Storage goes: Settings when Storage was opened from it
+  bool compact_shell_ = false;           // below 900 logical px: icon-over-label navigation, narrower content padding
   std::string detail_id_;
   char search_[96] = "";
   int platform_filter_ = 0;   // 0 all, 1 genesis, 2 master-system

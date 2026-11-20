@@ -45,8 +45,8 @@ SDL_Texture *banner_texture(Ctx &ctx) {
 } // namespace
 
 // The scenery banner: rich enough to carry the identity (sun, horizon, waterfall), short enough that every page's primary content - notably the
-// Details page's Build Configuration - fits the first 1080x740 viewport. About 163 px at 1080x740, 114 px at the 720x520 minimum.
-float App::hero_height(float, float h) const { return std::clamp(h * 0.22F, ctx_.u(108.0F), ctx_.u(196.0F)); }
+// Details page's Build Configuration - fits the first 1080x740 viewport. About 148 px at 1080x740, 104 px at the 720x520 minimum (it shrinks with the height so content keeps the room, and stops growing at 150 px: a larger window shows more content, not a bigger banner).
+float App::hero_height(float, float h) const { return std::clamp(h * 0.20F, ctx_.u(92.0F), ctx_.u(150.0F)); }
 
 void App::draw_background(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();

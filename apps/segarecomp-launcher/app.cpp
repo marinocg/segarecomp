@@ -725,7 +725,10 @@ void App::go(Page page) {
   if (page == Page::settings) reload_viewer_settings();
   nav_reset_ = true;
   editing_title_ = false;
-  if (page == Page::storage) request_scan();
+  if (page == Page::storage) {
+    storage_return_ = previous_page_ == Page::settings ? Page::settings : Page::library;  // Back returns to the area Storage was opened from
+    request_scan();
+  }
 }
 
 // ---------------------------------------------------------------- build / run

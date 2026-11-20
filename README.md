@@ -126,7 +126,7 @@ Check the downloaded archive against `SHA256SUMS.txt`.
 ### From a game image you own to playing
 
 1. Extract the archive and open **Segarecomp** (`Segarecomp.exe`, `Segarecomp.app` or `./Segarecomp`, depending on your platform).
-2. Drop your ROM into the window or select **Browse...** (Genesis `.md/.bin/.gen/.smd` and Master System `.sms`, or a `.zip` holding exactly one). For Sega CD use **Import ROMs > Add Sega CD game...** with your BIOS image and the disc's CUE file.
+2. Drop your ROM into the window or select **Browse...** (Genesis `.md/.bin/.gen/.smd` and Master System `.sms`, or a `.zip` holding exactly one). For Sega CD use **Add game > Add Sega CD game...** with your BIOS image and the disc's CUE file.
 3. Open the game and choose the build settings below, then **Recompile & Play** (for Sega CD, **Build**, then **Play**). The first build can take several minutes (a Sega CD disc, much longer); cached builds start immediately.
 4. Play. **Esc** (or the gamepad's Back button) opens the pause menu: Save State, Load State, Rewind, Quick Settings, Video & Display, Controls, Audio, System. Closing the window returns to the launcher.
    On Genesis your game's own saves (SRAM / EEPROM) are kept automatically when you quit; on Genesis, Master System and Sega CD you can save and load whole-machine states (**F5** / **F8** for the quick slot, five numbered slots in the menu) and

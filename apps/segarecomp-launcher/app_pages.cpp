@@ -25,7 +25,7 @@ struct Slice { const char *name; ImU32 color; std::uintmax_t bytes; };
 // ---------------------------------------------------------------- import
 
 void App::draw_import(float w, float h) {
-  page_header(ctx_, w, "IMPORT ROMS", "Drag and drop ROM files to add them to your library.");
+  page_header(ctx_, w, "ADD GAME", "Drag and drop ROM files to add them to your library.");
   draw_import_body(w, h);
 }
 
@@ -108,6 +108,12 @@ void App::draw_storage(float w, float h) {
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     page_header(ctx_, w, "STORAGE MANAGEMENT", "Analyze disk usage and clean up generated files.");
+    {  // Back: Storage lives under Settings (or the library bulk action that opened it); Escape / B do the same
+      const char *back_label = storage_return_ == Page::settings ? "Settings" : "Library";
+      const float bw = text_width(ctx_.bold, ctx_.u(13.0F), back_label) + ctx_.u(46.0F);
+      ImGui::SetCursorScreenPos(ImVec2(p.x + w - ctx_.u(180.0F) - bw - ctx_.u(8.0F), p.y - ctx_.u(6.0F)));
+      if (button(ctx_, "storage_back", back_label, ImVec2(bw, ctx_.u(32.0F)), Style::ghost, true, ctx_.icon("back"))) { go(storage_return_); return; }
+    }
     int sort = storage_sort_;
     ImGui::SetCursorScreenPos(ImVec2(p.x + w - ctx_.u(180.0F), p.y - ctx_.u(6.0F)));
     if (dropdown(ctx_, "st_sort", {"Sort by: Name", "Sort by: Size (large first)"}, &sort, ctx_.u(180.0F))) storage_sort_ = sort;
@@ -299,6 +305,7 @@ void App::draw_storage(float w, float h) {
 // ---------------------------------------------------------------- settings
 
 void App::draw_settings(float full_w, float h) {
+  const ImVec2 title_pos = ImGui::GetCursorScreenPos();
   page_header(ctx_, full_w, "SETTINGS", "Configure the library, metadata, builds and in-game defaults.");
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const bool narrow = full_w < ctx_.u(760.0F);
@@ -324,6 +331,11 @@ void App::draw_settings(float full_w, float h) {
       if (foc) focus_ring(ctx_, dl, a, b);
       if (pressed) settings_tab_ = i;
     }
+  }
+  {  // Storage lives under Settings: an explicit entry in the page header, whatever tab is open (Back / Escape / B return here)
+    const float bw = ctx_.u(130.0F);
+    ImGui::SetCursorScreenPos(ImVec2(title_pos.x + full_w - bw, title_pos.y - ctx_.u(6.0F)));
+    if (button(ctx_, "settings_storage", "Storage", ImVec2(bw, ctx_.u(32.0F)), Style::secondary, true, ctx_.icon("storage"))) go(Page::storage);
   }
   ImGui::SetCursorScreenPos(ImVec2(origin.x + tabs_w + tab_gap, origin.y + (narrow ? ctx_.u(44.0F) : 0.0F)));
   const float w_outer = full_w - tabs_w - tab_gap - ctx_.u(18.0F);

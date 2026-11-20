@@ -76,17 +76,20 @@ def main():
             return ok
 
         assertions = 0
-        # The primary navigation is exactly the four application areas; Game Details is not one of them.
-        assertions += check("primary navigation", ["expect nav_items=Library,Import ROMs,Storage,Settings", "expect page=library", "quit"], 2)
+        # The primary navigation is two destinations and one primary action; Game Details and Storage are not entries.
+        assertions += check("primary navigation", ["expect nav_items=Library,Settings,Add game", "expect page=library", "quit"], 2)
         # keyboard: Tab focuses the active entry, arrows walk the sidebar, Return activates, Escape returns to the library
-        assertions += check("keyboard", ["expect page=library", "key Tab", "frames 2", "key Down", "frames 2", "expect focus=Import ROMs", "key Down", "frames 2",
-                                         "expect focus=Storage", "key Down", "frames 2", "expect focus=Settings", "key Down", "frames 2", "expect focus=Settings",
-                                         "key Up", "frames 2", "key Return", "frames 6", "expect page=storage", "key Escape", "frames 6", "expect page=library", "quit"], 7)
+        assertions += check("keyboard", ["expect page=library", "key Tab", "frames 2", "expect focus=Library", "key Down", "frames 2", "expect focus=Settings", "key Return", "frames 6",
+                                         "expect page=settings", "key Escape", "frames 6", "expect page=library", "key Tab", "frames 2", "key Down", "frames 2", "key Down", "frames 2",
+                                         "expect focus=Add game", "key Down", "frames 2", "expect focus=Add game", "key Return", "frames 6", "expect page=import", "key Escape", "frames 6",
+                                         "expect page=library", "quit"], 9)
+        # Storage is reached from Settings (the explicit Storage action) and Back / Escape return to Settings, not to the library
+        assertions += check("storage under settings", ["page settings", "frames 6", "expect page=settings", "page storage", "frames 6", "expect page=storage", "key Escape", "frames 6",
+                                                       "expect page=settings", "key Escape", "frames 6", "expect page=library", "quit"], 4)
         # gamepad: a virtual SDL gamepad (hot-plugged after start) does the same with the D-pad, South and East
         pad = ["expect page=library", "pad_attach", "frames 20"]
-        for _ in range(2):
-            pad += ["pad dpad_down down", "pad dpad_down up", "frames 3"]
-        pad += ["expect focus=Storage", "pad south down", "pad south up", "frames 10", "expect page=storage", "pad east down", "pad east up", "frames 10", "expect page=library", "quit"]
+        pad += ["pad dpad_down down", "pad dpad_down up", "frames 3"]
+        pad += ["expect focus=Settings", "pad south down", "pad south up", "frames 10", "expect page=settings", "pad east down", "pad east up", "frames 10", "expect page=library", "quit"]
         assertions += check("gamepad", pad, 4)
         # Details is contextual: a card opens it with Return, Back (Escape) returns to the SAME library state - search, filter, view, focus.
         state = ["key F", "frames 4", "text Synthetic Card 0", "frames 6", "expect search=Synthetic Card 0", "expect visible=9", "key Tab", "frames 2",

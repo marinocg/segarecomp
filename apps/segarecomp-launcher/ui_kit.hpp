@@ -26,6 +26,13 @@ const ImU32 danger = rgba(160, 48, 56), danger_hover = rgba(190, 62, 70), danger
 const ImU32 focus = rgba(140, 224, 255), selected = rgba(57, 124, 219), inactive = rgba(11, 32, 72), scrim = rgba(4, 8, 20, 190);
 }
 
+// Layout and type tokens (logical px; multiply with Ctx::u). 4/8 spacing rhythm, control/panel corner radii, and the type scale of the shell.
+namespace sp { constexpr float s1 = 4.0F, s2 = 8.0F, s3 = 12.0F, s4 = 16.0F, s5 = 20.0F, s6 = 24.0F, s7 = 32.0F; }
+namespace rad { constexpr float control = 6.0F, panel = 8.0F; }
+namespace type { constexpr float caption = 11.0F, small = 12.0F, body = 13.0F, heading = 15.0F; }
+// Status tones are never color alone: a tone's color always travels with its symbol (an icon) and the status text. neutral states show a dot.
+const char *tone_icon(ImU32 color);  // "check" (ok), "warning" (warn/err), "info" (info), nullptr (neutral/text colors)
+
 // ImGui 1.92's InvisibleButton opts OUT of keyboard/gamepad navigation unless asked: every launcher control is reachable with Tab/arrows/D-pad.
 bool nav_button(const char *id, ImVec2 size);
 // SEG-069-T004: "zone" bookkeeping for D-pad hops between the sidebar and the page. While `zone_capture` is on, the first enabled nav_button submitted is
@@ -68,6 +75,8 @@ void step_circle(Ctx &ctx, ImDrawList *dl, ImVec2 center, float radius, int numb
 void dashed_rect(ImDrawList *dl, ImVec2 a, ImVec2 b, ImU32 color, float thickness, float dash, float gap);
 void focus_ring(Ctx &ctx, ImDrawList *dl, ImVec2 a, ImVec2 b);
 void icon_image(ImDrawList *dl, SDL_Texture *tex, ImVec2 a, float size, ImU32 tint = IM_COL32_WHITE);
+// The status symbol (the tone icon, or a dot for a neutral state) centered at `center`; `size` is the icon edge.
+void tone_mark(Ctx &ctx, ImDrawList *dl, ImVec2 center, float size, ImU32 color);
 
 // Widgets: all take absolute size in points (already scaled) and draw at the current ImGui cursor; they advance it like ImGui::Button.
 bool button(Ctx &ctx, const char *id, const char *label, ImVec2 size, Style style = Style::secondary, bool enabled = true, SDL_Texture *icon = nullptr);

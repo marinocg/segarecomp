@@ -260,12 +260,12 @@ def storage_journey(r, tmp, exe, fake_cli, fake_game, size):
     built = p.builds()[0]
     has_intermediates = lambda: (built / "generated.c").exists() or (built / "obj").exists()
     r.expect(has_intermediates(), "the setup build left intermediates")
-    script = START + seek("Storage", "dpad_down", 4) + press("south") + press("dpad_right") + expect(page="storage")
+    script = START + seek("Settings", "dpad_down", 4) + press("south") + press("dpad_right") + seek("settings_storage", "dpad_up", 4) + press("south") + press("dpad_right") + expect(page="storage")
     script += seek("sel", "dpad_down", 6) + press("south") + seek("act:a_zig", "dpad_down", 4) + seek("act:a_inter", "dpad_right", 2) + press("south") + expect(modal=1)
     script += press("east") + expect(modal=0)                                                       # cancel: nothing deleted
     script += press("south") + expect(modal=1) + seek("mod_ok", "dpad_right", 4) + press("south") + ["frames 60"] + expect(modal=0)
-    script += press("east") + expect(page="library") + ["quit"]
-    r.check("storage", p.run(script, None, size), 11)
+    script += press("east") + expect(page="settings") + press("east") + expect(page="library") + ["quit"]    # Back from Storage returns to Settings
+    r.check("storage", p.run(script, None, size), 13)
     r.expect(not has_intermediates(), "the confirmed cleanup removed the intermediates")
     r.expect((built / ("game" + EXE_SUFFIX)).exists(), "the playable executable stays after the cleanup")
 

@@ -8,10 +8,10 @@ Target names: **Library**, **Add game**, **Game > Overview / Mods / Game setting
 
 | Page (`Page` enum) | Contents | Target |
 | --- | --- | --- |
-| `library` | cover grid or list, search (Ctrl+F, Cmd+F on macOS), platform/status filter, sort, favorites, Select mode with bulk actions, context menu, Import ROMs button, free-space and build-slot footer | Library |
+| `library` | cover grid or list, search (Ctrl+F, Cmd+F on macOS), platform/status filter, sort, favorites, Select mode with bulk actions, context menu, Add game button (the sidebar's primary Add game opens the Add game page), free-space and build-slot footer | Library |
 | `details` | cover and metadata editing, favorite, Play/Build/More, status line, Build configuration, Patches / Variants, Build provenance, Build log, Input recording, per-game storage card | Game |
-| `import_page` | file picker, drag and drop, results list, optional "Also build each newly added game", Sega CD form (CUE, BIOS, prebuilt program) | Add game |
-| `storage` | per-game and total build storage by category, cleanup plans with confirmation | Settings > Storage & Data |
+| `import_page` | (T002: renamed Add game in the UI; opened by the sidebar's primary Add game button) file picker, drag and drop, results list, optional "Also build each newly added game", Sega CD form (CUE, BIOS, prebuilt program) | Add game |
+| `storage` | per-game and total build storage by category, cleanup plans with confirmation | Settings > Storage & Data (T002: no longer a sidebar entry; the Storage button in the Settings header and "Manage Storage" in Build & Runtime open it; Back / Escape / B return to Settings, or to the Library when a library action opened it) |
 | `settings` | six tabs: Library; Metadata & Covers; Build & Runtime; Video & Controls; Input Diagnostics; Advanced / About | Settings (four groups) |
 
 ## Actions

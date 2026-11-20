@@ -8,9 +8,9 @@ same journeys by hand on a real controller (CI cannot drive a real device or an 
 
 | Button | Action |
 | --- | --- |
-| D-pad / left stick | move focus (spatial); in the sidebar Up/Down walk the four areas |
+| D-pad / left stick | move focus (spatial); in the sidebar Up/Down walk Library, Settings and the primary Add game button |
 | **A** (South) | activate the focused control (open a card, press a button, tick a row, enter a folder) |
-| **B** (East) | back: closes a sheet, leaves Details/Storage/Settings for the Library, goes up one folder in the picker; on the Library page it moves focus to the sidebar |
+| **B** (East) | back: closes a sheet, leaves Details/Settings/Add game for the Library (Storage returns to Settings first), goes up one folder in the picker; on the Library page it moves focus to the sidebar |
 | **Y** (North) | the focused game's menu (Details, Play, Build, Cancel build, Remove from build queue, favorite, covers, storage, remove) |
 | **LB / RB** | previous / next page in the built-in file picker |
 | D-pad **Right** in the sidebar | enters the page (the first game card on the Library; the first control elsewhere). **Left** at a page's left edge returns to the sidebar |
@@ -21,7 +21,7 @@ targets; their actions are in the game's menu (Y) and Settings.
 
 ## Built-in file picker
 
-The native OS file dialog cannot be assumed to accept gamepad input, so when a controller was the last input device **Import ROMs**, **Locate ROM** and
+The native OS file dialog cannot be assumed to accept gamepad input, so when a controller was the last input device **Add game**, **Locate ROM** and
 **Change cover** open a built-in picker instead (mouse and keyboard keep the native dialog; `SEGARECOMP_FILE_PICKER=builtin|native` forces either, and the built-in
 picker is also used when no system file chooser exists, for example under WSL). It is deliberately not a file manager:
 

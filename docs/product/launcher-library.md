@@ -5,8 +5,8 @@ This is the user-facing description of what ships in the consumer launcher (`Seg
 
 ## What the launcher is
 
-A resizable window (default 1080x740, minimum about 720x520, HiDPI aware, compact mode) whose primary navigation is exactly four areas: **Library**,
-**Import ROMs**, **Storage** and **Settings** (including **Input Diagnostics**). A game's **Details** page is contextual, not a sidebar entry: a card, a
+A resizable window (default 1080x740, minimum about 720x520, HiDPI aware, compact mode) whose primary navigation is two destinations, **Library**
+and **Settings** (including **Storage** and **Input Diagnostics**), plus the primary **Add game** button. A game's **Details** page is contextual, not a sidebar entry: a card, a
 list row's Details button or the game's context menu (right click, the Menu key or the gamepad's North button) opens it, and **Back** (the button, Esc or the
 gamepad's East button) returns to exactly the library state it came from: search text, platform/status filters, sort, grid/list view, scroll position and the
 focused card. The repository's sunset artwork forms the header banner and the dimmed scenery behind the window. Everything it shows is read from the library
@@ -26,7 +26,7 @@ file, the build cache or the product: no placeholder values.
   the `roms` folder yourself if you want). The same ROM zipped or not is one game.
   Works for drag and drop, Browse, Locate ROM and the headless `--import` / `--build`. A sidecar `.mapper.json` inside a zip is not read (declare the
   Master System mapper on the game's page).
-* **Sega CD** - only its **import** is different: **Import ROMs > Add Sega CD game...** takes your BIOS image, the disc's CUE file and (optionally) a verified viewer
+* **Sega CD** - only its **import** is different: **Add game > Add Sega CD game...** takes your BIOS image, the disc's CUE file and (optionally) a verified viewer
   program built with the developer procedure. All three are referenced by path (never copied or bundled) and only paths, sizes and SHA-256 values are stored.
   After that a Sega CD game is an ordinary library game: the same cards, search, filters and sorting, the same **Details** page (its BIOS and disc are rows of
   *Build configuration*, the build mode is a row of three tiles, the verified program, the save data and the build identity are rows of *Build provenance*, its
