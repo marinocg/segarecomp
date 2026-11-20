@@ -9,7 +9,7 @@
     `native_driver` / `automatic` / `original_aot_failure_verified_replacement` with the original AOT's failure evidence (the catalog of a temporary copy of the runtime tree is
     given the fixture's signature; the product catalog is untouched), while the same driver without a catalog entry keeps the original path;
   * the AUTOMATIC structural-alternatives pass (ADR 0291 Decision 6): a self-modifying driver the compiled structural alternatives close is rebuilt with them (supported, evidence
-    recorded, `original_with_structural_alternatives`), one they cannot close stays degraded;
+    recorded, `original_with_structural_alternatives`), one whose images have no admissible form stays degraded and is not rebuilt (the first pass's emitter statistics decide);
   * `--z80-alternatives 1` (compiled structural alternatives of the original path) is recorded as requested and with its statistics, and is not a replacement;
   * malformed selections are rejected, and the record is deterministic across repeated builds.
 The positive case on a real driver image (replaced by the native implementation and compared with an independent reference) needs a commercial image and is
@@ -115,14 +115,18 @@ def main():
             check(log.count("second pass with the compiled structural alternatives") == 1 and "building the original driver without them" not in log,
                   "and it is not retried or replaced by another configuration (%s)" % mode)
 
-        # ... and one they cannot close (the stored value is loaded from RAM) stays degraded, with the attempt recorded
+        # ... and one whose images have no admissible form (the stored value is loaded from RAM) stays degraded WITHOUT a second build: the emitter's own statistics are the authority
         done, status = results["dyn"]
         audio = status.get("audio_implementation", {})
         check(done.returncode == 0 and audio.get("kind") == "original_z80_aot" and audio.get("audio_status") == "degraded" and audio.get("degraded_reason") == "structural_code_mismatch" and
               audio.get("reason") == "no_verified_replacement" and audio.get("selection") == "automatic" and status.get("genesis_audio") == "degraded" and
-              status.get("z80_audio_outcome") == "structural_code_mismatch" and audio.get("structural_alternatives", {}).get("requested") is True and
+              status.get("z80_audio_outcome") == "structural_code_mismatch" and audio.get("structural_alternatives", {}).get("requested") is False and
+              audio["structural_alternatives"].get("second_pass") == "skipped_no_admissible_forms" and audio["structural_alternatives"].get("forms") == 0 and
               audio.get("original_aot", {}).get("outcome") == "structural_code_mismatch",
-              "a structurally self-modifying driver without a verified replacement that the alternatives cannot close stays the original Z80, degraded, and says why")
+              "a structurally self-modifying driver without a verified replacement whose images have no admissible alternative forms stays the original Z80, degraded, and records that no second pass was made")
+        dyn_log = (tmp / "dyn" / "build.log").read_text()
+        check("no second pass" in dyn_log and "second pass with the compiled structural alternatives" not in dyn_log,
+              "the skipped second pass really did not run (the log says so and has no second-pass line)")
         done_original, status_original = results["dyn_original"]
         original = dict(status_original.get("audio_implementation", {}))
         check(done_original.returncode == 0 and original.get("selection") == "developer_override" and original.get("reason") == "developer_override" and original.get("requested") == "original" and
