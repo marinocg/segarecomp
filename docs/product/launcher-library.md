@@ -151,12 +151,19 @@ refused while a build or game runs (one busy guard). Settings > General > Prepar
 remove intermediates, keep the newest N playable games (older ones are reduced to metadata only; favorites, running games and the game being built
 are excluded) or a soft limit that only reminds you. The default is *never*.
 
-**First run.** A genuinely new profile (no settings, library or viewer-settings file yet) is asked once, in a modal that is operable by keyboard and gamepad
-(focus starts on the first choice, Esc/East decides later), whether to **Keep intermediates** (policy *never*) or **Remove after builds** (policy *remove
-intermediates*). The choice writes the same cleanup policy Settings > General > Preparation edits, together with a one-time `intermediates_choice_made` marker in
-`launcher-settings.json`; the marker is written only when the file was saved (a failed save keeps the question open). Existing profiles, including a
-settings file written before the marker existed, are never asked and keep their policy; restoring launcher defaults never re-asks. Scripted windows
-(GUI scripts, screenshots, autoplay) skip the question unless `SEGARECOMP_GUI_ONBOARDING=1` (new profiles) or `=always` (test seam) is set.
+**First run.** There is no question before the first preparation: a new user goes Add game, Prepare, Play. A fresh profile simply has the existing non-deleting
+policy (*never*: the files made while preparing a game are kept and only take disk space; the playable game never depends on them); Settings > General >
+Preparation (*After a successful build*) changes it, with the effect written under the control. `intermediates_choice_made` in `launcher-settings.json` is a
+**legacy marker** of the question earlier releases asked: it is loaded and saved verbatim and never read, so a profile written by an earlier release (answered
+or never asked) keeps every stored value, its cleanup policy is never changed by an upgrade, and a settings file the launcher did not change is not rewritten.
+Restoring launcher defaults resets the policy to *never* and leaves the marker as it was. The welcome (a brand-new profile with an empty library) stays;
+scripted windows (GUI scripts, screenshots, autoplay) skip it unless `SEGARECOMP_GUI_ONBOARDING=1` (new profiles) or `=always` (test seam) is set.
+
+**Standing notices.** Two conditions that stay true until they are fixed raise one concise, non-blocking notice at the top of the Library and of the Game page (never a
+toast, no control of its own): *Installation incomplete* (the build tool or runtime files are missing; games cannot be prepared) and *Your library cannot be saved* (the
+library folder cannot be created or written; games added now would be lost). Both are re-checked every few seconds and disappear by themselves once the cause is fixed.
+An import that cannot be saved reports only that ("Could not save the library ..."), never "N games added", and starts nothing. Transient messages (toasts) appear in the
+banner band above the panel, right of the wordmark, where no control lives, so they never cover a Cancel or Play button; errors stay a little longer.
 
 ## Covers and metadata provider
 

@@ -1,6 +1,6 @@
 # Launcher: operating it with a gamepad only (SEG-069-T004)
 
-The launcher's ordinary journeys can be completed with an SDL gamepad and no mouse or keyboard: the welcome page and first-run question, Add game (choose, review, Add & prepare / Add only), browsing the library, opening a game's
+The launcher's ordinary journeys can be completed with an SDL gamepad and no mouse or keyboard: the welcome page and the first preparation, Add game (choose, review, Add & prepare / Add only), browsing the library, opening a game's
 page and its tabs, preparing / cancelling / queueing, playing an earlier version, mods (approve or decline), Sega CD BIOS choice, Settings and Storage & Data (cleanup, Change data location with Cancel move). This page records what is automated and how to walk the
 same journeys by hand on a real controller (CI cannot drive a real device or an OS-specific dialog).
 
@@ -34,8 +34,8 @@ picker is also used when no system file chooser exists, for example under WSL). 
 ## Automated coverage
 
 * `file_picker_test`: the picker's model (containment, `../` and prefix-sibling escapes, symlinks, filtering, truncation, choose-time re-check).
-* `launcher_gamepad_journey_test.py` (real window, SDL dummy video driver, virtual joystick; **no mouse event is injected**; run at 1080x740 and 720x520): first-run sheet
-  (focus trapped, South confirms, East defers); empty library -> picker -> tick two ROMs -> import, plus back/cancel/root confinement; library toolbar (drop-down popup,
+* `launcher_gamepad_journey_test.py` (real window, SDL dummy video driver, virtual joystick; **no mouse event is injected**; run at 1080x740 and 720x520): first preparation
+  (Prepare starts at once, no question; the welcome's Add game / Skip); empty library -> picker -> tick two ROMs -> import, plus back/cancel/root confinement; library toolbar (drop-down popup,
   view switch, search field entered and left), grid hops, card menu (favorite, Details) and Back with focus restoration; Details -> Build -> Cancel build, a second game
   queued and removed from the queue (focus follows Build -> Cancel/Unqueue -> Build); the playable earlier build's Play and Recompile; Settings (tabs or the narrow
   section drop-down, a long tab scrolled to its last control, restore-defaults confirmed/cancelled with focus returning to the control); Storage cleanup confirm/cancel;

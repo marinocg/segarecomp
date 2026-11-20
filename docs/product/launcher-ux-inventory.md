@@ -69,7 +69,7 @@ Catalog `GameStatus` values: not built, ready, metadata only (ROM moved), stale,
 
 ## Modals and overlays
 
-first-run "Keep build intermediates?" (T003: raised when the user first prepares a game, not at start-up; Esc cancels that preparation request and records nothing), cleanup confirmation, delete confirmation, context menu, patch approval sheet (host-process permissions), toast, controller picker, build log panel. Each keeps Esc / B as cancel.
+cleanup confirmation (the former first-run "Keep build intermediates?" sheet no longer exists: round B of F30 removed it, a fresh profile keeps intermediates by the non-deleting default), delete confirmation, context menu, patch approval sheet (host-process permissions), toast, controller picker, build log panel. Each keeps Esc / B as cancel.
 
 ## Input paths
 
