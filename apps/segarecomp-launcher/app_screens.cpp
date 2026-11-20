@@ -747,7 +747,7 @@ void App::draw_library(float w, float h) {
     const float dw = narrow ? std::max(ctx_.u(104.0F), (w - ctx_.u(16.0F)) / 3.0F) : ctx_.u(160.0F);
     if (dropdown(ctx_, "pf", {"All Platforms", "Genesis", "Master System", "Sega CD"}, &platform, dw, narrow ? nullptr : ctx_.icon("controller"))) platform_filter_ = platform;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    if (dropdown(ctx_, "sf", {"All Statuses", "Ready", "Needs build", "Failed", "Missing ROM"}, &status, dw)) status_filter_ = status;
+    if (dropdown(ctx_, "sf", {"All Statuses", "Ready", "Needs preparing", "Failed", "Game file missing"}, &status, dw)) status_filter_ = status;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (dropdown(ctx_, "so", {"Last Played", "Title", "Last Built", "Date Added", "Size"}, &sort, dw)) { settings_.sort = sort_ids[sort]; save_settings(); }
     if (!narrow) {

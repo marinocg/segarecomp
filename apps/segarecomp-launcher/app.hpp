@@ -40,6 +40,8 @@ namespace launcher {
 // `playable_older`: the current identity has no build, but an executable built by an earlier release is verifiably playable (older_build.hpp).
 enum class GameStatus { not_built, ready, metadata_only, stale, failed, playable_older };
 enum class Page { library, details, import_page, storage, settings };
+// The Game page's tabs (ordinary view state: nothing about them is stored). Mods exists only for a game that has real content there (Genesis patches).
+enum class DetailsTab { overview = 0, mods = 1, settings = 2, advanced = 3 };
 
 struct StatusInfo {
   GameStatus status = GameStatus::not_built;
@@ -207,6 +209,17 @@ private:
   void go(Page page);
   // The Details page's build-identity facts and sections.
   void draw_details_identity(LibraryEntry &entry, const StatusInfo &info, float w, float cover_w);
+  // T004: Game > Overview / Mods / Game settings / Advanced. The tab strip, the Overview's notices and link rows, the Game settings cards, the build log panel.
+  [[nodiscard]] bool details_has_mods(const LibraryEntry &entry) const { return entry.platform_id == "genesis"; }
+  void set_details_tab(DetailsTab tab);                                  // switches the tab, remembering the scroll of the one it leaves
+  void draw_details_tabs(const LibraryEntry &entry, float w);
+  void draw_details_overview(LibraryEntry &entry, const StatusInfo &info, float w);
+  float draw_library_entry_card(LibraryEntry &entry, const StatusInfo &info, float w);
+  float draw_display_audio_card(const LibraryEntry &entry, float w);
+  void draw_build_log(const LibraryEntry &entry, const StatusInfo &info, float w);
+  void remove_cover(LibraryEntry &entry);
+  [[nodiscard]] std::string details_primary_label(const LibraryEntry &entry, const StatusInfo &info) const;   // the one primary action of the header in this state (script `expect primary_action=`)
+  [[nodiscard]] std::string prepare_label(const LibraryEntry &entry, const StatusInfo &info) const;   // the Details primary action's words (the library's vocabulary)
   float draw_build_config(LibraryEntry &entry, const StatusInfo &info, float w);
   void draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w);
   // SEG-122 (ADR 0266): the Patches / Variants card of a Genesis game's Details page and its actions.
@@ -357,7 +370,12 @@ private:
   ImVec2 script_mouse_{0, 0};
   std::pair<int, SDL_Event> script_mouse_up_{-1, SDL_Event{}};         // review aid: open the context menu of the card that receives the requested focus
   ImVec2 context_anchor_{0, 0};        // where the context menu opens: the mouse for a right click, beside the card for keyboard/gamepad
-  bool show_advanced_ = false;         // Details: the Advanced build options section is expanded
+  bool show_advanced_ = false;         // Details: the Advanced build options section is expanded (Game settings)
+  DetailsTab details_tab_ = DetailsTab::overview;
+  float details_tab_scroll_[4] = {-1.0F, -1.0F, -1.0F, -1.0F};  // scroll of each tab when it was left (-1: never visited, keep the current position)
+  float details_scroll_now_ = 0.0F;                            // the content scroll as last drawn (script `expect details_scroll=`)
+  std::string details_tabs_text_;                              // the tabs drawn this frame, comma separated (script `expect details_tabs=`)
+  float details_scroll_pending_ = -1.0F;                       // applied once on the next frame after a tab switch
   int settings_tab_ = 0;
   bool focus_search_ = false;
   char title_edit_[200] = "";

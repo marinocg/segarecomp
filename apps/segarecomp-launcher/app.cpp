@@ -760,6 +760,9 @@ void App::open_details(const std::string &id) {
   show_log_ = false;
   show_fallback_details_ = false;
   show_advanced_ = false;
+  details_tab_ = DetailsTab::overview;
+  for (float &scroll : details_tab_scroll_) scroll = -1.0F;
+  details_scroll_pending_ = -1.0F;
   if (page_ != Page::details) previous_page_ = page_;
   page_ = Page::details;
   trace("details=open title=" + (catalog_.find_id(id) != nullptr ? catalog_.find_id(id)->title() : std::string("?")));
@@ -990,7 +993,13 @@ App::Badge App::badge_for(const LibraryEntry &entry, const StatusInfo &info) con
   if (info.sega_cd && game_ && game_id_ == entry.id()) return {"Running", ui::col::ok, false};
   if (info.rom_missing && !info.runnable() && !info.sega_cd) return {"Game file missing", ui::col::warn, false};
   if (!info.runnable() && !info.sega_cd && entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty()) return {"Needs a mapper choice", ui::col::warn, false};
-  return {status_label(info), status_color(info), false};
+  // The user-facing words (the library and the Game page): the technical labels of status_label() (script `expect status=`) say Built / rebuild.
+  std::string label = status_label(info);
+  if (label == "Not built") label = "Not prepared";
+  else if (label == "Needs rebuild") label = "Out of date";
+  else if (label == "Build failed") label = "Failed";
+  else if (label == "Playable (older build)") label = "Older version";   // short on purpose: the compact library card must not cut the state
+  return {label, status_color(info), false};
 }
 
 void App::finish_build() {
@@ -1432,8 +1441,11 @@ void App::run_script() {
       save_catalog();
       request_status_refresh();
     }
-  } else if (cmd == "advanced") {      // SEG-122-T009: open or close the Advanced build options expander of the open game: 1 | 0
+  } else if (cmd == "advanced") {      // SEG-122-T009: open or close the "Advanced build options" expander of the open game (it lives on Game settings): 1 | 0
     show_advanced_ = arg == "1";
+    if (arg == "1" && page_ == Page::details) set_details_tab(DetailsTab::settings);
+  } else if (cmd == "details_tab") {   // T004: the Game page's tab, as its tab button would select it: overview | mods | settings | advanced
+    set_details_tab(arg == "mods" ? DetailsTab::mods : arg == "settings" ? DetailsTab::settings : arg == "advanced" ? DetailsTab::advanced : DetailsTab::overview);
   } else if (cmd == "cartridge") {     // SEG-122-T009: select the cartridge hardware of the open game as its tile would: auto | standard | lock_on
     if (LibraryEntry *e = catalog_.find_id(detail_id_)) { select_cartridge(*e, arg == "lock_on" ? 2 : (arg == "standard" ? 1 : 0)); save_catalog(); request_status_refresh(); }
   } else if (cmd == "report") {        // trace the measured storage of the open game
@@ -1661,6 +1673,10 @@ void App::run_script() {
     else if (key == "visible") actual = std::to_string(visible_entries().size());
     else if (key == "focus") actual = focus_label_;
     else if (key == "focus_id") actual = ui::focus_id;
+    else if (key == "details_tab") actual = details_tab_ == DetailsTab::mods ? "mods" : details_tab_ == DetailsTab::settings ? "settings" : details_tab_ == DetailsTab::advanced ? "advanced" : "overview";
+    else if (key == "details_scroll") actual = std::to_string(static_cast<int>(std::lround(details_scroll_now_)));
+    else if (key == "details_tabs") { actual = details_tabs_text_; }
+    else if (key == "primary_action") { const LibraryEntry *e = detail_id_.empty() ? nullptr : catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : details_primary_label(*e, status_of(detail_id_)); }
     else if (key == "cartridge") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : (e->mapper.empty() ? "standard" : e->mapper) + (e->mapper_explicit ? ":manual" : ":auto"); }
     else if (key == "hardware_changed") actual = statuses_.count(detail_id_) != 0 && statuses_[detail_id_].hardware_changed ? "1" : "0";
     else if (key == "modal") actual = modal_.kind == Modal::Kind::none ? "0" : "1";
@@ -1846,6 +1862,9 @@ int App::run() {
     const auto visible = visible_entries();
     if (index < visible.size()) open_details(visible[index]->id());
     if (SDL_getenv("SEGARECOMP_SHOT_LOG") != nullptr) show_log_ = true;  // review aid: the log panel expanded
+    if (const char *tab = SDL_getenv("SEGARECOMP_SHOT_TAB"))   // review aid: a Game tab other than Overview (mods | settings | advanced)
+      set_details_tab(std::string(tab) == "mods" ? DetailsTab::mods : std::string(tab) == "settings" ? DetailsTab::settings : std::string(tab) == "advanced" ? DetailsTab::advanced : DetailsTab::overview);
+    if (SDL_getenv("SEGARECOMP_SHOT_ADVANCED") != nullptr) show_advanced_ = true;  // review aid: the Advanced build options expander
   } else if (shot_page_ == "list") { settings_.view = "list"; }
   if (const char *drop = SDL_getenv("SEGARECOMP_SHOT_DROP")) {  // review aid: import several files at once, as a drag-and-drop would
     std::vector<std::string> paths;

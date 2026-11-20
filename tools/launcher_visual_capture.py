@@ -36,6 +36,11 @@ PAGES = [
     ("15_settings_library_lower", "settings0", {"SEGARECOMP_SHOT_SCROLL": "bottom"}), ("16_settings_video_lower", "settings3", {"SEGARECOMP_SHOT_SCROLL": "bottom"}),
     ("17_storage_lower", "storage", {"SEGARECOMP_SHOT_SELECT": "1", "SEGARECOMP_SHOT_SCROLL": "bottom"}),
     ("18_details_lower", "details:0", {"SEGARECOMP_SHOT_SCROLL": "bottom"}),
+    # T004: the Game page's tabs (the tab is a review aid: SEGARECOMP_SHOT_TAB=mods|settings|advanced; Overview is the default)
+    ("23_game_mods", "details:0", {"SEGARECOMP_SHOT_TAB": "mods"}), ("24_game_settings", "details:0", {"SEGARECOMP_SHOT_TAB": "settings"}),
+    ("25_game_settings_advanced_options", "details:0", {"SEGARECOMP_SHOT_TAB": "settings", "SEGARECOMP_SHOT_ADVANCED": "1"}),
+    ("26_game_advanced", "details:0", {"SEGARECOMP_SHOT_TAB": "advanced"}), ("27_game_failed_advanced", "details:4", {"SEGARECOMP_SHOT_TAB": "advanced", "SEGARECOMP_SHOT_LOG": "1"}),
+    ("28_game_sms_mapper_settings", "details:5", {"SEGARECOMP_SHOT_TAB": "settings"}), ("29_game_metadata_only_advanced", "details:6", {"SEGARECOMP_SHOT_TAB": "advanced"}),
     ("19_metadata_lower", "settings1", {"SEGARECOMP_SHOT_SCROLL": "bottom"}), ("20_about_lower", "settings5", {"SEGARECOMP_SHOT_SCROLL": "bottom"}),
 ]
 REFERENCES = {"01_library_home": "01_library_home", "03_game_details": "03_game_details",
@@ -73,7 +78,7 @@ def main():
                 env["SDL_RENDER_DRIVER"] = "software"
             # Clear inherited review actions: capture must not build, play or modify storage.
             for key in ["SEGARECOMP_SHOT_BUILD", "SEGARECOMP_SHOT_ROM", "SEGARECOMP_GUI_AUTOPLAY", "SEGARECOMP_GUI_SCRIPT", "SEGARECOMP_SHOT_SELECT", "SEGARECOMP_SHOT_DROP",
-                        "SEGARECOMP_SHOT_SCROLL", "SEGARECOMP_SHOT_LOG", "SEGARECOMP_SHOT_MENU", "SEGARECOMP_SHOT_SCALE"]:
+                        "SEGARECOMP_SHOT_SCROLL", "SEGARECOMP_SHOT_LOG", "SEGARECOMP_SHOT_MENU", "SEGARECOMP_SHOT_SCALE", "SEGARECOMP_SHOT_TAB", "SEGARECOMP_SHOT_ADVANCED"]:
                 env.pop(key, None)
             env.update(extra)
 

@@ -108,6 +108,19 @@ def parse_layout(trace):
     return out
 
 
+def parse_layouts(trace):
+    """Every `layout ...` line as a {name: (x, y, w, h)} dict, in order."""
+    out = []
+    for line in [l for l in trace if l.startswith("layout ")]:
+        one = {}
+        for part in line[len("layout "):].split(";"):
+            if ":" in part:
+                name, rect = part.split(":")
+                one[name] = tuple(int(v) for v in rect.split(","))
+        out.append(one)
+    return out
+
+
 def parse_menu(trace):
     """The last non-empty `menu_items ...` line as a normalized set of enabled/disabled-stripped labels."""
     best = []
@@ -271,18 +284,25 @@ def stage_journey(r, c, size):
         s = open_game(p) + ["expect can_play=0", "expect building=0"] + shot(c, p, "details-new", size) + ["layout"]
         s += ["build", "wait_idle", "frames 6", "expect building=0", "expect build_outcome=ok", "expect can_play=1"]
         s += ["play", "frames 4", "wait_play_end", "frames 10", "expect playing=0", "layout"] + shot(c, p, "details-ready", size)
+        # T004: the sections live on the Game page's tabs: Game settings, then Advanced (Overview was traced above)
+        s += ["details_tab settings", "frames 6", "expect details_tab=settings", "layout"] + shot(c, p, "details-settings", size)
+        s += ["details_tab advanced", "frames 6", "expect details_tab=advanced", "layout"] + shot(c, p, "details-advanced", size)
+        s += ["details_tab overview", "frames 6", "expect details_tab=overview"]
         s += ["scroll_page end", "frames 4"] + shot(c, p, "details-bottom", size) + ["scroll_page 0", "frames 4"]
         s += ["open_more", "frames 4", "menu_items", "expect menu_has=View build log", "expect menu_has=Manage storage...", "key Escape", "frames 8", "expect page=library"]
         s += ["focus_card 0", "frames 4", "key Menu", "frames 6", "menu_items", "key Escape", "frames 6"]
         return s
     trace, parts = window(c, size, ok_journey, {"FAKE_SCD_WRITE_SAVE": "1"})
     r.trace(f"{size} journey", trace)
-    layouts, menus, library_menus = {}, {}, {}
+    layouts, menus, library_menus, tab_layouts = {}, {}, {}, {}
     programs = {}
     for p in PLATFORMS:
         lines = parts.get(p, [])
         r.ok(bool(lines), f"{p} {size}: the journey ran")
-        layouts[p] = parse_layout(lines)
+        all_layouts = parse_layouts(lines)   # [new Overview, ready Overview, Game settings, Advanced]
+        r.ok(len(all_layouts) == 4, f"{p} {size}: four layouts were traced (Overview twice, Game settings, Advanced): {len(all_layouts)}")
+        tab_layouts[p] = {"overview": all_layouts[1] if len(all_layouts) > 1 else {}, "settings": all_layouts[2] if len(all_layouts) > 2 else {}, "advanced": all_layouts[3] if len(all_layouts) > 3 else {}}
+        layouts[p] = {k: v for tab in tab_layouts[p].values() for k, v in tab.items()}   # names are unique per tab
         item_lines = [l for l in lines if l.startswith("menu_items ") and len(l) > len("menu_items ")]
         menus[p] = item_lines[0][len("menu_items "):].split("|") if item_lines else []
         library_menus[p] = item_lines[1][len("menu_items "):].split("|") if len(item_lines) > 1 else []
@@ -334,7 +354,10 @@ def stage_journey(r, c, size):
     ref = PLATFORMS[0]
     for p in PLATFORMS[1:]:
         r.ok(set(layouts[p]) - {"recording", "variants"} == set(layouts[ref]) - {"recording", "variants"}, f"{p} {size}: the same sections as {ref}: {sorted(layouts[p])} vs {sorted(layouts[ref])}")
-        r.ok(order(layouts[p]) == order(layouts[ref]), f"{p} {size}: the sections are in the same reading order: {order(layouts[p])} vs {order(layouts[ref])}")
+        r.ok({"config", "display", "entry"} <= set(layouts[p]) and {"provenance", "storage"} <= set(layouts[p]) and {"play", "build", "more"} <= set(layouts[p]),
+             f"{p} {size}: the tabs carry their sections (Overview actions; Game settings config / display / entry; Advanced provenance / storage): {sorted(layouts[p])}")
+        for tab in ("overview", "settings", "advanced"):
+            r.ok(order(tab_layouts[p][tab]) == order(tab_layouts[ref][tab]), f"{p} {size}: the {tab} tab's sections are in the same reading order: {order(tab_layouts[p][tab])} vs {order(tab_layouts[ref][tab])}")
         for name in ("play", "build", "more", "config", "provenance"):
             if name in layouts[p] and name in layouts[ref]:
                 a, b = layouts[p][name], layouts[ref][name]
@@ -381,7 +404,7 @@ def stage_persist(r, c, size):
     save_before = (scd_dir / "backup-ram.bin").read_bytes()
     r.ok(len(save_before) == 8192 and save_before[100] == 0x5A, "Sega CD: the play stored the game's save (the program double wrote its mark)")
     def inspect(p):
-        return open_game(p) + ["build", "wait_idle", "frames 6", "expect can_play=1", "scan", "wait_scan", "report", "layout"] + BACK
+        return open_game(p) + ["build", "wait_idle", "frames 6", "expect can_play=1", "scan", "wait_scan", "report", "details_tab advanced", "frames 6", "layout"] + BACK
     trace, parts = window(c, size, inspect)
     r.trace("storage inspection", trace)
     for p in PLATFORMS:

@@ -351,6 +351,15 @@ if(BUILD_TESTING)
   set_property(TEST launcher_gui_navigation_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endif()
 
+# SEG-150-T004: the Game page's tabs, focus and scroll restoration, the failed-state recovery (Retry) and the missing game file (Find game file).
+if(BUILD_TESTING)
+  add_test(NAME launcher_details_tabs_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_details_tabs_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_details_tabs_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_details_tabs_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_details_tabs_gui_test PROPERTY TIMEOUT 600)
+endif()
+
 # SEG-058 corrective delivery: the Input diagnostics classes A-F against real SDL events from virtual joysticks (never a physical-device claim).
 if(BUILD_TESTING)
   add_test(NAME launcher_input_diagnostics_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_input_diagnostics_test.py $<TARGET_FILE:segarecomp-launcher>)
