@@ -129,23 +129,14 @@ def counted(script):
 
 
 def first_run(r, tmp, exe, fake_cli, fake_game, size):
-    # SEG-150-T003: the question is asked when the user first prepares a game (not at start-up), and the empty fresh profile gets the skippable welcome.
+    # SEG-150 round B: no question is asked before the first preparation (the non-deleting cleanup default applies); a fresh profile gets the skippable welcome.
     always = {"SEGARECOMP_GUI_ONBOARDING": "always"}
     p = Profile(tmp, "first-run", exe, fake_cli, fake_game, games=1)
     open_game = press("dpad_down") + seek("card:game0", "dpad_right", 4) + press("south") + press("dpad_right") + expect(page="details")
-    ask = START + expect(modal=0, welcome=0, build_count=0) + open_game + seek("build", "dpad_down", 14) + press("south") + expect(modal=1)
-    script = list(ask)
-    for d in DIRS:  # focus is trapped in the sheet: whatever the direction, it stays on one of its two choices
-        script += press(d)
-    script += expect(modal=1, focus_id="mod_remove")   # the last press was Right
-    script += press("dpad_left") + expect(focus_id="mod_keep") + press("dpad_right") + expect(focus_id="mod_remove") + press("dpad_left") + expect(focus_id="mod_keep")
-    script += press("east") + expect(modal=0, intermediates_choice=0, build_count=0)          # East defers: nothing recorded, the preparation request is dropped
-    script += ["quit"]
-    r.check("first run defer", p.run(script, always, size), counted(script))
-    script = list(ask) + press("dpad_right") + press("south") + expect(modal=0, cleanup_mode="intermediates", intermediates_choice=1) + ["wait_idle", "frames 60"] + expect(build_outcome="ok") + ["quit"]
-    r.check("first run choose", p.run(script, always, size), counted(script))   # the chosen answer starts the preparation that raised the question
-    settings = json.loads((p.lib / "launcher-settings.json").read_text())
-    r.expect(settings.get("cleanup_mode") == "intermediates" and settings.get("intermediates_choice_made") is True, f"first run persisted: {settings}")
+    script = START + expect(modal=0, welcome=0, build_count=0) + open_game + seek("build", "dpad_down", 14) + press("south") + expect(modal=0, cleanup_mode="never", cleanup_policy="never:10:4096")
+    script += ["wait_idle", "frames 60"] + expect(build_outcome="ok") + ["quit"]
+    r.check("first run prepare", p.run(script, always, size), counted(script))   # the preparation starts at once, with no sheet in between
+    r.expect(not (p.lib / "launcher-settings.json").exists(), "the first preparation records nothing in the settings file")
     # a brand-new profile: the welcome (no modal over it), skippable with the pad, and skipping records nothing
     w = Profile(tmp, "welcome", exe, fake_cli, fake_game, games=0)
     script = START + expect(welcome=1, modal=0, library_size=0, intermediates_choice=0) + seek("welcome_skip", "dpad_right", 8) + press("south") + expect(welcome=0, page="library", modal=0, intermediates_choice=0) + ["quit"]

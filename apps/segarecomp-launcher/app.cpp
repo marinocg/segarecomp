@@ -159,7 +159,8 @@ void App::trace(const std::string &line) {
 }
 
 void App::toast(const std::string &text, bool error) {
-  toasts_.push_back({text, error, SDL_GetTicks() + 4200U});
+  trace(std::string("toast=") + (error ? "error " : "") + text);   // test seam: what the user was told
+  toasts_.push_back({text, error, SDL_GetTicks() + (error ? 6500U : 4200U)});
   if (toasts_.size() > 4) toasts_.erase(toasts_.begin());
 }
 
@@ -170,24 +171,59 @@ void App::show_message(const std::string &title, const std::vector<std::string> 
   modal_.lines = lines;
 }
 
+// Saves the library without reporting: the caller words the outcome (an import must not say "added" and "not saved" together). A failure arms the standing
+// library notice; the next successful save (or a probe that finds the folder writable again) clears it.
+bool App::try_save_catalog(std::string *error) {
+  if (catalog_.read_only()) return true;
+  std::string why;
+  if (!catalog_.save(&why)) {
+    library_unwritable_ = "it cannot be written";   // the system's own wording names a local path: it is kept for the trace / the typed callers, not for the notice
+    if (error != nullptr) *error = why.empty() ? library_unwritable_ : why;
+    return false;
+  }
+  library_unwritable_.clear();
+  return true;
+}
+
 void App::save_catalog() {
   std::string error;
-  if (catalog_.read_only()) return;
-  if (!catalog_.save(&error)) toast("The library could not be saved: " + error, true);
+  if (!try_save_catalog(&error)) toast("The library could not be saved: " + error, true);
+}
+
+// The library folder can be created and written (a throw-away file is created and removed in an existing folder). Empty text when it can, else why not.
+std::string App::probe_library_writable() const {
+  std::error_code ec;
+  if (!fs::is_directory(library_dir_, ec)) {
+    fs::create_directories(library_dir_, ec);
+    return ec || !fs::is_directory(library_dir_, ec) ? "it cannot be created" : std::string();
+  }
+  const fs::path probe = library_dir_ / ".write-probe";
+  {
+    std::ofstream out(probe, std::ios::binary | std::ios::trunc);
+    out << 'x';
+    if (!out) return "it cannot be written";
+  }
+  fs::remove(probe, ec);
+  return std::string();
+}
+
+// Standing health of the installation and of the library folder, re-checked every few seconds so a notice disappears once its cause is fixed (no restart).
+void App::refresh_health() {
+  const Uint64 now = SDL_GetTicks();
+  if (health_checked_ != 0 && now - health_checked_ < 3000U) return;
+  health_checked_ = now;
+  if (!layout_.problem.empty()) {   // an installation that was repaired while the window is open
+    const Layout fresh = locate_layout();
+    if (fresh.problem.empty()) {
+      layout_ = fresh;
+      sms_probe_ = std::async(std::launch::async, [lay = layout_] { return sms_optimized_available_blocking(lay); });
+    }
+  }
+  if (!library_unwritable_.empty() && !catalog_.read_only()) library_unwritable_ = probe_library_writable();   // only a standing failure is polled; a healthy library is not
 }
 
 void App::save_settings() {
   if (!save_launcher_settings(settings_, settings_file_)) toast("Settings could not be saved.", true);
-}
-
-bool App::apply_intermediates_choice(bool remove_after_build) {
-  LauncherSettings next = settings_;
-  next.cleanup.mode = remove_after_build ? "intermediates" : "never";
-  next.intermediates_choice_made = true;
-  if (!save_launcher_settings(next, settings_file_)) return false;  // nothing is claimed: the question stays open and can be retried
-  settings_ = next;
-  trace(std::string("onboarding=intermediates_chosen mode=") + settings_.cleanup.mode);
-  return true;
 }
 
 // The viewer (a separate process) owns edits made in its in-game menu and writes the same file. The launcher re-reads it at the two seams where such an
@@ -779,11 +815,19 @@ void App::commit_review(bool prepare) {
   const std::string first_added = added_ids.empty() ? std::string() : added_ids.front();
   review_.clear();
   for (ReviewItem &k : kept) review_.push_back(std::move(k));
-  save_catalog();
+  std::string save_error;
+  const bool saved = try_save_catalog(&save_error);
   request_status_refresh();
   request_scan();
   queue_auto_covers(added_ids);
   trace("import=done added=" + std::to_string(added_ids.size()) + " total=" + std::to_string(total) + " prepare=" + (prepare ? std::to_string(prepare_ids.size()) : std::string("0")));
+  if (!saved && !added_ids.empty()) {   // the truthful outcome only: nothing is claimed as added, nothing starts, the standing notice explains the next step
+    trace("import=not_saved added=" + std::to_string(added_ids.size()));
+    if (review_.empty()) go(Page::library);
+    toast("Could not save the library, so " + std::to_string(added_ids.size()) + (added_ids.size() == 1 ? " game" : " games") + " will be lost when you close Segarecomp.", true);
+    trace("import=save_error " + save_error);
+    return;
+  }
   std::string note = std::to_string(added_ids.size()) + (added_ids.size() == 1 ? " game added" : " games added");
   if (skipped > 0) note += ", " + std::to_string(skipped) + " skipped";
   if (!kept.empty()) note += ", " + std::to_string(kept.size()) + " need attention";
@@ -802,6 +846,7 @@ void App::open_details(const std::string &id) {
   show_fallback_details_ = false;
   show_advanced_ = false;
   details_tab_ = DetailsTab::overview;
+  details_focus_primary_ = std::exchange(open_by_keyboard_, false);   // F10: only a keyboard activation (Return / Space on a card) starts on the primary action; mouse and pad flows are unchanged
   for (float &scroll : details_tab_scroll_) scroll = -1.0F;
   details_scroll_pending_ = -1.0F;
   if (page_ != Page::details) previous_page_ = page_;
@@ -968,27 +1013,13 @@ void App::stop_or_dequeue_build(const std::string &id) {
   else if (is_queued(id)) dequeue_build(id);
 }
 
-bool App::first_run_gate(std::vector<std::string> ids) {
-  if (!ask_intermediates_ || settings_.intermediates_choice_made) return false;
-  if (modal_.kind != Modal::Kind::none) return true;   // the question (or another sheet) is already open: the request waits for nothing and is dropped
-  first_run_pending_ = std::move(ids);
-  modal_ = Modal{};
-  modal_.kind = Modal::Kind::first_run_intermediates;
-  modal_.title = "Keep build intermediates?";
-  modal_.lines = {"Preparing starts right after you choose. Press Esc (or B) to cancel this request and decide later."};
-  trace("onboarding=intermediates_shown");
-  return true;
-}
-
 void App::request_prepare(const std::vector<std::string> &ids) {
-  if (first_run_gate(ids)) return;
   for (const auto &id : ids) request_build(id);
 }
 
 void App::prepare_and_play(const std::string &id) {
   const LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr || entry->platform_id == "sega-cd") return;  // a Sega CD game keeps its own Play flow
-  if (first_run_gate({id})) { first_run_play_ = id; return; }
   if (!can_build(*entry, status_of(id))) return;
   play_after_build_ = id;
   notices_.erase(id);
@@ -1034,7 +1065,6 @@ void App::run_main_action(const std::string &id) {
 
 void App::request_build(const std::string &id) {
   if (is_building(id) || is_queued(id)) return;
-  if (first_run_gate({id})) return;
   if (build_running() || !build_queue_.empty() || maintenance_active() || scd_import_job_.valid()) {
     build_queue_.push(id);
     if (const LibraryEntry *e = catalog_.find_id(id)) toast("Queued: " + e->title() + " (build " + std::to_string(build_count()) + ").");
@@ -1876,7 +1906,12 @@ void App::run_script() {
     else if (key == "picker_chosen") actual = std::to_string(picker_.chosen.size());
     else if (key == "picker_level") actual = !picker_.open ? "-" : (picker_.root.empty() ? "locations" : (picker_.dir == picker_.root ? "root" : "sub"));
     else if (key == "library_size") actual = std::to_string(catalog_.entries().size());
-    else if (key == "welcome") actual = page_ == Page::library && catalog_.entries().empty() && ask_intermediates_ && !welcome_dismissed_ ? "1" : "0";
+    else if (key == "health_notice") actual = health_notice_text_.empty() ? "-" : health_notice_text_;
+    else if (key == "states_clipped") actual = std::to_string(states_clipped_);
+    else if (key == "toasts") actual = toast_shown_ > 0 ? "1" : "0";
+    else if (key == "toast_overlap") actual = std::to_string(toast_overlap_);
+    else if (key == "toast_text") { actual = "-"; if (!toasts_.empty()) actual = toasts_.back().text.substr(0, 40); }
+    else if (key == "welcome") actual = page_ == Page::library && catalog_.entries().empty() && welcome_armed_ && !welcome_dismissed_ ? "1" : "0";
     else if (key == "review") { actual.clear(); for (const auto &i : review_) actual += (actual.empty() ? "" : ",") + std::string(verdict_name(i.verdict)); if (actual.empty()) actual = "-"; }
     else if (key == "review_selected") actual = std::to_string(std::count_if(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.selected; }));
     else if (key == "main_action") { const auto vis = visible_entries(); actual = vis.empty() ? "-" : main_action_label(*vis.front(), status_of(vis.front()->id())); }
@@ -1960,15 +1995,13 @@ int App::run() {
     // SEGARECOMP_GUI_ONBOARDING=1 lets an automated window ask on a genuinely new profile; =always asks regardless of the profile (test seam).
     const char *onboarding_env = SDL_getenv("SEGARECOMP_GUI_ONBOARDING");
     const bool forced = onboarding_env != nullptr, always = forced && std::string(onboarding_env) == "always";
-    if (!settings_.intermediates_choice_made) {
-      if (always || (fresh_profile && (!automated || forced))) {
-        ask_intermediates_ = true;   // the question itself waits for the first preparation (first_run_gate); the empty library shows the welcome meanwhile
-        trace("onboarding=armed");
-      } else {
-        settings_.intermediates_choice_made = true;
-      }
+    // The welcome (a brand-new profile only); a settings file is never rewritten at start, whatever its legacy `intermediates_choice_made` says.
+    if (always || (fresh_profile && (!automated || forced))) {
+      welcome_armed_ = true;
+      trace("onboarding=armed");
     }
   }
+  if (const std::string why = probe_library_writable(); !why.empty()) { library_unwritable_ = why; }
   if (layout_.problem.empty()) sms_probe_ = std::async(std::launch::async, [lay = layout_] { return sms_optimized_available_blocking(lay); });
   if (!catalog_notice_.empty()) toast(catalog_notice_, true);
   autoplay_ = SDL_getenv("SEGARECOMP_GUI_AUTOPLAY") != nullptr;

@@ -457,6 +457,8 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Off (default): after a successful recompile the game's older builds (earlier releases, options or modes) are deleted; the new build stays. Turn it on to keep them, e.g. to switch back to an earlier build without recompiling.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     row_label("After a successful build");
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Default: Never. Files made while preparing a game (generated C, object files, logs) are kept; they only take disk space and the playable game never depends on them. Your game files and saves are never touched by this setting.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
     int mode = 0;
     static const char *modes[] = {"never", "intermediates", "keep_last_n", "soft_limit"};
     for (int i = 0; i < 4; ++i) if (settings_.cleanup.mode == modes[i]) mode = i;

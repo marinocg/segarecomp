@@ -191,7 +191,7 @@ void App::draw_file_picker(float w, float h) {
   else if (picker_.listing.truncated) draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::warn, ImVec2(lx, b.y - footer_h + ctx_.u(2.0F)), "This folder has more files than are shown.");
 
   // ---- bottom bar ----
-  const float bh = ctx_.u(34.0F), by = b.y - ctx_.u(50.0F);
+  const float bh = ctx_.u(34.0F), by = b.y - ctx_.u(70.0F);   // the buttons end 36 px above the border; the hint line below them has its own band (it used to touch both)
   const float bw = (inner - ctx_.u(18.0F)) / 4.0F;
   ImGui::SetCursorScreenPos(ImVec2(lx, by));
   if (button(ctx_, "pk_prev", "Previous page", ImVec2(bw, bh), Style::secondary, picker_.page > 0)) { --picker_.page; picker_.focus_first = true; }
@@ -203,7 +203,7 @@ void App::draw_file_picker(float w, float h) {
   const bool folder_pick = picker_.purpose == "data_folder";
   const std::string ok_label = folder_pick ? "Use this folder" : (picker_.multi ? "Review (" + std::to_string(picker_.chosen.size()) + ")" : "Select");
   const bool ok_button = button(ctx_, "pk_ok", ok_label.c_str(), ImVec2(bw, bh), Style::primary, folder_pick ? !at_roots : !picker_.chosen.empty());
-  draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::dim, ImVec2(lx, b.y - ctx_.u(8.0F) - ctx_.u(11.0F)), picker_.purpose == "data_folder" ? "A: open a folder     B: up / back     LB / RB: page" : "A: open / tick     B: up / back     LB / RB: page");
+  draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::dim, ImVec2(lx, b.y - ctx_.u(26.0F)), picker_.purpose == "data_folder" ? "A: open a folder     B: up / back     LB / RB: page" : "A: open / tick     B: up / back     LB / RB: page");
   const bool back = ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
   if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) && picker_.page > 0) { --picker_.page; picker_.focus_first = true; }
   if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) && picker_.page + 1 < pages) { ++picker_.page; picker_.focus_first = true; }

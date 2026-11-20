@@ -214,6 +214,7 @@ def group_settings():
             p.run([f"settings_tab {tab}", "frames 14"] + S(name) + ["quit"], size, name="cap")
         for name, tab in (("18_settings_general_lower", 0), ("19_input_diagnostics_end", 1), ("20_storage_data_lower", 2), ("24_advanced_about", 3)):
             p.run([f"settings_tab {tab}", "frames 14"] + S(name) + ["quit"], size, {"SEGARECOMP_SHOT_SCROLL": "bottom"}, name="cap")
+        p.run(["settings_tab 0", "frames 14"] + S("18_settings_general_preparation") + ["quit"], size, {"SEGARECOMP_SHOT_SCROLL": "middle"}, name="cap")   # round B: Preparation (the non-deleting default)
         p.run(["frames 10", "page storage", "frames 20", "wait_scan", "frames 10"] + S("23_cleanup") + ["scroll_page end", "frames 6"] + S("23_cleanup_lower") + ["quit"], size, name="cap")
         p.run(["frames 10", "pad_attach", "frames 20", "settings_tab 1", "frames 10"] + S("19_controls_pad_attached") + ["quit"], size, name="cap")
         p.run(["frames 10", "pad_raw_attach", "frames 20", "settings_tab 1", "frames 10"] + S("19_controls_raw_unmapped") + ["quit"], size, name="cap")

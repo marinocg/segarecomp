@@ -12,9 +12,11 @@ namespace ui {
 std::string focus_id;
 bool zone_capture = false;
 ZoneEntry zone_first;
+std::vector<ImRect> button_rects;
 
 bool nav_button(const char *id, ImVec2 size) {
   const bool pressed = ImGui::InvisibleButton(id, size, ImGuiButtonFlags_EnableNav);
+  button_rects.emplace_back(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
   if (zone_capture && zone_first.id == 0 && !(ImGui::GetItemFlags() & ImGuiItemFlags_Disabled)) {
     zone_first.id = ImGui::GetItemID();
     zone_first.window = ImGui::GetCurrentWindow();

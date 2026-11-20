@@ -32,7 +32,13 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         tmp = pathlib.Path(d)
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SEGARECOMP_CACHE_DIR=str(tmp / "cache"),
-                   SEGARECOMP_HOME=str(tmp / "no-package"))
+                   SEGARECOMP_HOME=str(tmp / "package"))
+        # A complete (empty) installation layout: without it the Library carries the standing "Installation incomplete" notice (F8), which moves every card down and is not what this test
+        # measures (scroll and focus restoration). The files are placeholders; nothing here is built.
+        for rel in ("bin/segarecomp", "toolchain/zig", "runtime/platforms/genesis/runtime/runtime.c", "runtime/platforms/genesis/viewer/viewer_sdl3.c", "runtime/platforms/master-system/viewer/sms_viewer_sdl3.c",
+                    "runtime/libs/viewer/src/sv_host.c", "runtime/libs/viewer/src/sv_input_diag.c", "sdl3/include/SDL3/SDL.h"):
+            (tmp / "package" / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp / "package" / rel).write_text("x")
         # Fictional synthetic cartridges (distinct digests): enough cards that the library grid scrolls.
         titles = ["Fictional Nav Test"] + [f"Synthetic Card {i:02d}" for i in range(1, 13)]
         for index, title in enumerate(titles):

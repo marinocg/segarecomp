@@ -346,6 +346,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     const bool stopping = is_stopping(entry.id());
     const bool cancel_pressed = button(ctx_, "cancel_build", stopping ? "Stopping..." : "Cancel", ImVec2(std::min(ctx_.u(180.0F), tw), bh), Style::secondary, !stopping, ctx_.icon("close"));
     note_item_layout("build");
+    claim_primary_focus(!stopping);
     take_details_focus("cancel_build");
     if (cancel_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "build" : std::string(); details_refocus_ttl_ = 30; cancel_build(entry.id()); }
     if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop preparing and discard its partial files. A version prepared earlier is kept.");
@@ -378,11 +379,13 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
         if (scd_locate) scd_browse((info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed) ? "scd_locate_bios" : "scd_locate_cue", entry.id());
         else browse_locate(entry.id());
       }
+      claim_primary_focus(true);
       note_item_layout("play");
       if (ImGui::IsItemHovered()) tooltip(ctx_, scd_locate ? "Point the library at the moved file again (it must be the same file)." : "Point the library at the moved game file again. It must be the same file (same SHA-256).");
       slot_drawn = true;
     } else if (mapper_needed) {
       if (button(ctx_, "choose_mapper", "Choose mapper", ImVec2(std::max(play_w, build_w), bh), Style::primary, !is_queued(entry.id()), ctx_.icon("settings"))) set_details_tab(DetailsTab::settings);
+      claim_primary_focus(!is_queued(entry.id()));
       note_item_layout("play");
       if (ImGui::IsItemHovered()) tooltip(ctx_, "The header never names the cartridge mapper, so it is never guessed. Choose it in Game settings.");
       slot_drawn = true;
@@ -392,6 +395,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       const char *play_label = is_running ? "Playing" : (entry.patches.empty() ? "Play" : (info.variant.empty() ? "Play Vanilla" : "Play Patched"));
       if (split && text_width(ctx_.bold, ctx_.u(13.0F), play_label) + ctx_.u(58.0F) > play_w - chev_w) play_label = is_running ? "Playing" : "Play";   // never a truncated label: the menu and the state line name the version
       if (button(ctx_, "play", play_label, ImVec2(play_w - chev_w, bh), runnable_now ? Style::primary : Style::secondary, can_play(info), ctx_.icon("play"))) play(entry.id());
+      claim_primary_focus(can_play(info));
       note_item_layout("play");
       if (ImGui::IsItemHovered() && !can_play(info)) {
         const std::string why = info.sega_cd ? (info.scd.state == scd::State::ready ? std::string("Wait for the running game or check to finish.") : scd::message(info.scd.refusal, info.scd.detail))
@@ -418,11 +422,13 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       if (queued) {
         // SEG-069-T001: a queued game's build action is its way out of the queue (it owns no process or folder yet).
         const bool unqueue_pressed = button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"));
+        claim_primary_focus(true);
         take_details_focus("unqueue");
         if (unqueue_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "build" : std::string(); details_refocus_ttl_ = 30; dequeue_build(entry.id()); }
       } else {
         const std::string label = prepare_label(entry, info);
         const bool build_pressed = button(ctx_, "build", label.c_str(), ImVec2(build_w, bh), prepare_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon(label == "Prepare & play" ? "play" : "reset"));
+        claim_primary_focus(can_build(entry, info) && prepare_primary);
         take_details_focus("build");
         if (build_pressed) {
           details_refocus_ = ImGui::IsItemFocused() ? "after_build" : std::string(); details_refocus_ttl_ = 30; notices_.erase(entry.id());
@@ -476,6 +482,12 @@ void App::draw_play_variants_menu(const char *popup_id, LibraryEntry &entry, con
     }
   }
   end_menu();
+}
+
+void App::claim_primary_focus(bool enabled) {
+  if (!details_focus_primary_ || !enabled) return;
+  ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());   // the nav ring shows only when the keyboard / pad is the active input
+  details_focus_primary_ = false;
 }
 
 void App::take_details_focus(const char *id) {
@@ -1631,8 +1643,10 @@ void App::draw_details(float w, float h) {
     draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::dim, ImVec2(cx + hw + ctx_.u(12.0F), p.y + ctx_.u(9.0F)), crumb.c_str());
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(42.0F)));
   }
+  draw_health_notice(w);
   const float cover_w = std::clamp(w * 0.2F, ctx_.u(88.0F), ctx_.u(124.0F));
   draw_details_identity(*entry, info, w, cover_w);
+  details_focus_primary_ = false;   // one attempt per opening: a page whose primary action is disabled keeps the sidebar focus
   draw_details_tabs(*entry, w);
   switch (details_tab_) {
     case DetailsTab::overview: draw_details_overview(*entry, info, w); break;

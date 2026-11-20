@@ -39,6 +39,8 @@ bool nav_button(const char *id, ImVec2 size);
 // remembered (id, window and screen rectangle) so the sidebar can move focus into the page with D-pad Right even though ImGui's directional scoring does not
 // cross from a parent window into its (flattened) child reliably.
 struct ZoneEntry { ImGuiID id = 0; ImGuiWindow *window = nullptr; ImRect rect; };
+// Test seam: the rectangles of every button submitted in the current frame (cleared at the start of each frame); a notification is checked against them.
+extern std::vector<ImRect> button_rects;
 extern bool zone_capture;
 extern std::vector<std::string> menu_log;   // test aid (GUI script `menu_items`): the labels of the menu items drawn in the current frame
 extern ZoneEntry zone_first;

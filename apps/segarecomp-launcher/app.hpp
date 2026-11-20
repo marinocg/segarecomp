@@ -137,7 +137,7 @@ struct ReviewItem {
 };
 
 struct Modal {
-  enum class Kind { none, message, plan, remove_entries, clear_library, restore_defaults, first_run_intermediates, install_patch, remove_patch } kind = Kind::none;
+  enum class Kind { none, message, plan, remove_entries, clear_library, restore_defaults, install_patch, remove_patch } kind = Kind::none;
   std::string title;
   std::vector<std::string> lines;
   Plan plan;
@@ -211,6 +211,10 @@ private:
   // ---- data / actions ----
   [[nodiscard]] static long long now_seconds();
   void save_catalog();
+  bool try_save_catalog(std::string *error);   // no toast: the caller words the outcome
+  std::string probe_library_writable() const;
+  void refresh_health();
+  void draw_health_notice(float w);   // the standing notice of Library and Game page: unwritable library, incomplete installation
   void save_settings();
   void request_status_refresh();
   void poll_status_refresh();
@@ -234,8 +238,6 @@ private:
   void draw_main_action(const LibraryEntry &entry, const StatusInfo &info, ImVec2 pos, ImVec2 size);   // inside the card/row's PushID scope
   // Prepare & play: an explicit request that builds (when needed) and then launches ONCE from the revalidated build of that exact request.
   void prepare_and_play(const std::string &id);
-  // The first "Keep build intermediates?" question is asked when the user first prepares a game, not at start-up.
-  bool first_run_gate(std::vector<std::string> ids);
   void request_prepare(const std::vector<std::string> &ids);
   void open_details(const std::string &id);
   // Leaves the contextual Details page for the page it was opened from; the library keeps its search, filters, sort, view, scroll and focus.
@@ -321,8 +323,6 @@ private:
   struct Badge { std::string label; ImU32 color; bool spinner; };
   [[nodiscard]] Badge badge_for(const LibraryEntry &entry, const StatusInfo &info) const;
   void finish_build();
-  // SEG-069-T003: records the first-run answer (Keep -> cleanup.mode "never", Remove -> "intermediates"); false (and nothing changed) when it cannot be saved.
-  bool apply_intermediates_choice(bool remove_after_build);
   // SEG-069-T004: D-pad hops between the sidebar and the page (see ui::ZoneEntry).
   ui::ZoneEntry content_entry_;                  // where Right from the sidebar lands (the first game card on the library page, else the page's first control)
   ui::ZoneEntry card_entry_;                     // first game card/row submitted this frame
@@ -389,6 +389,9 @@ private:
   bool input_seen_gamepad_nav_ = false;
   BusyGuard busy_;
   std::string catalog_notice_;
+  std::string library_unwritable_;   // non-empty while the library folder cannot be written (startup probe or a failed save), cleared when it can again
+  Uint64 health_checked_ = 0;
+  std::string health_notice_text_;   // test seam: titles of the standing notices drawn in the last frame
   // ---- navigation / library view ----
   Page page_ = Page::library;
   Page previous_page_ = Page::library;
@@ -587,9 +590,7 @@ private:
   int import_total_ = 0;
   std::vector<ReviewItem> review_;
   bool welcome_dismissed_ = false;           // session only: a fresh profile's welcome is skipped for this session
-  bool ask_intermediates_ = false;           // the first-run question is armed (profile is new, or a test forced it) and not answered yet
-  std::vector<std::string> first_run_pending_;  // preparation requested before the question was answered; runs after the choice, dropped on defer
-  std::string first_run_play_;               // ... and the one of them that was a Prepare & play
+  bool welcome_armed_ = false;               // the welcome is shown while the library is empty (profile is new, or a test forced it); no question is asked before the first preparation
   std::string play_after_build_;             // Prepare & play in flight: launch this game once its own build succeeds and is revalidated
   // ---- dialog results ----
   struct DialogEvent { std::string purpose, key; std::vector<std::string> paths; std::string error; };
@@ -616,6 +617,8 @@ private:
   Modal modal_;
   struct Toast { std::string text; bool error; Uint64 until; };
   std::vector<Toast> toasts_;
+  int states_clipped_ = 0;   // test seam: state labels of library cards / rows cut by an ellipsis in the last frame (must be 0)
+  int toast_shown_ = 0, toast_overlap_ = 0;   // test seam: toasts drawn this frame, and how many button rectangles they cover (must be 0)
   std::vector<std::string> deferred_paths_;
   // ---- automation (review/test aids, not user features) ----
   bool autoplay_ = false, autoplay_pending_ = false, autoplay_started_ = false, autoplay_build_tried_ = false;
@@ -633,6 +636,7 @@ private:
   SDL_Joystick *script_joy_ = nullptr;
   std::vector<std::pair<int, int>> script_key_up_;  // (frame, scancode) key releases to deliver
   bool shot_modal_done_ = false;
+  bool nav_was_visible_ = false;  // the navigation ring was visible at the end of the previous frame (a keyboard / pad user is navigating)
   bool nav_reset_ = true;  // put keyboard/gamepad focus on the active sidebar entry (start-up and page changes)
   std::string nav_items_;    // the primary navigation entries drawn this frame (script `expect nav_items=`)
   // SEG-069-T004: keyboard/gamepad focus follows the build controls on Details. Build -> Cancel build or Unqueue (the same place), and either -> Build again,
@@ -640,6 +644,9 @@ private:
   std::string details_refocus_;                  // "" | "after_build" | "build"
   int details_refocus_ttl_ = 0;                  // frames the request stays valid (a refused build must not leave it pending)
   void take_details_focus(const char *id);
+  void claim_primary_focus(bool enabled);   // F10: a freshly opened Game page starts on its primary action (Play / Prepare / Retry / Find game file / Cancel), not on the sidebar
+  bool details_focus_primary_ = false;
+  bool open_by_keyboard_ = false;
   // SEG-109-T005 test aids (GUI script `layout`, `scroll_page`, `open_more`, `menu_items`): where the Details page drew its sections and actions this frame, relative to
   // the page's top-left, so three platforms' pages can be compared structurally. Never a user feature.
   struct LayoutRect { std::string name; ImRect rect; };

@@ -187,6 +187,33 @@ if(BUILD_TESTING)
   set_property(TEST launcher_first_run_test PROPERTY TIMEOUT 600)
 endif()
 
+# SEG-150 corrective round B: toasts never cover a control, an unsaved import is reported truthfully, standing notices for an unwritable library / incomplete installation.
+if(BUILD_TESTING)
+  add_test(NAME launcher_notifications_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_notifications_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_notifications_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_notifications_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_notifications_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150 corrective round B: a Game page opened by keyboard starts on its primary action, the welcome's Add game is the first Tab stop, focus after failure / cancel / sheet.
+if(BUILD_TESTING)
+  add_test(NAME launcher_keyboard_focus_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_keyboard_focus_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_keyboard_focus_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_keyboard_focus_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_keyboard_focus_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150 corrective round B: no state label of a library card / row is cut by an ellipsis at the compact (720x520) and the roomier sizes.
+if(BUILD_TESTING)
+  add_test(NAME launcher_compact_layout_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_compact_layout_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_compact_layout_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_compact_layout_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_compact_layout_gui_test PROPERTY TIMEOUT 600)
+endif()
+
 # SEG-150-T003: the Add game review, explicit Add & prepare / Add only, queued and running cancel, Prepare & play (real window, product and game doubles).
 if(BUILD_TESTING)
   add_test(NAME launcher_import_review_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_import_review_gui_test.py

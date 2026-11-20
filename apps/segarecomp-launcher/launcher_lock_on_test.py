@@ -300,11 +300,11 @@ def gamepad_control(tmp, exe, fake_cli, fake_game):
         assert "import=added" in p.cli("--import", p.write("game.bin", cartridge(BASE, 1))).stdout
         press = lambda button: [f"pad {button} down", f"pad {button} up", "frames 6"]
         # D-pad through the expanded tiles: Standard, Lock-on, back to Automatic, each a real gamepad press.
-        steps = ["frames 10", "pad_attach", "frames 20", "focus_card 0", "frames 4", "key Return", "frames 8"] + SETTLE + ["advanced 1", "frames 6"] + press("dpad_right")
+        steps = ["frames 10", "pad_attach", "frames 20", "focus_card 0", "frames 4", "key Return", "frames 8"] + SETTLE + ["advanced 1", "frames 6"]   # round B: Return on a card starts on the page's primary action, already inside the content: no D-pad press is needed to enter it
         steps += ["pad_seek cartridge#0 dpad_down 40"] + press("dpad_right") + ["expect focus_id=cartridge#1"] + press("south") + ["wait_idle", "frames 6", "expect cartridge=standard:manual", "quit"]
         p.run("pad standard " + size, steps)
         expect(p.game().get("mapper_explicit") is True and p.game().get("mapper") == "", f"{size}: the real control saved a manual Standard: {p.game()}")
-        steps = ["frames 10", "pad_attach", "frames 20", "focus_card 0", "frames 4", "key Return", "frames 8"] + SETTLE + ["advanced 1", "frames 6"] + press("dpad_right")
+        steps = ["frames 10", "pad_attach", "frames 20", "focus_card 0", "frames 4", "key Return", "frames 8"] + SETTLE + ["advanced 1", "frames 6"]   # round B: Return on a card starts on the page's primary action, already inside the content: no D-pad press is needed to enter it
         steps += ["pad_seek cartridge#0 dpad_down 40"] + press("dpad_right") + press("dpad_right") + ["expect focus_id=cartridge#2"] + press("south") + ["wait_idle", "frames 6", "expect cartridge=lock_on:manual"]
         steps += press("dpad_left") + press("dpad_left") + ["expect focus_id=cartridge#0"] + press("south") + ["wait_idle", "frames 6", "expect cartridge=lock_on:auto", "quit"]
         p.run("pad select " + size, steps)
