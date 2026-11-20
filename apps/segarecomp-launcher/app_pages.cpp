@@ -20,94 +20,146 @@ namespace {
 
 struct Slice { const char *name; ImU32 color; std::uintmax_t bytes; };
 
+fs::path from_u8(const std::string &text) { return fs::path(std::u8string(reinterpret_cast<const char8_t *>(text.c_str()))); }
+
 } // namespace
 
 // ---------------------------------------------------------------- import
 
 void App::draw_import(float w, float h) {
-  page_header(ctx_, w, "IMPORT ROMS", "Drag and drop ROM files to add them to your library.");
+  page_header(ctx_, w, "ADD GAME", "Choose or drop your game files; you review them before anything is added.");
   draw_import_body(w, h);
+}
+
+// The review of inspected files: what each is (valid / needs a choice / already in the library / cannot be added), then the explicit intent.
+void App::draw_review(float w) {
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const int preparable = review_preparable_count();
+  const int addable = review_count(ReviewItem::Verdict::valid, true) + static_cast<int>(std::count_if(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.selectable() && i.verdict == ReviewItem::Verdict::needs_choice && i.selected; }));
+  heading(ctx_, "REVIEW");
+  paragraph(ctx_, ctx_.bold, ctx_.u(13.0F), col::text, w, review_summary());
+  paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w,
+            "Add & prepare builds a playable version on this computer, one game at a time (several minutes each); you can cancel at any time. Add only keeps the game in your library to prepare later. Nothing starts playing by itself, and your original files are never changed.");
+  if (std::any_of(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.sega_cd; }))
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, w, "Sega CD support is experimental: a successful preparation does not mean the whole game is playable. Your BIOS and disc are only referenced by path, never copied, uploaded or shipped.");
+  ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
+  const float bh = ctx_.u(36.0F);
+  const std::string prepare_label = preparable > 0 ? "Add & prepare (" + std::to_string(preparable) + ")" : std::string("Add & prepare");
+  const std::string add_label = "Add only" + (addable > 0 ? " (" + std::to_string(addable) + ")" : std::string());
+  const float pw = std::max(ctx_.u(170.0F), text_width(ctx_.bold, ctx_.u(13.0F), prepare_label.c_str()) + ctx_.u(56.0F)), aw = std::max(ctx_.u(120.0F), text_width(ctx_.bold, ctx_.u(13.0F), add_label.c_str()) + ctx_.u(40.0F));
+  if (button(ctx_, "review_prepare", prepare_label.c_str(), ImVec2(pw, bh), Style::primary, preparable > 0 && !import_job_.valid() && !scd_inspect_job_.valid())) commit_review(true);
+  ImGui::SameLine(0.0F, ctx_.u(8.0F));
+  if (button(ctx_, "review_add", add_label.c_str(), ImVec2(aw, bh), Style::secondary, addable > 0 && !import_job_.valid() && !scd_inspect_job_.valid())) commit_review(false);
+  ImGui::SameLine(0.0F, ctx_.u(8.0F));
+  if (button(ctx_, "review_decline", "Cancel", ImVec2(ctx_.u(96.0F), bh), Style::ghost)) discard_review();
+  ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+  const float text_x = ctx_.u(46.0F), btn_w = ctx_.u(88.0F);
+  for (std::size_t i = 0; i < review_.size(); ++i) {
+    ReviewItem &item = review_[i];
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const bool dup = item.verdict == ReviewItem::Verdict::duplicate, bad = item.verdict == ReviewItem::Verdict::invalid, choice = item.verdict == ReviewItem::Verdict::needs_choice;
+    const ImU32 color = bad ? col::err : (choice ? col::warn : (dup ? col::info : col::ok));
+    const char *verdict = bad ? "Cannot be added" : (choice ? "Needs a choice" : (dup ? "Already in library" : "Valid"));
+    const float text_w = w - text_x - ctx_.u(14.0F) - (item.entry_id.empty() ? 0.0F : btn_w + ctx_.u(8.0F));
+    const auto lines = wrap(ctx_.regular, ctx_.u(11.5F), text_w, item.message + " " + item.next_action + (item.verdict == ReviewItem::Verdict::valid && !item.prepare_blocked.empty() ? " " + item.prepare_blocked : std::string()));
+    // SEG-150-T005: the BIOS step of a Sega CD disc whose tracks are complete: a note, the remembered BIOS (each with its measured state) and one chooser.
+    const bool bios_step = item.sega_cd && item.scd.disc.verdict == scd::DiscInspection::Verdict::ready && !dup;
+    const float ow = text_w, row_h = ctx_.u(30.0F);
+    std::vector<std::string> note_lines;
+    std::size_t shown = 0;
+    if (bios_step) {
+      note_lines = wrap(ctx_.regular, ctx_.u(11.5F), ow, item.scd.note);
+      shown = std::min<std::size_t>(item.scd.options.size(), 4U);
+    }
+    const float bios_h = bios_step ? ctx_.u(10.0F) + static_cast<float>(note_lines.size()) * ctx_.u(15.0F) + static_cast<float>(shown) * row_h + ctx_.u(40.0F) : 0.0F;
+    const float rh = ctx_.u(34.0F) + static_cast<float>(lines.size()) * ctx_.u(15.0F) + bios_h;
+    card(ctx_, dl, a, ImVec2(a.x + w, a.y + rh));
+    ImGui::PushID(static_cast<int>(i));
+    if (item.selectable()) {
+      ImGui::SetCursorScreenPos(ImVec2(a.x + ctx_.u(10.0F), a.y + ctx_.u(8.0F)));
+      checkbox(ctx_, "sel", "", &item.selected);
+    } else {
+      tone_mark(ctx_, dl, ImVec2(a.x + ctx_.u(22.0F), a.y + ctx_.u(19.0F)), ctx_.u(16.0F), color);
+    }
+    const char *verdict_text = item.sega_cd && choice ? "Needs your BIOS" : verdict;
+    const float verdict_w = text_width(ctx_.bold, ctx_.u(11.5F), verdict_text);
+    draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(a.x + text_x, a.y + ctx_.u(8.0F)), ellipsize(ctx_.bold, ctx_.u(13.0F), text_w - verdict_w - ctx_.u(14.0F), item.title).c_str());
+    draw_text(dl, ctx_.bold, ctx_.u(11.5F), color, ImVec2(a.x + text_x + text_w - verdict_w, a.y + ctx_.u(9.0F)), verdict_text);
+    float ly = a.y + ctx_.u(29.0F);
+    for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text2, ImVec2(a.x + text_x, ly), l.c_str()); ly += ctx_.u(15.0F); }
+    if (!item.entry_id.empty()) {
+      ImGui::SetCursorScreenPos(ImVec2(a.x + w - btn_w - ctx_.u(10.0F), a.y + ctx_.u(8.0F)));
+      if (button(ctx_, "open", "Open", ImVec2(btn_w, ctx_.u(28.0F)), Style::secondary)) open_details(item.entry_id);
+    }
+    if (bios_step) {
+      ly += ctx_.u(6.0F);
+      dl->AddRectFilled(ImVec2(a.x + text_x, ly - ctx_.u(3.0F)), ImVec2(a.x + text_x + ow, ly - ctx_.u(2.0F)), rgba(34, 70, 140));
+      for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), item.scd.note_error ? col::err : (item.scd.chosen ? col::ok : col::warn), ImVec2(a.x + text_x, ly), l.c_str()); ly += ctx_.u(15.0F); }
+      for (std::size_t k = 0; k < shown; ++k) {
+        const ScdReviewBios &o = item.scd.options[k];
+        const bool in_use = item.scd.chosen && item.scd.bios_sha256 == o.profile.sha256;
+        const bool usable = o.state == scd::BiosCheckState::ok;
+        std::string line = (o.profile.region.empty() ? std::string("BIOS (region not stated)") : o.profile.region + " BIOS") + " - " + u8s(from_u8(o.profile.path).filename()) + ": ";
+        line += usable ? "verified just now" + std::string(o.region_conflict ? ", region differs from the disc" : "") : (o.state == scd::BiosCheckState::missing ? "not at its remembered location" : o.state == scd::BiosCheckState::changed ? "the file changed since it was verified" : "cannot be read");
+        const float bx = a.x + text_x + ow - btn_w;
+        draw_text(dl, ctx_.regular, ctx_.u(11.5F), usable ? col::text : col::warn, ImVec2(a.x + text_x, ly + ctx_.u(7.0F)), ellipsize(ctx_.regular, ctx_.u(11.5F), ow - btn_w - ctx_.u(10.0F), line).c_str());
+        ImGui::SetCursorScreenPos(ImVec2(bx, ly + ctx_.u(1.0F)));
+        ImGui::PushID(static_cast<int>(k) + 100);
+        if (in_use) draw_text(dl, ctx_.bold, ctx_.u(11.5F), col::ok, ImVec2(bx + ctx_.u(14.0F), ly + ctx_.u(7.0F)), "In use");
+        else if (usable) { if (button(ctx_, "use", "Use", ImVec2(btn_w, ctx_.u(26.0F)), Style::secondary)) scd_review_use_profile(i, k); }
+        else if (button(ctx_, "locate", "Locate...", ImVec2(btn_w, ctx_.u(26.0F)), Style::secondary)) scd_browse("scd_review_bios", o.profile.sha256 + ":" + item.path);
+        ImGui::PopID();
+        ly += row_h;
+      }
+      ImGui::SetCursorScreenPos(ImVec2(a.x + text_x, ly + ctx_.u(2.0F)));
+      const char *choose_label = item.scd.chosen || !item.scd.options.empty() ? "Choose another BIOS..." : "Choose BIOS...";
+      if (button(ctx_, "choose_bios", choose_label, ImVec2(std::max(ctx_.u(190.0F), text_width(ctx_.bold, ctx_.u(13.0F), choose_label) + ctx_.u(56.0F)), ctx_.u(30.0F)), item.scd.chosen ? Style::secondary : Style::primary, true, ctx_.icon("folder")))
+        scd_browse("scd_review_bios", ":" + item.path);
+    }
+    ImGui::PopID();
+    ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(5.0F)));
+    ImGui::Dummy(ImVec2(w, 1));
+  }
 }
 
 void App::draw_import_body(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool two = w > ctx_.u(700.0F) && import_results_.empty();  // once there are results they take the guide's place
-  const float steps_w = two ? ctx_.u(240.0F) : 0.0F, gap = ctx_.u(18.0F);
-  const float drop_w = two ? w - steps_w - gap : w;
-  const ImVec2 top = ImGui::GetCursorScreenPos();
-  draw_drop_zone(drop_w, h, true);
-  draw_scd_import(drop_w);  // SEG-078-T002: Sega CD games are a BIOS + a disc + an imported program, never a single dropped file
-  const float after_drop = ImGui::GetCursorScreenPos().y;
-  float side_bottom = top.y;
-  if (two) {
-    const ImVec2 a(top.x + drop_w + gap, top.y);
-    const char *titles[] = {"Add ROMs", "We identify the game", "Build and play"};
-    const char *texts[] = {"Drag and drop files here, or choose them manually. Several at once are fine.", "The platform comes from the ROM header; the same game is recognised by its SHA-256.", "Adding does not build. Open a game, choose Build, then Play."};
-    float y = a.y;
-    for (int i = 0; i < 3; ++i) {
-      const auto lines = wrap(ctx_.regular, ctx_.u(11.5F), steps_w - ctx_.u(70.0F), texts[i]);
-      const float ch = ctx_.u(42.0F) + static_cast<float>(lines.size()) * ctx_.u(15.0F);
-      card(ctx_, dl, ImVec2(a.x, y), ImVec2(a.x + steps_w, y + ch));
-      step_circle(ctx_, dl, ImVec2(a.x + ctx_.u(26.0F), y + ctx_.u(26.0F)), ctx_.u(13.0F), i + 1);
-      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(a.x + ctx_.u(52.0F), y + ctx_.u(10.0F)), titles[i]);
-      float ly = y + ctx_.u(28.0F);
-      for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text2, ImVec2(a.x + ctx_.u(52.0F), ly), l.c_str()); ly += ctx_.u(15.0F); }
-      y += ch + ctx_.u(8.0F);
-    }
-    const auto info_lines = wrap(ctx_.regular, ctx_.u(11.5F), steps_w - ctx_.u(52.0F), "ROM files are added by reference. Segarecomp doesn't modify or upload your original files.\n\nZIP archives are read without modification. Segarecomp extracts the ROM into your local library so it can be built and played.");
-    const float ih = static_cast<float>(info_lines.size()) * ctx_.u(15.0F) + ctx_.u(22.0F);
-    card(ctx_, dl, ImVec2(a.x, y), ImVec2(a.x + steps_w, y + ih), false, false, rgba(10, 30, 66));
-    icon_image(dl, ctx_.icon("info"), ImVec2(a.x + ctx_.u(12.0F), y + ctx_.u(12.0F)), ctx_.u(20.0F), col::info);
-    float ly = y + ctx_.u(11.0F);
-    for (const auto &l : info_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text, ImVec2(a.x + ctx_.u(42.0F), ly), l.c_str()); ly += ctx_.u(15.0F); }
-    side_bottom = y + ih;
-  }
-  ImGui::SetCursorScreenPos(ImVec2(top.x, std::max(after_drop, side_bottom) + ctx_.u(10.0F)));
-  if (!two) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "1. Add ROMs   2. Review the detected system   3. Choose Build, then Play. ROM files are added by reference and never modified or uploaded; from a ZIP archive the ROM is extracted into your local library.");
-  checkbox(ctx_, "import_build", "Also build each newly added game (can take several minutes per game)", &import_build_option_);
-  paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "Off by default. Duplicates are detected by the ROM's SHA-256: the same game found in another place only adds a second tracked location.");
+  if (!review_.empty()) draw_review(w);
+  draw_drop_zone(w, h, true);
   if (import_job_.valid()) {
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     const ImVec2 p = ImGui::GetCursorScreenPos();
     spinner(ctx_, dl, ImVec2(p.x + ctx_.u(8.0F), p.y + ctx_.u(9.0F)), ctx_.u(7.0F), col::info);
-    draw_text(dl, ctx_.regular, ctx_.u(13.0F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y), ("Reading ROMs: " + std::to_string(import_done_.load()) + " of " + std::to_string(import_total_)).c_str());
+    draw_text(dl, ctx_.regular, ctx_.u(13.0F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y), ("Checking files: " + std::to_string(import_done_.load()) + " of " + std::to_string(import_total_)).c_str());
     ImGui::Dummy(ImVec2(w, ctx_.u(24.0F)));
   }
-  if (!import_results_.empty()) {
-    ImGui::Dummy(ImVec2(1, ctx_.u(10.0F)));
-    heading(ctx_, "RESULTS");
-    for (std::size_t i = 0; i < import_results_.size(); ++i) {
-      const ImportItem &item = import_results_[i];
-      const ImVec2 a = ImGui::GetCursorScreenPos();
-      const float rh = ctx_.u(46.0F);
-      const bool ok = item.outcome == "added", dup = item.outcome == "duplicate" || item.outcome == "location";
-      const ImU32 color = ok ? col::ok : (dup ? col::info : col::err);
-      card(ctx_, dl, a, ImVec2(a.x + w, a.y + rh));
-      icon_image(dl, ctx_.icon(ok ? "check" : (dup ? "info" : "warning")), ImVec2(a.x + ctx_.u(12.0F), a.y + (rh - ctx_.u(16.0F)) * 0.5F), ctx_.u(16.0F), color);
-      const std::string title = item.title.empty() ? fs::path(std::u8string(reinterpret_cast<const char8_t *>(item.path.c_str()))).filename().string() : item.title;
-      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(a.x + ctx_.u(40.0F), a.y + ctx_.u(7.0F)), ellipsize(ctx_.bold, ctx_.u(13.0F), w - ctx_.u(220.0F), title).c_str());
-      draw_text(dl, ctx_.regular, ctx_.u(11.5F), color, ImVec2(a.x + ctx_.u(40.0F), a.y + ctx_.u(25.0F)), ellipsize(ctx_.regular, ctx_.u(11.5F), w - ctx_.u(220.0F), item.message).c_str());
-      if (!item.entry_id.empty()) {
-        ImGui::SetCursorScreenPos(ImVec2(a.x + w - ctx_.u(114.0F), a.y + (rh - ctx_.u(28.0F)) * 0.5F));
-        ImGui::PushID(static_cast<int>(i));
-        if (button(ctx_, "open", "Open", ImVec2(ctx_.u(100.0F), ctx_.u(28.0F)), Style::secondary)) open_details(item.entry_id);
-        ImGui::PopID();
-      }
-      ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(5.0F)));
-      ImGui::Dummy(ImVec2(w, 1));
-    }
-    if (button(ctx_, "clear_results", "Clear results", ImVec2(ctx_.u(140.0F), ctx_.u(28.0F)), Style::ghost)) import_results_.clear();
+  if (scd_inspect_job_.valid()) {   // SEG-150-T005: the disc check reads and hashes the track files; Cancel is always available
+    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    spinner(ctx_, dl, ImVec2(p.x + ctx_.u(8.0F), p.y + ctx_.u(15.0F)), ctx_.u(7.0F), col::info);
+    draw_text(dl, ctx_.regular, ctx_.u(13.0F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y + ctx_.u(7.0F)), scd_inspect_cancel_.load() ? "Cancelling the disc check..." : "Checking the disc and its track files...");
+    ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(300.0F), p.y));
+    if (button(ctx_, "scd_inspect_cancel", "Cancel", ImVec2(ctx_.u(90.0F), ctx_.u(30.0F)), Style::ghost, !scd_inspect_cancel_.load())) scd_inspect_cancel_ = true;
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(34.0F)));
+    ImGui::Dummy(ImVec2(w, 1));
   }
+  if (review_.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "Files are added by reference: Segarecomp never modifies or uploads your originals. A ZIP archive is read without modification and its game is copied into your local library. The same game is recognised by its content, so adding it twice never creates a copy. A Sega CD disc is added from its .cue (the track files stay beside it) together with your own BIOS image: both stay where they are.");
 }
 
 // ---------------------------------------------------------------- storage
 
 void App::draw_storage(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool maintenance = maintenance_running_ || busy_.any_activity();
+  const bool maintenance = maintenance_active() || busy_.any_activity();
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    page_header(ctx_, w, "STORAGE MANAGEMENT", "Analyze disk usage and clean up generated files.");
+    page_header(ctx_, w, "STORAGE & DATA", "Review disk usage and clean up generated files. ROMs, saves, recordings and mod approvals are never removed.");
+    {  // Back: Storage lives under Settings (or the library bulk action that opened it); Escape / B do the same
+      const char *back_label = storage_return_ == Page::settings ? "Settings" : "Library";
+      const float bw = text_width(ctx_.bold, ctx_.u(13.0F), back_label) + ctx_.u(46.0F);
+      ImGui::SetCursorScreenPos(ImVec2(p.x + w - ctx_.u(180.0F) - bw - ctx_.u(8.0F), p.y - ctx_.u(6.0F)));
+      if (button(ctx_, "storage_back", back_label, ImVec2(bw, ctx_.u(32.0F)), Style::ghost, true, ctx_.icon("back"))) { go(storage_return_); return; }
+    }
     int sort = storage_sort_;
     ImGui::SetCursorScreenPos(ImVec2(p.x + w - ctx_.u(180.0F), p.y - ctx_.u(6.0F)));
     if (dropdown(ctx_, "st_sort", {"Sort by: Name", "Sort by: Size (large first)"}, &sort, ctx_.u(180.0F))) storage_sort_ = sort;
@@ -291,7 +343,7 @@ void App::draw_storage(float w, float h) {
   ImGui::SetCursorScreenPos(ImVec2(ao.x, ao.y + static_cast<float>(arows) * (ah + ctx_.u(10.0F)) + ctx_.u(4.0F)));
   ImGui::Dummy(ImVec2(w, 1));
   checkbox(ctx_, "keep_logs", "When cleaning failed builds, keep build.log and status.json", &keep_failed_logs_);
-  if (maintenance) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, w, maintenance_running_ ? "A cleanup is running..." : "Cleanup is unavailable while a build or game is running.");
+  if (maintenance) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, w, move_.run_job.valid() || move_.cleanup_job.valid() ? "A data location change is running..." : (maintenance_running_ ? "A cleanup is running..." : "Cleanup is unavailable while a build or game is running."));
   paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Cleanup only touches the Segarecomp cache. Your ROM files, covers, screenshots and the library itself are never deleted. Playing never cleans anything. Cache: " + u8s(cache_dir_));
   paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "ROMs extracted from ZIP archives are stored separately from generated builds, in the library's roms folder. Clearing build caches or keeping only metadata does not remove those ROM copies.");
 }
@@ -299,16 +351,17 @@ void App::draw_storage(float w, float h) {
 // ---------------------------------------------------------------- settings
 
 void App::draw_settings(float full_w, float h) {
-  page_header(ctx_, full_w, "SETTINGS", "Configure the library, metadata, builds and in-game defaults.");
+  page_header(ctx_, full_w, "SETTINGS", "General, appearance and controls, storage and data, and advanced options.");
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const bool narrow = full_w < ctx_.u(760.0F);
   const float tabs_w = narrow ? 0.0F : ctx_.u(176.0F), tab_gap = narrow ? 0.0F : ctx_.u(18.0F);
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   {
-    static const char *labels[] = {"Library", "Metadata & Covers", "Build & Runtime", "Video & Controls", "Input Diagnostics", "Advanced / About"};
-    static const char *icons[] = {"library", "folder", "settings", "video", "controller", "info"};
-    if (narrow) dropdown(ctx_, "settings_section", {labels[0], labels[1], labels[2], labels[3], labels[4], labels[5]}, &settings_tab_, full_w);
-    for (int i = 0; !narrow && i < 6; ++i) {
+    static const char *labels[] = {"General", "Appearance & Controls", "Storage & Data", "Advanced"};
+    static const char *icons[] = {"library", "controller", "storage", "settings"};
+    settings_tab_ = std::clamp(settings_tab_, 0, 3);
+    if (narrow) dropdown(ctx_, "settings_section", {labels[0], labels[1], labels[2], labels[3]}, &settings_tab_, full_w);
+    for (int i = 0; !narrow && i < 4; ++i) {
       ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + static_cast<float>(i) * ctx_.u(40.0F)));
       ImGui::PushID(i);
       const bool pressed = ui::nav_button("##tab", ImVec2(tabs_w, ctx_.u(34.0F)));
@@ -327,18 +380,17 @@ void App::draw_settings(float full_w, float h) {
   }
   ImGui::SetCursorScreenPos(ImVec2(origin.x + tabs_w + tab_gap, origin.y + (narrow ? ctx_.u(44.0F) : 0.0F)));
   const float w_outer = full_w - tabs_w - tab_gap - ctx_.u(18.0F);
-  // Settings groups are titled section cards, the same card language as the Details page (Input Diagnostics draws its own structure).
-  const bool carded = settings_tab_ != 4;
-  const float sec_pad = carded ? ctx_.u(16.0F) : 0.0F;
+  // Settings groups are titled section cards, the same card language as the Details page (the Input diagnostics block of Appearance & Controls draws its own structure).
+  const float sec_pad = ctx_.u(16.0F);
   const float w = w_outer - 2 * sec_pad;
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   // SEG-069-T004: the tab column and the body are navigated by explicit hops (Right from a tab enters the body, Left at its left edge returns to the tab):
   // ImGui scores a move from the parent into a child clipped, which skips the body's controls. The page-level entry stays the first tab.
   const ui::ZoneEntry outer_first = ui::zone_first;
   ui::zone_first = ui::ZoneEntry{};
-  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
+  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y)), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);   // minus the spacing after the child: the page itself must not overflow
   settings_body_window_ = ImGui::GetCurrentWindow();
-  if (SDL_getenv("SEGARECOMP_SHOT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid, never a persisted preference
+  if (const char *shot_scroll = SDL_getenv("SEGARECOMP_SHOT_SCROLL")) ImGui::SetScrollY(std::string(shot_scroll) == "middle" ? ImGui::GetScrollMaxY() * 0.5F : ImGui::GetScrollMaxY());  // review aid, never a persisted preference
   dl = ImGui::GetWindowDrawList();
   ImVec2 sec_origin(0, 0);
   bool sec_open = false;
@@ -370,6 +422,7 @@ void App::draw_settings(float full_w, float h) {
   const auto next_row = [&] { ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ctx_.u(14.0F) - ImGui::GetScrollX(), ImGui::GetCursorScreenPos().y + ctx_.u(6.0F))); };
   (void)next_row;
   if (settings_tab_ == 0) {
+    // ---------------------------------------------------------------- General
     section("LIBRARY");
     row_label("View");
     int view = settings_.view == "list" ? 1 : 0;
@@ -396,12 +449,42 @@ void App::draw_settings(float full_w, float h) {
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(28.0F)));
     if (button(ctx_, "recheck", "Re-check", ImVec2(ctx_.u(110.0F), ctx_.u(28.0F)), Style::secondary)) { request_status_refresh(); toast("Checking ROM links..."); }
     ImGui::Dummy(ImVec2(1, ctx_.u(14.0F)));
-    section("RESET");
-    if (button(ctx_, "restore", "Restore launcher defaults", ImVec2(ctx_.u(260.0F), ctx_.u(32.0F)), Style::secondary)) { modal_ = Modal{}; modal_.kind = Modal::Kind::restore_defaults; modal_.title = "Restore launcher defaults?"; }
-    if (w > ctx_.u(480.0F)) ImGui::SameLine(0.0F, ctx_.u(10.0F));
-    if (button(ctx_, "clear_lib", "Clear library...", ImVec2(ctx_.u(200.0F), ctx_.u(32.0F)), Style::danger, !catalog_.entries().empty())) { modal_ = Modal{}; modal_.kind = Modal::Kind::clear_library; modal_.title = "Clear the whole library?"; }
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Restoring defaults and clearing the library are separate actions. Neither deletes ROMs or build folders.");
-  } else if (settings_tab_ == 1) {
+    section("PREPARATION");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Adding a game never starts a build by itself: in Add game you choose Add & prepare or Add only each time (a prepared game can always be rebuilt from its page). Your choices for what happens after a build finishes:");
+    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+    row_label("Recompiling");
+    if (toggle(ctx_, "keep_old", "Keep old build artifacts when a game is recompiled", &settings_.keep_old_artifacts, ctx_.u(420.0F))) save = true;
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Off (default): after a successful recompile the game's older builds (earlier releases, options or modes) are deleted; the new build stays. Turn it on to keep them, e.g. to switch back to an earlier build without recompiling.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+    row_label("After a successful build");
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Default: Never. Files made while preparing a game (generated C, object files, logs) are kept; they only take disk space and the playable game never depends on them. Your game files and saves are never touched by this setting.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
+    int mode = 0;
+    static const char *modes[] = {"never", "intermediates", "keep_last_n", "soft_limit"};
+    for (int i = 0; i < 4; ++i) if (settings_.cleanup.mode == modes[i]) mode = i;
+    if (segmented(ctx_, "cleanup", {"Never", "Remove intermediates", "Keep last N builds", "Soft limit and ask"}, &mode, 0.0F)) { settings_.cleanup.mode = modes[mode]; save = true; soft_limit_exceeded_ = false; if (mode >= 2) request_scan(); }
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    if (settings_.cleanup.mode == "keep_last_n") {
+      row_label("Keep newest");
+      if (button(ctx_, "n_minus", "-", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { settings_.cleanup.keep_last_n = std::max(1, settings_.cleanup.keep_last_n - 1); save = true; }
+      ImGui::SameLine(0.0F, ctx_.u(6.0F));
+      const ImVec2 p = ImGui::GetCursorScreenPos();
+      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(p.x, p.y + ctx_.u(7.0F)), (std::to_string(settings_.cleanup.keep_last_n) + " games").c_str());
+      ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(90.0F), p.y));
+      if (button(ctx_, "n_plus", "+", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { settings_.cleanup.keep_last_n = std::min(500, settings_.cleanup.keep_last_n + 1); save = true; }
+      ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    } else if (settings_.cleanup.mode == "soft_limit") {
+      row_label("Soft limit");
+      if (button(ctx_, "l_minus", "-", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { settings_.cleanup.soft_limit_mb = std::max(256LL, settings_.cleanup.soft_limit_mb - 512); save = true; }
+      ImGui::SameLine(0.0F, ctx_.u(6.0F));
+      const ImVec2 p = ImGui::GetCursorScreenPos();
+      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(p.x, p.y + ctx_.u(7.0F)), (std::to_string(settings_.cleanup.soft_limit_mb) + " MiB").c_str());
+      ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(110.0F), p.y));
+      if (button(ctx_, "l_plus", "+", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { settings_.cleanup.soft_limit_mb += 512; save = true; }
+      ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    }
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), settings_.cleanup.mode == "keep_last_n" ? col::warn : col::text2, w, describe_policy(settings_.cleanup));
+    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     section("METADATA & COVERS");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Titles come from the ROM header or file name and can be renamed on the game's page. Covers are images you choose or download from Libretro; the placeholder is shown otherwise.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
@@ -436,46 +519,20 @@ void App::draw_settings(float full_w, float h) {
     row_label("Offline");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w - lw, "Everything else works offline. Covers are stored in the covers folder next to the library and survive cleanups; removing a cover returns the placeholder.");
     if (button(ctx_, "open_covers", "Open covers folder", ImVec2(ctx_.u(200.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) { std::error_code ec; fs::create_directories(covers_dir_, ec); SDL_OpenURL(("file://" + u8s(covers_dir_)).c_str()); }
-  } else if (settings_tab_ == 2) {
-    section("BUILD & RUNTIME");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Compatibility, Optimized, the Genesis region, the Master System mapper and H-interrupt discovery are chosen per game on its page (they are part of what a build is). Toolchain: bundled Zig " SEGARECOMP_ZIG_VERSION ".");
-    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    row_label("Master System Optimized");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), sms_optimized_available_ ? col::ok : col::dim, w - lw, sms_optimized_available_ ? "Offered by this product build. It is the default for Master System games." : (sms_probe_.valid() ? "Checking..." : "Not offered by this product build: Master System games build as Compatibility."));
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
-    row_label("Recompiling");
-    if (toggle(ctx_, "keep_old", "Keep old build artifacts when a game is recompiled", &settings_.keep_old_artifacts, ctx_.u(420.0F))) save = true;
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Off (default): after a successful recompile the game's older builds (earlier releases, options or modes) are deleted; the new build stays. Turn it on to keep them, e.g. to switch back to an earlier build without recompiling.");
-    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
-    section("AFTER A SUCCESSFUL BUILD");
-    int mode = 0;
-    static const char *modes[] = {"never", "intermediates", "keep_last_n", "soft_limit"};
-    for (int i = 0; i < 4; ++i) if (settings_.cleanup.mode == modes[i]) mode = i;
-    if (segmented(ctx_, "cleanup", {"Never", "Remove intermediates", "Keep last N builds", "Soft limit and ask"}, &mode, 0.0F)) { settings_.cleanup.mode = modes[mode]; save = true; soft_limit_exceeded_ = false; if (mode >= 2) request_scan(); }
+    section("RESET");
+    if (button(ctx_, "restore", "Restore launcher defaults", ImVec2(ctx_.u(260.0F), ctx_.u(32.0F)), Style::secondary)) { modal_ = Modal{}; modal_.kind = Modal::Kind::restore_defaults; modal_.title = "Restore launcher defaults?"; }
+    if (w > ctx_.u(480.0F)) ImGui::SameLine(0.0F, ctx_.u(10.0F));
+    if (button(ctx_, "clear_lib", "Clear library...", ImVec2(ctx_.u(200.0F), ctx_.u(32.0F)), Style::danger, !catalog_.entries().empty())) { modal_ = Modal{}; modal_.kind = Modal::Kind::clear_library; modal_.title = "Clear the whole library?"; }
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Restoring defaults and clearing the library are separate actions. Neither deletes ROMs or build folders.");
+  } else if (settings_tab_ == 1) {
+    // ---------------------------------------------------------------- Appearance & Controls
+    section("INTERFACE");
+    row_label("Size");
+    if (toggle(ctx_, "compact", "Compact mode (smaller cards and text)", &settings_.compact, ctx_.u(420.0F))) save = true;
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "The interface scale follows the display's scale and pixel density automatically; Compact mode is the only size choice, and it also applies to the Library.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    if (settings_.cleanup.mode == "keep_last_n") {
-      row_label("Keep newest");
-      if (button(ctx_, "n_minus", "-", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { settings_.cleanup.keep_last_n = std::max(1, settings_.cleanup.keep_last_n - 1); save = true; }
-      ImGui::SameLine(0.0F, ctx_.u(6.0F));
-      const ImVec2 p = ImGui::GetCursorScreenPos();
-      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(p.x, p.y + ctx_.u(7.0F)), (std::to_string(settings_.cleanup.keep_last_n) + " games").c_str());
-      ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(90.0F), p.y));
-      if (button(ctx_, "n_plus", "+", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { settings_.cleanup.keep_last_n = std::min(500, settings_.cleanup.keep_last_n + 1); save = true; }
-      ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    } else if (settings_.cleanup.mode == "soft_limit") {
-      row_label("Soft limit");
-      if (button(ctx_, "l_minus", "-", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { settings_.cleanup.soft_limit_mb = std::max(256LL, settings_.cleanup.soft_limit_mb - 512); save = true; }
-      ImGui::SameLine(0.0F, ctx_.u(6.0F));
-      const ImVec2 p = ImGui::GetCursorScreenPos();
-      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(p.x, p.y + ctx_.u(7.0F)), (std::to_string(settings_.cleanup.soft_limit_mb) + " MiB").c_str());
-      ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(110.0F), p.y));
-      if (button(ctx_, "l_plus", "+", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { settings_.cleanup.soft_limit_mb += 512; save = true; }
-      ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    }
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), settings_.cleanup.mode == "keep_last_n" ? col::warn : col::text2, w, describe_policy(settings_.cleanup));
-    if (button(ctx_, "go_storage", "Manage Storage", ImVec2(ctx_.u(200.0F), ctx_.u(32.0F)), Style::secondary, true, ctx_.icon("storage"))) go(Page::storage);
-  } else if (settings_tab_ == 3) {
-    section("VIDEO & CONTROLS DEFAULTS");
+    section("WINDOW & PICTURE");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, "SDL_Renderer presentation; SDL_GPU is not implemented. Audio uses the default output device; device selection is not implemented.");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "These are the same settings as the game's in-game menu (Esc), stored in the viewer settings file. They apply the next time a game starts. Widescreen choices here are only the defaults for games that have none of their own; changing them in a game's menu saves them for that game only. Key and gamepad bindings are remapped in the game's Controls page.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
@@ -560,7 +617,8 @@ void App::draw_settings(float full_w, float h) {
     if (w > ctx_.u(360.0F)) ImGui::SameLine(0.0F, ctx_.u(18.0F));
     if (toggle(ctx_, "fp", "FPS counter", &fps, ctx_.u(190.0F))) { v.show_fps = fps; v_changed = true; }
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    row_label("Audio");
+    section("AUDIO");
+    row_label("Volume");
     if (button(ctx_, "vol_minus", "-", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { viewer_settings_.audio.volume = std::max(0, viewer_settings_.audio.volume - 10); v_changed = true; }
     ImGui::SameLine(0.0F, ctx_.u(6.0F));
     { const ImVec2 p = ImGui::GetCursorScreenPos(); draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(p.x, p.y + ctx_.u(7.0F)), ("Volume " + std::to_string(viewer_settings_.audio.volume) + "%").c_str()); ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(120.0F), p.y)); }
@@ -569,27 +627,131 @@ void App::draw_settings(float full_w, float h) {
     if (toggle(ctx_, "mu", "Mute", &muted, ctx_.u(120.0F))) { viewer_settings_.audio.muted = muted; v_changed = true; }
     ImGui::Dummy(ImVec2(1, ctx_.u(10.0F)));
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Volume is playback gain only; the console's generated sound is unchanged. Genesis has two ports (Player 2: I/K/J/L, U/O/P, Right Shift); Master System Player 2 uses the same keys. The Master System Pause button is P, separate from the menu key (Esc).");
-    if (button(ctx_, "viewer_defaults", "Restore video defaults", ImVec2(ctx_.u(240.0F), ctx_.u(30.0F)), Style::secondary)) { SvVideoSettings keep = v; sv_video_defaults(&v); v.window_w = keep.window_w; v.window_h = keep.window_h; viewer_settings_.audio.volume = 100; viewer_settings_.audio.muted = 0; v_changed = true; }
+    if (button(ctx_, "viewer_defaults", "Restore video and audio defaults", ImVec2(ctx_.u(300.0F), ctx_.u(30.0F)), Style::secondary)) { SvVideoSettings keep = v; sv_video_defaults(&v); v.window_w = keep.window_w; v.window_h = keep.window_h; viewer_settings_.audio.volume = 100; viewer_settings_.audio.muted = 0; v_changed = true; }
     if (v_changed) viewer_settings_changed();
-  } else if (settings_tab_ == 4) {
-    draw_input_diagnostics(w);
-  } else {
-    section("ABOUT");
+    section("KEYBOARD & GAMEPAD");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "In the launcher: arrow keys or the D-pad move; Enter or A (South) activates; Esc or B (East) goes back; Tab switches between the sidebar and the page. A controller needs no setup to navigate; if one is not recognised, use Input diagnostics below.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "In a game, Esc (or Back / Home on a controller) opens the pause menu, where key and button assignments are changed; they are stored in the same viewer settings file as the defaults above.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    section_end();
+    draw_input_diagnostics(w_outer);
+  } else if (settings_tab_ == 2) {
+    // ---------------------------------------------------------------- Storage & Data
+    if (!settings_scan_asked_) { settings_scan_asked_ = true; request_scan(); }   // one bounded read-only measurement per visit
+    if (!inventory_asked_) { inventory_asked_ = true; refresh_completed_move(); request_inventory(); }   // SEG-150-T009: the size of the data by class, measured once per visit (read-only)
+    const EffectivePaths ep = effective_paths(layout_);
     const float vw = w - lw;
+    section("DISK USAGE");
+    label_value(ctx_, lw, vw, "Built games", report_valid_ ? format_bytes(report_.builds_total()) : (scanning_ ? "measuring..." : "not measured"));
+    label_value(ctx_, lw, vw, "Compiler cache", report_valid_ ? format_bytes(report_.zig_cache + report_.scd_object_cache) + (report_.zig_truncated ? " or more" : "") : (scanning_ ? "measuring..." : "not measured"));
+    label_value(ctx_, lw, vw, "Library data", report_valid_ ? format_bytes(report_.catalog_and_covers) : (scanning_ ? "measuring..." : "not measured"));
+    label_value(ctx_, lw, vw, "Free disk space", report_valid_ ? format_bytes(report_.free_bytes) : (scanning_ ? "measuring..." : "not measured"), report_valid_ && report_.free_bytes < (2ULL << 30U) ? col::err : col::text);
+    if (report_valid_ && report_.free_bytes < (2ULL << 30U)) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::err, w, "Low disk space: builds need room for generated code and objects.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    section("CLEAN UP");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Clear the shared compiler cache, remove build intermediates or old builds, clean failed or abandoned builds, or keep a game's metadata only. Every plan shows what it will delete and the bytes it frees before anything happens, and nothing is deleted without your confirmation.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::ok, w, "Never touched by ordinary cleanup, and never at your current location: your ROM and disc files, save data and save states, input recordings, covers, mod approvals, the library and these settings. The only exception is the optional removal of already-moved, verified old copies at a previous location after a data move.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
+    if (button(ctx_, "go_storage", "Review usage and clean up", ImVec2(ctx_.u(250.0F), ctx_.u(32.0F)), Style::primary, true, ctx_.icon("storage"))) go(Page::storage);
+    if (settings_focus_storage_) {   // Back from the cleanup page lands here again
+      settings_focus_storage_ = false;
+      ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+      ImGuiContext &fg = *ImGui::GetCurrentContext();
+      fg.NavCursorVisible = true;
+      fg.NavHighlightItemUnderNav = true;
+    }
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    section("DATA LOCATION");
+    // SEG-150-T009 (ADR 0317): where the data lives, how much of it is kept versus rebuildable, and the control that moves it (disabled, with the reason, under an environment override).
+    const bool env_governed = ep.cache_overridden || ep.library_overridden;
+    const bool unavailable_saved = ep.saved_location_unavailable && !env_governed;
+    const bool move_active = data_move_running();
+    if (recovery_.action != RecoveryAction::none && recovery_.action != RecoveryAction::kept_completed && !recovery_dismissed_) {   // shown once, never blocking
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), recovery_.action == RecoveryAction::completed ? col::ok : col::warn, w, recovery_message_text(recovery_.action));
+      if (button(ctx_, "dm_notice_ok", "OK", ImVec2(ctx_.u(90.0F), ctx_.u(28.0F)), Style::secondary)) recovery_dismissed_ = true;
+      if (recovery_.action == RecoveryAction::journal_invalid) {
+        ImGui::SameLine(0.0F, ctx_.u(8.0F));
+        if (button(ctx_, "dm_notice_forget", "Forget this record", ImVec2(ctx_.u(190.0F), ctx_.u(28.0F)), Style::secondary, !move_active)) {
+          if (dismiss_completed_migration(ep.bootstrap_file)) { recovery_ = RecoveryResult{}; toast("The unreadable record was forgotten. Your data was not touched."); }
+          else toast("The record could not be removed.", true);
+        }
+      }
+      ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    }
+    if (!ep.data_location_notice.empty())   // a saved location that is not in use: unavailable drive, damaged or newer file, shadowed by the environment
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, ep.data_location_notice);
+    if (restart_needed_for_move())
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, "Restart required: your data was moved to " + u8s(read_bootstrap(ep.bootstrap_file).root) + " and that location is used from the next start. Until then this window keeps using the previous location.");
+    label_value(ctx_, lw, vw, "Data folder", u8s(ep.cache) + (ep.cache_overridden ? "  - set by SEGARECOMP_CACHE_DIR" : ep.relocated ? "  - a location you chose" : "  - default location"));
+    label_value(ctx_, lw, vw, "Library (kept)", u8s(ep.library) + (ep.library_overridden ? "  - set by SEGARECOMP_LIBRARY_DIR" : "  - library folder inside the data folder"));
+    if (inventory_valid_ && !env_governed && inventory_.areas.size() > 0) {
+      std::size_t kept_files = inventory_.items.size();
+      label_value(ctx_, lw, vw, "Your data", std::to_string(kept_files) + (kept_files == 1 ? " file, " : " files, ") + format_bytes(inventory_.durable_bytes) + "  - catalog, settings, covers, mods, saves, recordings, ROMs unpacked from ZIPs; this is what a move copies");
+      label_value(ctx_, lw, vw, "Rebuildable", format_bytes(inventory_.regenerable_bytes) + "  - prepared games, compiler cache and downloads; a move does not copy them");
+    } else if (!env_governed) {
+      label_value(ctx_, lw, vw, "Your data", inventory_job_.valid() ? "measuring..." : "not measured", col::dim);
+    }
+    label_value(ctx_, lw, vw, "Installation", u8s(ep.home) + (ep.home_overridden ? "  - set by SEGARECOMP_HOME" : "  - where this program runs from") + (layout_.problem.empty() ? "" : "  (incomplete)"), layout_.problem.empty() ? col::text : col::err);
+    if (!layout_.problem.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::err, w, layout_.problem);
+    ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
+    dm_change_state_ = move_active ? "progress" : ((env_governed || unavailable_saved) ? "disabled" : "enabled");
+    if (env_governed) {
+      const PlainText t = refusal_text(ep.cache_overridden ? MigrationRefusal::env_override_cache : MigrationRefusal::env_override_library);
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, t.what);
+      paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w, t.next);
+    } else if (unavailable_saved) {
+      const PlainText t = refusal_text(MigrationRefusal::saved_location_unavailable);
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, t.what);
+      paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w, t.next);
+    } else {
+      paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w, "Move your library, saves, mods and settings to another folder or drive. You see exactly what moves and what it needs first, your current data is kept, and nothing is deleted automatically.");
+    }
+    if (button(ctx_, "dm_change", move_active ? "Show progress" : "Change data location...", ImVec2(ctx_.u(250.0F), ctx_.u(32.0F)), Style::secondary, (env_governed || unavailable_saved) ? false : true, ctx_.icon("folder"))) go(Page::data_location);
+    if (settings_focus_move_) {   // Back from the data-location page lands here again
+      settings_focus_move_ = false;
+      ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+      ImGuiContext &fg = *ImGui::GetCurrentContext();
+      fg.NavCursorVisible = true;
+      fg.NavHighlightItemUnderNav = true;
+    }
+    if (completed_move_.present) {
+      ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+      paragraph(ctx_, ctx_.bold, ctx_.u(12.5F), col::text, w, "Previous location");
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, completed_move_.source.empty() ? "A record of an earlier data move cannot be used." : "Your data was moved. The old folder " + u8s(completed_move_.source) + " still holds the previous copy. Segarecomp never removes it by itself.");
+      if (button(ctx_, "dm_prev_clean", "Clean up the previous location...", ImVec2(ctx_.u(300.0F), ctx_.u(30.0F)), Style::secondary, !completed_move_.source.empty() && !move_active)) { go(Page::data_location); data_cleanup_open(); }
+      ImGui::SameLine(0.0F, ctx_.u(8.0F));
+      if (button(ctx_, "dm_prev_keep", "Keep it", ImVec2(ctx_.u(110.0F), ctx_.u(30.0F)), Style::ghost, !move_active)) data_dismiss_previous();
+    }
+    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "A change takes effect the next time Segarecomp starts. SEGARECOMP_CACHE_DIR and SEGARECOMP_LIBRARY_DIR, when set in the environment that starts the launcher, always take precedence over any chosen location.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    if (button(ctx_, "open_cache", "Open data folder", ImVec2(ctx_.u(190.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) SDL_OpenURL(("file://" + u8s(ep.cache)).c_str());
+    ImGui::SameLine(0.0F, ctx_.u(8.0F));
+    if (button(ctx_, "open_lib", "Open library folder", ImVec2(ctx_.u(200.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) { std::error_code ec; fs::create_directories(ep.library, ec); SDL_OpenURL(("file://" + u8s(ep.library)).c_str()); }
+  } else {
+    // ---------------------------------------------------------------- Advanced
+    const float vw = w - lw;
+    section("BUILD & RUNTIME");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Compatibility, Optimized, the Genesis region, the Master System mapper and H-interrupt discovery are chosen per game on its page (they are part of what a build is). Toolchain: bundled Zig " SEGARECOMP_ZIG_VERSION ".");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    row_label("Master System Optimized");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), sms_optimized_available_ ? col::ok : col::dim, w - lw, sms_optimized_available_ ? "Offered by this product build. It is the default for Master System games." : (sms_probe_.valid() ? "Checking..." : "Not offered by this product build: Master System games build as Compatibility."));
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    section("ABOUT");
     label_value(ctx_, lw, vw, "Version", std::string("Segarecomp ") + SEGARECOMP_LAUNCHER_VERSION);
     label_value(ctx_, lw, vw, "Toolchain", std::string("Zig ") + SEGARECOMP_ZIG_VERSION + " (bundled, used only to compile generated C)");
     label_value(ctx_, lw, vw, "SDL", std::to_string(SDL_VERSIONNUM_MAJOR(SDL_GetVersion())) + "." + std::to_string(SDL_VERSIONNUM_MINOR(SDL_GetVersion())) + "." + std::to_string(SDL_VERSIONNUM_MICRO(SDL_GetVersion())) + ", renderer " + (SDL_GetRendererName(renderer_) != nullptr ? SDL_GetRendererName(renderer_) : "?"));
     label_value(ctx_, lw, vw, "Host", host_description());
-    section("WHERE THINGS LIVE");
     label_value(ctx_, lw, vw, "Installation", u8s(layout_.root) + (layout_.problem.empty() ? "" : "  (incomplete)"), layout_.problem.empty() ? col::text : col::err);
-    label_value(ctx_, lw, vw, "Cache (disposable)", u8s(cache_dir_) + "  - games/ and zig-cache/ only");
-    label_value(ctx_, lw, vw, "Library (kept)", u8s(library_dir_) + "  - library.json, covers, settings, ROMs extracted from ZIPs");
     label_value(ctx_, lw, vw, "Viewer settings", u8s(viewer_settings_file_));
-    if (!layout_.problem.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::err, w, layout_.problem);
-    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    if (button(ctx_, "open_cache", "Open cache folder", ImVec2(ctx_.u(190.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) SDL_OpenURL(("file://" + u8s(cache_dir_)).c_str());
-    ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    if (button(ctx_, "open_lib", "Open library folder", ImVec2(ctx_.u(200.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) { std::error_code ec; fs::create_directories(library_dir_, ec); SDL_OpenURL(("file://" + u8s(library_dir_)).c_str()); }
+    {   // the license texts the installation ships (MPL-2.0 and the bundled components'): shown with their folder only when it exists
+      std::error_code ec;
+      const fs::path licenses = layout_.root / "licenses";
+      const bool have_licenses = fs::is_directory(licenses, ec);
+      label_value(ctx_, lw, vw, "Licenses", have_licenses ? u8s(licenses) : "not found in this installation (a development build does not ship them)", have_licenses ? col::text : col::dim);
+      ImGui::Dummy(ImVec2(1, ctx_.u(2.0F)));
+      if (button(ctx_, "open_licenses", "Open licenses folder", ImVec2(ctx_.u(210.0F), ctx_.u(30.0F)), Style::secondary, have_licenses, ctx_.icon("folder"))) SDL_OpenURL(("file://" + u8s(licenses)).c_str());
+    }
     section("DIAGNOSTICS");
     label_value(ctx_, lw, vw, "Library", std::to_string(catalog_.entries().size()) + " game(s), schema " + std::to_string(Catalog::schema_version) + (catalog_.read_only() ? " (read-only: written by a newer release)" : ""));
     if (!catalog_notice_.empty()) label_value(ctx_, lw, vw, "Notice", catalog_notice_, col::warn);
@@ -599,9 +761,11 @@ void App::draw_settings(float full_w, float h) {
       request_status_refresh();
       toast(added == 0 ? "No new verifiable builds found in the cache." : "Adopted " + std::to_string(added) + " game(s) from the cache.");
     }
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Errors are shown where they happen (build failures on the game's page with the sanitized log). Nothing is sent anywhere; Segarecomp makes no network requests.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Logs: a build failure is shown on the game's page with its sanitized log (Game > Advanced); every build keeps its build.log inside its folder in the cache (Open cache folder, under Storage & Data). Nothing about you is sent anywhere: the only network use is the optional Libretro cover lookup described under General.");
   }
+
   section_end();
+  if (settings_tab_ != 2) settings_focus_storage_ = false;   // the pending focus return belongs to the Storage & Data group only
   ImGui::EndChild();
   settings_body_entry_ = ui::zone_first;   // where Right from a tab lands: the body's first control
   ui::zone_first = outer_first;

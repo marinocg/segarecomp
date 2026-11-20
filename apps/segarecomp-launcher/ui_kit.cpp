@@ -1,5 +1,6 @@
 #include "ui_kit.hpp"
 
+#include "library_view.hpp"
 #include "pixel_assets.hpp"
 
 #include <algorithm>
@@ -11,9 +12,11 @@ namespace ui {
 std::string focus_id;
 bool zone_capture = false;
 ZoneEntry zone_first;
+std::vector<ImRect> button_rects;
 
 bool nav_button(const char *id, ImVec2 size) {
   const bool pressed = ImGui::InvisibleButton(id, size, ImGuiButtonFlags_EnableNav);
+  button_rects.emplace_back(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
   if (zone_capture && zone_first.id == 0 && !(ImGui::GetItemFlags() & ImGuiItemFlags_Disabled)) {
     zone_first.id = ImGui::GetItemID();
     zone_first.window = ImGui::GetCurrentWindow();
@@ -27,8 +30,6 @@ void note_focus(const char *id, int index = -1) {
   if (ImGui::IsItemFocused()) focus_id = index < 0 ? std::string(id) : std::string(id) + "#" + std::to_string(index);
 }
 } // namespace
-
-ImFont *bold_font = nullptr;
 
 SDL_Texture *Ctx::asset(const std::string &relative) {
   const auto found = textures.find(relative);
@@ -46,19 +47,16 @@ void Ctx::release() {
   textures.clear();
 }
 
-float text_width(ImFont *font, float px, const char *text) { return font->CalcTextSizeA(px, FLT_MAX, 0.0F, text).x + (font == bold_font ? 0.6F : 0.0F); }
+float text_width(ImFont *font, float px, const char *text) { return font->CalcTextSizeA(px, FLT_MAX, 0.0F, text).x; }
 
 std::string ellipsize(ImFont *font, float px, float max_px, const std::string &text) {
   if (text_width(font, px, text.c_str()) <= max_px) return text;
   std::string cut = text;
-  while (cut.size() > 1 && text_width(font, px, (cut + "...").c_str()) > max_px) cut.pop_back();
+  while (cut.size() > 1 && text_width(font, px, (cut + "...").c_str()) > max_px) launcher::utf8_pop_back(cut);
   return cut + "...";
 }
 
-void draw_text(ImDrawList *dl, ImFont *font, float px, ImU32 color, ImVec2 pos, const char *text) {
-  dl->AddText(font, px, pos, color, text);
-  if (font == bold_font) dl->AddText(font, px, ImVec2(pos.x + 0.6F, pos.y), color, text);
-}
+void draw_text(ImDrawList *dl, ImFont *font, float px, ImU32 color, ImVec2 pos, const char *text) { dl->AddText(font, px, pos, color, text); }
 
 void draw_text_bold(Ctx &ctx, ImDrawList *dl, float px, ImU32 color, ImVec2 pos, const char *text) { draw_text(dl, ctx.bold, px, color, pos, text); }
 
@@ -104,6 +102,20 @@ void focus_ring(Ctx &ctx, ImDrawList *dl, ImVec2 a, ImVec2 b) {
 void icon_image(ImDrawList *dl, SDL_Texture *tex, ImVec2 a, float size, ImU32 tint) {
   if (tex == nullptr) return;
   dl->AddImage(reinterpret_cast<ImTextureID>(tex), a, ImVec2(a.x + size, a.y + size), ImVec2(0, 0), ImVec2(1, 1), tint);
+}
+
+const char *tone_icon(ImU32 color) {
+  if (color == col::ok) return "check";
+  if (color == col::warn || color == col::err) return "warning";
+  if (color == col::info) return "info";
+  return nullptr;
+}
+
+void tone_mark(Ctx &ctx, ImDrawList *dl, ImVec2 c, float size, ImU32 color) {
+  const char *name = tone_icon(color);
+  SDL_Texture *tex = name != nullptr ? ctx.icon(name) : nullptr;
+  if (tex != nullptr) icon_image(dl, tex, ImVec2(c.x - size * 0.5F, c.y - size * 0.5F), size, color);
+  else dl->AddCircleFilled(c, size * 0.3F, color);
 }
 
 void pill(Ctx &ctx, ImDrawList *dl, ImVec2 pos, const char *text, ImU32 color, SDL_Texture *icon, float px, ImVec2 *size_out) {

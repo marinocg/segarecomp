@@ -8,6 +8,7 @@ go back, and the page changes accordingly. Game Details is contextual (not in th
 usage: launcher_gui_navigation_test.py <path to the Segarecomp executable>
 """
 import os
+import shutil
 import pathlib
 import subprocess
 import struct
@@ -32,7 +33,18 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         tmp = pathlib.Path(d)
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SEGARECOMP_CACHE_DIR=str(tmp / "cache"),
-                   SEGARECOMP_HOME=str(tmp / "no-package"))
+                   SEGARECOMP_HOME=str(tmp / "package"))
+        # A complete (empty) installation layout: without it the Library carries the standing "Installation incomplete" notice (F8), which moves every card down and is not what this test
+        # measures (scroll and focus restoration). The files are placeholders; nothing here is built.
+        suffix = ".exe" if sys.platform == "win32" else ""  # locate_layout() requires segarecomp/zig with the platform's executable suffix; without it Windows shows the notice
+        for rel in ("bin/segarecomp" + suffix, "toolchain/zig" + suffix, "runtime/platforms/genesis/runtime/runtime.c", "runtime/platforms/genesis/viewer/viewer_sdl3.c", "runtime/platforms/master-system/viewer/sms_viewer_sdl3.c",
+                    "runtime/libs/viewer/src/sv_host.c", "runtime/libs/viewer/src/sv_input_diag.c", "sdl3/include/SDL3/SDL.h"):
+            (tmp / "package" / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp / "package" / rel).write_text("x")
+        # The CLI placeholder is the project's own fake_segarecomp (built next to the launcher), like the other GUI tests: a text file named segarecomp.exe is not something Windows can start.
+        fake_cli = pathlib.Path(exe).resolve().parent / ("fake_segarecomp" + suffix)
+        if fake_cli.is_file():
+            shutil.copy(fake_cli, tmp / "package" / "bin" / ("segarecomp" + suffix))
         # Fictional synthetic cartridges (distinct digests): enough cards that the library grid scrolls.
         titles = ["Fictional Nav Test"] + [f"Synthetic Card {i:02d}" for i in range(1, 13)]
         for index, title in enumerate(titles):
@@ -76,17 +88,20 @@ def main():
             return ok
 
         assertions = 0
-        # The primary navigation is exactly the four application areas; Game Details is not one of them.
-        assertions += check("primary navigation", ["expect nav_items=Library,Import ROMs,Storage,Settings", "expect page=library", "quit"], 2)
+        # The primary navigation is two destinations and one primary action; Game Details and Storage are not entries.
+        assertions += check("primary navigation", ["expect nav_items=Library,Settings,Add game", "expect page=library", "quit"], 2)
         # keyboard: Tab focuses the active entry, arrows walk the sidebar, Return activates, Escape returns to the library
-        assertions += check("keyboard", ["expect page=library", "key Tab", "frames 2", "key Down", "frames 2", "expect focus=Import ROMs", "key Down", "frames 2",
-                                         "expect focus=Storage", "key Down", "frames 2", "expect focus=Settings", "key Down", "frames 2", "expect focus=Settings",
-                                         "key Up", "frames 2", "key Return", "frames 6", "expect page=storage", "key Escape", "frames 6", "expect page=library", "quit"], 7)
+        assertions += check("keyboard", ["expect page=library", "key Tab", "frames 2", "expect focus=Library", "key Down", "frames 2", "expect focus=Settings", "key Return", "frames 6",
+                                         "expect page=settings", "key Escape", "frames 6", "expect page=library", "key Tab", "frames 2", "key Down", "frames 2", "key Down", "frames 2",
+                                         "expect focus=Add game", "key Down", "frames 2", "expect focus=Add game", "key Return", "frames 6", "expect page=import", "key Escape", "frames 6",
+                                         "expect page=library", "quit"], 9)
+        # Storage is reached from Settings (its Storage & Data group) and Back / Escape return to that group, not to the library
+        assertions += check("storage under settings", ["page settings", "frames 6", "expect page=settings", "page storage", "frames 6", "expect page=storage", "key Escape", "frames 6",
+                                                       "expect page=settings", "expect settings_tab=2", "key Escape", "frames 6", "expect page=library", "quit"], 5)
         # gamepad: a virtual SDL gamepad (hot-plugged after start) does the same with the D-pad, South and East
         pad = ["expect page=library", "pad_attach", "frames 20"]
-        for _ in range(2):
-            pad += ["pad dpad_down down", "pad dpad_down up", "frames 3"]
-        pad += ["expect focus=Storage", "pad south down", "pad south up", "frames 10", "expect page=storage", "pad east down", "pad east up", "frames 10", "expect page=library", "quit"]
+        pad += ["pad dpad_down down", "pad dpad_down up", "frames 3"]
+        pad += ["expect focus=Settings", "pad south down", "pad south up", "frames 10", "expect page=settings", "pad east down", "pad east up", "frames 10", "expect page=library", "quit"]
         assertions += check("gamepad", pad, 4)
         # Details is contextual: a card opens it with Return, Back (Escape) returns to the SAME library state - search, filter, view, focus.
         state = ["key F", "frames 4", "text Synthetic Card 0", "frames 6", "expect search=Synthetic Card 0", "expect visible=9", "key Tab", "frames 2",
@@ -94,10 +109,10 @@ def main():
                  "expect page=details", "expect detail=Synthetic Card 03", "key Escape", "frames 8", "expect page=library", "expect search=Synthetic Card 0",
                  "expect platform_filter=1", "expect view=list", "expect visible=9", "expect focus=card:Synthetic Card 03", "quit"]
         assertions += check("details round trip (keyboard)", state, 11)
-        # the same with a gamepad: South opens the focused card, East goes back; the grid's scroll position is restored too
-        state = ["pad_attach", "frames 20", "scroll_library 270", "frames 6", "expect library_scroll=270", "focus_card 6", "frames 4", "expect focus=card:Synthetic Card 06",
+        # the same with a gamepad: South opens the focused card, East goes back; the grid's scroll position is restored too  # T003: the offset keeps the taller card 06 fully in view, so focusing it does not scroll and the restored offset is the one that was set
+        state = ["pad_attach", "frames 20", "scroll_library 330", "frames 6", "expect library_scroll=330", "focus_card 6", "frames 4", "expect focus=card:Synthetic Card 06",
                  "pad south down", "pad south up", "frames 10", "expect page=details", "expect detail=Synthetic Card 06", "pad east down", "pad east up", "frames 10",
-                 "expect page=library", "expect library_scroll=270", "expect focus=card:Synthetic Card 06", "quit"]
+                 "expect page=library", "expect library_scroll=330", "expect focus=card:Synthetic Card 06", "quit"]
         assertions += check("details round trip (gamepad)", state, 7)
         # Mouse: the buttons drawn over a card (favorite star, Play) stay put while the pointer moves onto them, and a click on them is theirs:
         # it must not fall through to the card (which would open Details).
@@ -111,7 +126,7 @@ def main():
         assertions += check("context menu", state, 3)
         # Responsive screen smoke: render the actual widgets, including the nested settings
         # scroller and confirmation sheet, at both supported sizes. No builds or guest runs.
-        pages = ["library", "list", "details:0", "details:1", "import", "storage", "storage-modal"] + [f"settings{i}" for i in range(6)]
+        pages = ["library", "list", "details:0", "details:1", "import", "storage", "storage-modal"] + [f"settings{i}" for i in range(4)]
         for size in ("1080x740", "720x520"):
             for page in pages:
                 shot = tmp / "responsive.bmp"

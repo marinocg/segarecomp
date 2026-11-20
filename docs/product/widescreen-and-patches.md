@@ -9,7 +9,7 @@ This page is the entry point. Each section links the detailed document. Status o
 ## 1. Generic widescreen (built in, no patch needed)
 
 Widescreen is a **presentation** feature of the viewer. It never changes the game, its timing, its audio, a recording or the native picture; the console is still emulated at its own resolution.
-The settings are in the pause menu (Quick Settings and Video & Display) and in the launcher's Settings > Video & Controls, and are saved in `viewer-settings.cfg`.
+The settings are in the pause menu (Quick Settings and Video & Display) and in the launcher's Settings > Appearance & Controls, and are saved in `viewer-settings.cfg`.
 
 | Setting | Values | What it does |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ Virtual sprites (ADR 0303, 0306, 0307) do not change this. The viewer now presen
 
 ### Installing a verified patch
 
-See [From install to a patched game](../../README.md#install-a-verified-patch-main-only-genesis) in the README for the short walk-through.
+See [From install to a patched game](../../README.md#install-a-verified-mod-or-patch-main-only-genesis) in the README for the short walk-through.
 
 ## 4. Writing your own provider
 

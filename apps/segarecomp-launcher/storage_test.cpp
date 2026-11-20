@@ -4,6 +4,8 @@
 #include "storage.hpp"
 
 #include <fstream>
+#include <map>
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -553,7 +555,86 @@ int main() {
     expect(candidates.size() == 1 && candidates[0] == entry('2').id(), "eviction skips favorites and active games");
     policy.mode = "never";
     expect(policy_eviction_candidates(p, rep, policy, {}).empty(), "no eviction unless the policy is on");
-    expect(describe_policy(policy).find("Nothing is cleaned automatically") == 0, "policy text states exactly what happens");
+    expect(describe_policy(policy).find("Finished builds are not removed to save space") == 0 && describe_policy(policy).find("Recompiling") != std::string::npos, "policy text states exactly what happens, without contradicting the recompile option");
+  }
+  {  // SEG-150-T007 (Settings > Storage & Data): EVERY cleanup plan, executed on a library that holds the player's own data, reclaims exactly the bytes its preview named
+     // and leaves saves, save states, input recordings, mod approvals, covers, the catalog, settings and the ROM byte-identical.
+    const fs::path root = dir / "protected_matrix";
+    fs::remove_all(root);
+    const fs::path pcache = root / "cache", plibrary = root / "library", prom = root / "roms" / "keep.md";
+    fs::create_directories(pcache / "games");
+    spit(prom, "ROM BYTES");
+    spit(plibrary / "covers" / "c.png", "cover");
+    spit(plibrary / "saves" / "genesis" / digest('d') / "vanilla" / "cartridge.srm", std::string(512, 's'));
+    spit(plibrary / "saves" / "genesis" / digest('d') / "vanilla" / "states" / "quick.sgstate", std::string(900, 'q'));
+    spit(plibrary / "saves" / "master-system" / digest('e') / "sega" / "states" / "slot-1.sgstate", std::string(300, 'm'));
+    spit(plibrary / "sega-cd" / std::string(16, 'c') / "backup-ram.bin", std::string(64, 'b'));
+    spit(plibrary / "sega-cd" / std::string(16, 'c') / "recordings" / "take1.inputrec", std::string(40, 'r'));
+    spit(plibrary / "recordings" / "genesis" / digest('d') / "take2.inputrec", std::string(40, 'r'));
+    spit(plibrary / "patches" / digest('p') / "approval.json", "{\"approved\":true}");
+    spit(plibrary / "launcher-settings.json", "{\"schema\":1}");
+    Catalog pcatalog(plibrary / "library.json");
+    pcatalog.load();
+    LibraryEntry pa = entry('a'); pa.rom_paths = {prom.string()}; pa.current_build_key = key32('1'); pa.builds = {{key32('2'), 1, "compatibility", "", "", ""}, {key32('1'), 2, "compatibility", "", "", ""}};
+    LibraryEntry pb = entry('b'); pb.current_build_key = key32('3'); pb.builds = {{key32('3'), 3, "compatibility", "", "", ""}};
+    pcatalog.entries() = {pa, pb};
+    make_build(pcache / "games" / key32('1'));
+    make_build(pcache / "games" / key32('2'), 500);
+    make_build(pcache / "games" / key32('3'));
+    spit(pcache / "games" / (key32('1') + ".failed") / "build.log", std::string(70, 'f'));
+    spit(pcache / "games" / (key32('9') + ".partial") / "obj" / "y.o", std::string(40, 'p'));
+    spit(pcache / "zig-cache" / "o" / "blob", std::string(900, 'z'));
+    expect(pcatalog.save(), "the protected-data fixture catalog is saved");
+    const auto snapshot = [&](const fs::path &base) {   // every file under `base` with its bytes: what a cleanup must not change
+      std::map<std::string, std::string> files;
+      std::error_code ec;
+      if (fs::exists(base, ec))
+        for (const auto &it : fs::recursive_directory_iterator(base, ec))
+          if (it.is_regular_file(ec)) { std::ifstream in(it.path(), std::ios::binary); std::ostringstream text; text << in.rdbuf(); files[fs::relative(it.path(), base).string()] = text.str(); }
+      return files;
+    };
+    const auto library_before = snapshot(plibrary), rom_before = snapshot(root / "roms");
+    expect(library_before.size() >= 10, "the fixture holds the player's data");
+    const std::string ids_a = pa.id(), ids_b = pb.id();
+    const auto run_plan = [&](const std::string &name, const std::function<Plan(const StorageReport &, const BusyGuard &, const fs::path &)> &make) {
+      const fs::path copy = root / ("run_" + name);
+      fs::remove_all(copy);
+      fs::create_directories(copy);
+      fs::copy(pcache, copy / "cache", fs::copy_options::recursive);
+      BusyGuard guard;
+      const StorageReport rep = scan_storage(pcatalog, copy / "cache", plibrary);
+      const Plan plan = make(rep, guard, copy / "cache");
+      std::uintmax_t sum = 0;
+      for (const auto &item : plan.items) sum += item.bytes;
+      expect(!plan.items.empty() && plan.bytes == sum, name + ": the preview's byte total is the sum of its items");
+      for (const auto &item : plan.items)
+        expect(is_within(copy / "cache", item.path) && !is_within(plibrary, item.path) && !is_within(root / "roms", item.path), name + ": every planned path is inside the disposable cache");
+      expect(guard.try_begin_maintenance(), name + ": maintenance lock");
+      const ExecResult result = execute_plan(plan, copy / "cache", guard, plibrary);
+      guard.end_maintenance();
+      expect(result.ok() && result.bytes_freed == plan.bytes, name + ": exactly the previewed bytes were freed");
+      expect(snapshot(plibrary) == library_before && snapshot(root / "roms") == rom_before, name + ": saves, save states, recordings, approvals, covers, catalog, settings and the ROM are untouched");
+      fs::remove_all(copy);
+    };
+    run_plan("zig", [&](const StorageReport &r, const BusyGuard &g, const fs::path &cache_copy) { return plan_zig_cache(r, cache_copy, g); });
+    run_plan("intermediates", [&](const StorageReport &r, const BusyGuard &g, const fs::path &) { return plan_intermediates(r, {ids_a, ids_b}, g); });
+    run_plan("superseded", [&](const StorageReport &r, const BusyGuard &g, const fs::path &) { return plan_superseded(r, {ids_a}, g); });
+    run_plan("failed_keep_logs", [&](const StorageReport &r, const BusyGuard &g, const fs::path &) { return plan_failed_partial(r, true, g); });
+    run_plan("failed_all", [&](const StorageReport &r, const BusyGuard &g, const fs::path &) { return plan_failed_partial(r, false, g); });
+    run_plan("archive", [&](const StorageReport &r, const BusyGuard &g, const fs::path &) { return plan_archive(r, {ids_a, ids_b}, g); });
+    run_plan("remove_with_builds", [&](const StorageReport &r, const BusyGuard &g, const fs::path &) { return plan_remove_from_library(r, {ids_a}, true, g); });
+    {   // a forged plan that names the player's data is refused outright
+      BusyGuard guard;
+      Plan forged;
+      forged.kind = PlanKind::intermediates;
+      forged.items = {{plibrary / "saves" / "genesis" / digest('d') / "vanilla" / "cartridge.srm", 512, false}, {plibrary / "patches" / digest('p'), 18, true}, {plibrary / "recordings", 40, true}, {prom, 9, false}};
+      forged.bytes = 512 + 18 + 40 + 9;
+      expect(guard.try_begin_maintenance(), "maintenance lock (forged plan)");
+      const ExecResult refused = execute_plan(forged, pcache, guard, plibrary);
+      guard.end_maintenance();
+      expect(refused.removed == 0 && !refused.ok() && snapshot(plibrary) == library_before && snapshot(root / "roms") == rom_before, "a forged plan naming saves, approvals, recordings or the ROM removes nothing");
+    }
+    fs::remove_all(root);
   }
   fs::remove_all(dir);
   if (failures != 0) return 1;

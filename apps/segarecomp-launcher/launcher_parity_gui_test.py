@@ -79,21 +79,26 @@ def sha(data):
 
 
 def scd_fixture(root, fake_program):
-    """A synthetic BIOS-like image, a two-track disc and the statement of a program double built for exactly these two."""
+    """A synthetic BIOS-like image, a project-authored two-track Sega CD fixture disc (the Add game review validates it with the product's own CUE parser) and the statement of a program double built for exactly these two."""
     bios_bytes = b"SYNTHETIC BIOS-LIKE IMAGE FOR THE PARITY TEST " + b"x" * 4000
-    track1, track2 = b"SYNTHETIC TRACK ONE " + b"1" * 3000, b"SYNTHETIC TRACK TWO " + b"2" * 5000
     root.mkdir(parents=True)
-    (root / "disc").mkdir()
+    subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve().parents[2] / "tools" / "sega_cd_fixture_disc.py"), "build", "--fixture", "comm", "--variant", "cooked", "--out", str(root / "disc")],
+                   check=True, capture_output=True)
     (root / "bios.bin").write_bytes(bios_bytes)
-    cue = root / "disc" / (TITLE["sega-cd"] + ".cue")
-    cue.write_text('FILE "Game (Track 1).bin" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\nFILE "Game (Track 2).bin" BINARY\n  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n')
-    (root / "disc" / "Game (Track 1).bin").write_bytes(track1)
-    (root / "disc" / "Game (Track 2).bin").write_bytes(track2)
-    statement = ('{"describe":1,"runtime_abi":1,"profile":"bios_image","viewer":true,"program_identity":"%s","disc_identity":"%s","bios":{"size":%d,"sha256":"%s"},'
-                 '"disc_files":[{"name":"Game (Track 1).bin","size":%d,"sha256":"%s"},{"name":"Game (Track 2).bin","size":%d,"sha256":"%s"}]}\n'
-                 % ("7" * 64, "8" * 64, len(bios_bytes), sha(bios_bytes), len(track1), sha(track1), len(track2), sha(track2)))
+    cue = root / "disc" / (TITLE["sega-cd"] + ".cue")   # the game's title comes from the CUE file's name
+    (root / "disc" / "disc.cue").rename(cue)
+    files = [(n, (root / "disc" / n).read_bytes()) for n in ("track01.bin", "track02.bin")]
+    table = ",".join('{"name":"%s","size":%d,"sha256":"%s"}' % (n, len(d), sha(d)) for n, d in files)
+    statement = ('{"describe":1,"runtime_abi":1,"profile":"bios_image","viewer":true,"program_identity":"%s","disc_identity":"%s","bios":{"size":%d,"sha256":"%s"},"disc_files":[%s]}\n'
+                 % ("7" * 64, "8" * 64, len(bios_bytes), sha(bios_bytes), table))
     (root / "statement.json").write_text(statement)
     return root / "bios.bin", cue, root / "statement.json", fake_program
+
+
+def add_scd(bios, cue):
+    """SEG-150-T005: a Sega CD game is added through the one Add game review (the .cue is inspected, the BIOS chosen in its row, Add only) and its page is opened."""
+    return ["page import", "frames 6", "import_files %s" % cue, "wait_scd_inspect", "frames 6", "review_bios 0 %s" % bios, "frames 4", "review_add", "frames 8",
+            "platform_filter 3", "frames 4", "focus_card 0", "frames 4", "key Return", "frames 8"]
 
 
 def parse_layout(trace):
@@ -105,6 +110,19 @@ def parse_layout(trace):
             if ":" in part:
                 name, rect = part.split(":")
                 out[name] = tuple(int(v) for v in rect.split(","))
+    return out
+
+
+def parse_layouts(trace):
+    """Every `layout ...` line as a {name: (x, y, w, h)} dict, in order."""
+    out = []
+    for line in [l for l in trace if l.startswith("layout ")]:
+        one = {}
+        for part in line[len("layout "):].split(";"):
+            if ":" in part:
+                name, rect = part.split(":")
+                one[name] = tuple(int(v) for v in rect.split(","))
+        out.append(one)
     return out
 
 
@@ -150,7 +168,7 @@ class Case:
             if game["platform"] == "master-system":
                 game["mapper"] = "sega"   # the header never names it: the user (here the test) declares it
         (self.lib / "library.json").write_text(json.dumps(data))
-        trace = self.run(["frames 8", "page import", "frames 6", "scd_form %s|%s|" % (self.bios, self.cue), "frames 4", "scd_add", "wait_scd", "frames 10", "quit"])
+        trace = self.run(["frames 8", *add_scd(self.bios, self.cue), "quit"])
         assert any("scd=added" in l for l in trace), trace
 
     def run(self, script, extra_env=None, size="1080x740"):
@@ -271,18 +289,25 @@ def stage_journey(r, c, size):
         s = open_game(p) + ["expect can_play=0", "expect building=0"] + shot(c, p, "details-new", size) + ["layout"]
         s += ["build", "wait_idle", "frames 6", "expect building=0", "expect build_outcome=ok", "expect can_play=1"]
         s += ["play", "frames 4", "wait_play_end", "frames 10", "expect playing=0", "layout"] + shot(c, p, "details-ready", size)
+        # T004: the sections live on the Game page's tabs: Game settings, then Advanced (Overview was traced above)
+        s += ["details_tab settings", "frames 6", "expect details_tab=settings", "layout"] + shot(c, p, "details-settings", size)
+        s += ["details_tab advanced", "frames 6", "expect details_tab=advanced", "layout"] + shot(c, p, "details-advanced", size)
+        s += ["details_tab overview", "frames 6", "expect details_tab=overview"]
         s += ["scroll_page end", "frames 4"] + shot(c, p, "details-bottom", size) + ["scroll_page 0", "frames 4"]
         s += ["open_more", "frames 4", "menu_items", "expect menu_has=View build log", "expect menu_has=Manage storage...", "key Escape", "frames 8", "expect page=library"]
         s += ["focus_card 0", "frames 4", "key Menu", "frames 6", "menu_items", "key Escape", "frames 6"]
         return s
     trace, parts = window(c, size, ok_journey, {"FAKE_SCD_WRITE_SAVE": "1"})
     r.trace(f"{size} journey", trace)
-    layouts, menus, library_menus = {}, {}, {}
+    layouts, menus, library_menus, tab_layouts = {}, {}, {}, {}
     programs = {}
     for p in PLATFORMS:
         lines = parts.get(p, [])
         r.ok(bool(lines), f"{p} {size}: the journey ran")
-        layouts[p] = parse_layout(lines)
+        all_layouts = parse_layouts(lines)   # [new Overview, ready Overview, Game settings, Advanced]
+        r.ok(len(all_layouts) == 4, f"{p} {size}: four layouts were traced (Overview twice, Game settings, Advanced): {len(all_layouts)}")
+        tab_layouts[p] = {"overview": all_layouts[1] if len(all_layouts) > 1 else {}, "settings": all_layouts[2] if len(all_layouts) > 2 else {}, "advanced": all_layouts[3] if len(all_layouts) > 3 else {}}
+        layouts[p] = {k: v for tab in tab_layouts[p].values() for k, v in tab.items()}   # names are unique per tab
         item_lines = [l for l in lines if l.startswith("menu_items ") and len(l) > len("menu_items ")]
         menus[p] = item_lines[0][len("menu_items "):].split("|") if item_lines else []
         library_menus[p] = item_lines[1][len("menu_items "):].split("|") if len(item_lines) > 1 else []
@@ -334,7 +359,10 @@ def stage_journey(r, c, size):
     ref = PLATFORMS[0]
     for p in PLATFORMS[1:]:
         r.ok(set(layouts[p]) - {"recording", "variants"} == set(layouts[ref]) - {"recording", "variants"}, f"{p} {size}: the same sections as {ref}: {sorted(layouts[p])} vs {sorted(layouts[ref])}")
-        r.ok(order(layouts[p]) == order(layouts[ref]), f"{p} {size}: the sections are in the same reading order: {order(layouts[p])} vs {order(layouts[ref])}")
+        r.ok({"config", "display", "entry"} <= set(layouts[p]) and {"provenance", "storage"} <= set(layouts[p]) and {"play", "build", "more"} <= set(layouts[p]),
+             f"{p} {size}: the tabs carry their sections (Overview actions; Game settings config / display / entry; Advanced provenance / storage): {sorted(layouts[p])}")
+        for tab in ("overview", "settings", "advanced"):
+            r.ok(order(tab_layouts[p][tab]) == order(tab_layouts[ref][tab]), f"{p} {size}: the {tab} tab's sections are in the same reading order: {order(tab_layouts[p][tab])} vs {order(tab_layouts[ref][tab])}")
         for name in ("play", "build", "more", "config", "provenance"):
             if name in layouts[p] and name in layouts[ref]:
                 a, b = layouts[p][name], layouts[ref][name]
@@ -381,7 +409,7 @@ def stage_persist(r, c, size):
     save_before = (scd_dir / "backup-ram.bin").read_bytes()
     r.ok(len(save_before) == 8192 and save_before[100] == 0x5A, "Sega CD: the play stored the game's save (the program double wrote its mark)")
     def inspect(p):
-        return open_game(p) + ["build", "wait_idle", "frames 6", "expect can_play=1", "scan", "wait_scan", "report", "layout"] + BACK
+        return open_game(p) + ["build", "wait_idle", "frames 6", "expect can_play=1", "scan", "wait_scan", "report", "details_tab advanced", "frames 6", "layout"] + BACK
     trace, parts = window(c, size, inspect)
     r.trace("storage inspection", trace)
     for p in PLATFORMS:
@@ -402,7 +430,7 @@ def stage_persist(r, c, size):
     r.ok((scd_dir / "backup-ram.bin").read_bytes() == save_before, "Sega CD: the save is intact after the rebuild and the run")
     # removal from the library keeps a Sega CD game's user data; adding the same BIOS and disc again finds it
     script = START + open_game("sega-cd") + ["scan", "wait_scan", "cleanup remove", "wait_idle", "frames 10", "expect maintenance=0"]
-    script += ["page import", "frames 6", "scd_form %s|%s|" % (c.bios, c.cue), "frames 4", "scd_add", "wait_scd", "frames 10", "build", "wait_idle", "frames 6", "expect can_play=1",
+    script += [*add_scd(c.bios, c.cue), "build", "wait_idle", "frames 6", "expect can_play=1",
                "play", "frames 4", "wait_play_end", "frames 10", "expect playing=0", "quit"]
     trace = c.run(script, {"FAKE_SCD_EXPECT_SAVE": "1"}, size)
     r.trace("removal and re-adding", trace)

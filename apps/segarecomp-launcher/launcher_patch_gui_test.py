@@ -176,7 +176,7 @@ def main():
         # 3. The right package: preview sheet, then install. Nothing is built or selected by installing.
         trace = p.run(OPEN + [f"patch_pick {pkg_a}", "frames 12", "expect modal=1", "key Escape", "frames 6", "expect modal=0", "expect patches=0",
                               f"patch_pick {pkg_a}", "frames 12", "expect modal=1", "patch_confirm", "frames 20", "expect modal=0", "expect patches=1", "expect variant=vanilla",
-                              "expect patch_notice=Patch instal", "expect status=Ready", "expect patch_built=0", "expect vanilla_ready=1", "quit"])
+                              "expect patch_notice=Mod installe", "expect status=Ready", "expect patch_built=0", "expect vanilla_ready=1", "quit"])
         check("install", trace)
         expect(not any("build=started" in l for l in trace), "installing must not start a build")
         expect((p.lib / "patches" / f"{ident_a}.segapatch").is_file(), "the package is stored under its identity")

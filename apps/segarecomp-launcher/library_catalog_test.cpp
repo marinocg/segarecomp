@@ -3,6 +3,7 @@
 
 #include "library_catalog.hpp"
 #include "json_lite.hpp"
+#include "patch_library.hpp"
 #include <limits>
 
 #include <fstream>
@@ -355,6 +356,33 @@ int main() {
     // removing the record of a patch
     e.patches.clear(); e.selected_variant.clear();
     expect(!e.is_current_key(key32('2')) && e.is_current_key(key32('1')), "once the patch is gone its build is no longer current");
+  }
+  // SEG-150-T006: the Mods tab's status vocabulary stays distinct and typed; platform availability follows the executable admission rule (Genesis only).
+  {
+    InstalledPatch plain, native;
+    plain.identity = digest('a'); plain.name = "Plain"; plain.version = "1.0";
+    native = plain; native.native_source_sha256 = digest('b'); native.native_abi = 2; native.native_caps = 3; native.author = "Someone"; native.native_approved = true;
+    ModStatusInput in;
+    expect(mod_status(plain, in).code == "installed" && mod_status(plain, in).reason.empty(), "an unselected unbuilt mod is Installed");
+    in.built = true;
+    expect(mod_status(plain, in).code == "installed_prepared", "an unselected built mod is Installed - Prepared");
+    in.selected = true;
+    expect(mod_status(plain, in).code == "selected_prepared" && mod_status(plain, in).tone == ModTone::ok, "a selected built mod is Selected - Prepared");
+    in.built = false;
+    const ModStatus np = mod_status(plain, in);
+    expect(np.code == "selected_needs_preparation" && np.label == "Selected - Needs preparation" && np.next.find("Prepare selected mod") != std::string::npos, "a selected unbuilt mod Needs preparation and names the action");
+    in.failed = true; in.failure = "typed failure";
+    expect(mod_status(plain, in).code == "preparation_failed" && mod_status(plain, in).reason == "typed failure" && !mod_status(plain, in).next.empty(), "a failed preparation keeps its reason and a next action");
+    in.failed = false;
+    native.native_approved = false;
+    expect(mod_status(native, in).code == "needs_approval" && !mod_status(native, in).reason.empty() && !mod_status(native, in).next.empty(), "an unapproved native record is typed Needs approval with a next action, selected or not");
+    native.native_approved = true;
+    in.package_present = false;
+    expect(mod_status(native, in).code == "incompatible_package_missing" && mod_status(native, in).label == "Incompatible" && mod_status(plain, in).code == "incompatible_package_missing", "a missing package file is Incompatible with a typed reason, before every other state");
+    expect(mod_kind_label(native).find("not sandboxed") != std::string::npos && mod_kind_label(plain) == "Patched game image", "the kind names native code plainly and a plain patch as a patched image");
+    expect(mod_capabilities_label(native) == "work RAM snapshot, VDP state" && mod_capabilities_label(plain).empty(), "capabilities are shown only when the record holds them");
+    expect(mods_unavailable_reason("genesis").empty() && !mods_unavailable_reason("master-system").empty() && !mods_unavailable_reason("sega-cd").empty(), "mods are admitted for Genesis only");
+    expect(mod_refusal_next_step("This mod was made for a different game or revision. It is only").find("exact game and revision") != std::string::npos && mod_refusal_next_step("something unforeseen").find("Nothing was installed") != std::string::npos, "a refusal gets a next step, an unknown one a generic non-claiming one");
   }
   fs::remove_all(dir);
   if (failures != 0) return 1;

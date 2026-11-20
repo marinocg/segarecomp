@@ -37,6 +37,15 @@
       "sampling": "linear",
       "authority": "primary"
     },
+    "banner.png": {
+      "size": [
+        2172,
+        724
+      ],
+      "mode": "RGB",
+      "role": "the wide sunset hero banner of the launcher window header (sun/horizon line near row 450)",
+      "sampling": "linear"
+    },
     "icon-drop.png": {
       "size": [
         128,
@@ -71,6 +80,14 @@
       "role": "UI icons (tinted, nearest-neighbour upscaled); byte-identical to the kit's textures/icons/*.png",
       "sampling": "nearest"
     },
+    "fonts/Inter-Regular.ttf": {
+      "role": "body text",
+      "license": "SIL OFL 1.1 (fonts/Inter-OFL.txt)"
+    },
+    "fonts/Inter-SemiBold.ttf": {
+      "role": "bold body text, buttons, labels",
+      "license": "SIL OFL 1.1 (fonts/Inter-OFL.txt)"
+    },
     "fonts/Silkscreen-Bold.ttf": {
       "role": "titles, section headings, platform bands and the no-cover tag",
       "license": "SIL OFL 1.1 (fonts/Silkscreen-OFL.txt)"
@@ -88,6 +105,19 @@
       "role": "cover placeholders for games without a chosen cover: one of four distinct fictional paintings (coast with loop, sunset bay, night city, jungle temple) picked from the ROM digest, always shown under the platform band and a NO COVER ART tag so it is never mistaken for identified box art",
       "sampling": "nearest",
       "source": "segarecomp-4-library-placeholders.zip supplied by the project owner (project-owned fictional art; no commercial cover)"
+    },
+    "icons/Segarecomp-*.png": {
+      "count": 6,
+      "sizes": [
+        16,
+        32,
+        48,
+        128,
+        256,
+        512
+      ],
+      "role": "the application icon: window / taskbar / dock (the launcher loads 256 first); also the source of the platform icon files",
+      "sampling": "linear"
     }
   },
   "removed": {

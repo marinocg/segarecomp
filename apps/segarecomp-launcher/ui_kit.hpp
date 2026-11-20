@@ -19,12 +19,19 @@ inline ImU32 rgba(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a
 namespace col {
 const ImU32 panel = rgba(8, 19, 44, 226), panel_solid = rgba(9, 22, 50), panel_hover = rgba(15, 34, 74), panel_dark = rgba(5, 12, 30, 245), field = rgba(5, 13, 32), glow = rgba(46, 104, 214), glow_soft = rgba(46, 104, 214, 46);
 const ImU32 border_dark = rgba(7, 16, 38), edge = rgba(35, 62, 120), highlight = rgba(77, 103, 167), dash = rgba(94, 132, 209, 215), dash_hover = rgba(70, 220, 255);
-const ImU32 text = rgba(220, 232, 255), text2 = rgba(169, 183, 221), dim = rgba(120, 133, 170), footer = rgba(202, 211, 235);
+const ImU32 text = rgba(220, 232, 255), text2 = rgba(169, 183, 221), dim = rgba(140, 153, 190), footer = rgba(202, 211, 235);
 const ImU32 ok = rgba(104, 224, 158), err = rgba(255, 129, 119), warn = rgba(255, 197, 109), info = rgba(64, 191, 245);
 const ImU32 btn = rgba(21, 87, 201), btn_hover = rgba(27, 111, 231), btn_top = rgba(64, 191, 245), btn_inner = rgba(38, 141, 238), btn_bottom = rgba(8, 41, 110), btn_outer = rgba(3, 21, 56), btn_text = rgba(244, 247, 255);
 const ImU32 danger = rgba(160, 48, 56), danger_hover = rgba(190, 62, 70), danger_top = rgba(255, 129, 119), danger_bottom = rgba(80, 18, 28);
 const ImU32 focus = rgba(140, 224, 255), selected = rgba(57, 124, 219), inactive = rgba(11, 32, 72), scrim = rgba(4, 8, 20, 190);
 }
+
+// Layout and type tokens (logical px; multiply with Ctx::u). 4/8 spacing rhythm, control/panel corner radii, and the type scale of the shell.
+namespace sp { constexpr float s1 = 4.0F, s2 = 8.0F, s3 = 12.0F, s4 = 16.0F, s5 = 20.0F, s6 = 24.0F, s7 = 32.0F; }
+namespace rad { constexpr float control = 6.0F, panel = 8.0F; }
+namespace type { constexpr float caption = 11.0F, small = 12.0F, body = 13.0F, heading = 15.0F; }
+// Status tones are never color alone: a tone's color always travels with its symbol (an icon) and the status text. neutral states show a dot.
+const char *tone_icon(ImU32 color);  // "check" (ok), "warning" (warn/err), "info" (info), nullptr (neutral/text colors)
 
 // ImGui 1.92's InvisibleButton opts OUT of keyboard/gamepad navigation unless asked: every launcher control is reachable with Tab/arrows/D-pad.
 bool nav_button(const char *id, ImVec2 size);
@@ -32,6 +39,8 @@ bool nav_button(const char *id, ImVec2 size);
 // remembered (id, window and screen rectangle) so the sidebar can move focus into the page with D-pad Right even though ImGui's directional scoring does not
 // cross from a parent window into its (flattened) child reliably.
 struct ZoneEntry { ImGuiID id = 0; ImGuiWindow *window = nullptr; ImRect rect; };
+// Test seam: the rectangles of every button submitted in the current frame (cleared at the start of each frame); a notification is checked against them.
+extern std::vector<ImRect> button_rects;
 extern bool zone_capture;
 extern std::vector<std::string> menu_log;   // test aid (GUI script `menu_items`): the labels of the menu items drawn in the current frame
 extern ZoneEntry zone_first;
@@ -40,7 +49,7 @@ extern ZoneEntry zone_first;
 extern std::string focus_id;
 
 struct Ctx {
-  ImFont *regular = nullptr, *bold = nullptr;  // body text: the scalable embedded font; `bold` draws it twice for weight
+  ImFont *regular = nullptr, *bold = nullptr;  // body text: Inter Regular; `bold` is Inter SemiBold (a real face, never a double draw)
   ImFont *display = nullptr;                  // the repository's Silkscreen Bold: titles and section headings
   float S = 1.0F;  // UI scale (display scale / pixel density, times the compact factor)
   SDL_Renderer *renderer = nullptr;
@@ -53,7 +62,6 @@ struct Ctx {
 
 enum class Style { primary, secondary, danger, ghost };
 
-extern ImFont *bold_font;  // set once by the app: draw_text draws this font twice (faux bold)
 float text_width(ImFont *font, float px, const char *text);
 // Shortens `text` with "..." to fit `max_px`.
 std::string ellipsize(ImFont *font, float px, float max_px, const std::string &text);
@@ -69,6 +77,8 @@ void step_circle(Ctx &ctx, ImDrawList *dl, ImVec2 center, float radius, int numb
 void dashed_rect(ImDrawList *dl, ImVec2 a, ImVec2 b, ImU32 color, float thickness, float dash, float gap);
 void focus_ring(Ctx &ctx, ImDrawList *dl, ImVec2 a, ImVec2 b);
 void icon_image(ImDrawList *dl, SDL_Texture *tex, ImVec2 a, float size, ImU32 tint = IM_COL32_WHITE);
+// The status symbol (the tone icon, or a dot for a neutral state) centered at `center`; `size` is the icon edge.
+void tone_mark(Ctx &ctx, ImDrawList *dl, ImVec2 center, float size, ImU32 color);
 
 // Widgets: all take absolute size in points (already scaled) and draw at the current ImGui cursor; they advance it like ImGui::Button.
 bool button(Ctx &ctx, const char *id, const char *label, ImVec2 size, Style style = Style::secondary, bool enabled = true, SDL_Texture *icon = nullptr);

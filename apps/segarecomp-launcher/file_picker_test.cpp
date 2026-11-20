@@ -97,6 +97,22 @@ int main() {
     expect(!picker_accept(root, root / "beta", rom), "a folder is not a file");
     expect(!picker_accept(root, root / "gone.md", rom), "a vanished file is refused");
   }
+  {  // SEG-150-T009: choosing a folder: only existing plain folders inside the root; a folders-only listing (no extensions) offers no files
+    std::string why;
+    expect(picker_accept_folder(root, root / "beta", &why), "a folder inside the root is accepted");
+    expect(picker_accept_folder(root, root), "the root itself is accepted");
+    expect(!picker_accept_folder(root, root / "Sonic.md", &why) && !why.empty(), "a file is not a folder");
+    expect(!picker_accept_folder(root, root / "gone", &why), "a vanished folder is refused");
+    expect(!picker_accept_folder(root, base, &why) && why.find("outside") != std::string::npos, "a folder outside the root is refused");
+    expect(!picker_accept_folder(root, root / ".." / "roms-evil"), "a ../ detour is refused");
+    std::error_code lec;
+    fs::create_directory_symlink(root / "beta", root / "betalink", lec);
+    if (!lec) expect(!picker_accept_folder(root, root / "betalink", &why), "a symlinked folder is refused");
+    const PickerListing dirs_only = picker_list(root, root, {});
+    bool any_file = false;
+    for (const auto &e : dirs_only.entries) any_file = any_file || !e.directory;
+    expect(!dirs_only.entries.empty() && !any_file, "an empty extension list shows folders only");
+  }
   {  // a huge folder is capped, not enumerated forever
     for (int i = 0; i < static_cast<int>(picker_max_entries) + 20; ++i) touch(base / "big" / ("f" + std::to_string(i) + ".md"), "");
     const PickerListing l = picker_list(base / "big", base / "big", rom);

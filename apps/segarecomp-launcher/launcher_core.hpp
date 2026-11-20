@@ -17,6 +17,9 @@
 
 namespace launcher {
 
+struct DataEnvironment;   // data_location.hpp (not included here: that header includes library_catalog.hpp, which needs this one)
+struct RecoveryResult;
+
 struct Layout {
   std::filesystem::path root;         // directory holding bin/, toolchain/, runtime/, sdl3/
   std::filesystem::path cli;          // segarecomp build driver
@@ -153,10 +156,30 @@ struct SaveOutcome {
 [[nodiscard]] SaveOutcome read_save_outcome(const std::filesystem::path &run_log);
 
 [[nodiscard]] Layout locate_layout();
-[[nodiscard]] std::filesystem::path cache_root();
+[[nodiscard]] std::filesystem::path cache_root();   // SEGARECOMP_CACHE_DIR, else the data root named by the saved data-location file (data_location.hpp), else default_cache_root()
+[[nodiscard]] std::filesystem::path default_cache_root();
+[[nodiscard]] std::filesystem::path data_bootstrap_file();
+// SEG-150-T009: the environment overrides as the data-location core wants them, and what the startup recovery of a pending move did (RecoveryAction::none when
+// nothing was pending, or when SEGARECOMP_CACHE_DIR governs the cache so that no recovery runs). Both are read from the same once-per-process state cache_root() uses.
+[[nodiscard]] DataEnvironment data_environment();
+[[nodiscard]] RecoveryResult startup_recovery();
 // Per-user persistent data: the library catalog, covers, viewer settings and screenshots. It lives beside, never inside, the disposable
 // build folders (`games/`, `zig-cache/`) that cache maintenance is allowed to touch. SEGARECOMP_LIBRARY_DIR overrides it.
 [[nodiscard]] std::filesystem::path library_root();
+// SEG-150-T007: where the launcher's three locations come from, for the read-only Settings > Storage & Data explanation. `*_overridden` is true when the
+// matching environment variable (SEGARECOMP_CACHE_DIR / SEGARECOMP_LIBRARY_DIR / SEGARECOMP_HOME) is set, which is exactly when cache_root() /
+// library_root() / locate_layout() take it instead of the default. The paths are the effective ones (what the launcher really uses).
+struct EffectivePaths {
+  std::filesystem::path cache, library, home;
+  bool cache_overridden = false, library_overridden = false, home_overridden = false;
+  // SEG-150-T008: the data root was chosen by the saved data-location file (not the default, not an environment variable); the file's path; why a saved location is
+  // not in use (damaged, unavailable, shadowed by an environment variable), "" when nothing needs saying.
+  bool relocated = false;
+  bool saved_location_unavailable = false;   // a valid saved location whose folder is missing (unplugged drive): the default is used and a move is refused
+  std::filesystem::path bootstrap_file;
+  std::string data_location_notice;
+};
+[[nodiscard]] EffectivePaths effective_paths(const Layout &layout);
 [[nodiscard]] RomView inspect_rom_file(const std::filesystem::path &path, const Layout &layout);
 // SEG-122-T009: the Genesis cartridge declaration a finished build recorded in its metadata ("" = standard, also for a build older than the record).
 [[nodiscard]] std::string recorded_cartridge_mapper(const std::filesystem::path &entry);

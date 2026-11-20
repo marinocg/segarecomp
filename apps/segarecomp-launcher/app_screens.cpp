@@ -96,6 +96,11 @@ void App::draw() {
   ui::focus_id.clear();
   focus_label_.clear();
   ui::menu_log.clear();
+  ui::button_rects.clear();
+  states_clipped_ = 0;
+  refresh_health();
+  health_notice_text_.clear();
+  health_pending_text_.clear();
   int ww = 0, wh = 0;
   SDL_GetWindowSize(window_, &ww, &wh);
   win_w_ = static_cast<float>(ww);
@@ -116,8 +121,9 @@ void App::draw() {
   ImGui::PopStyleColor();
   draw_background(win_w_, win_h_);
   ImDrawList *dl = ImGui::GetWindowDrawList();
+  compact_shell_ = win_w_ < ctx_.u(900.0F);
   const float hero = hero_height(win_w_, win_h_);
-  const float m = ctx_.u(12.0F);
+  const float m = ctx_.u(sp::s3);
   {
     float wm_h = 0.0F, wm_w = 0.0F;
     if (SDL_Texture *wm = ctx_.asset("wordmark.png")) {
@@ -145,25 +151,30 @@ void App::draw() {
   const float top = hero;
   const ImVec2 pa(m, top), pb(win_w_ - m, win_h_ - m);
   panel(ctx_, dl, pa, pb);
-  const float sw = win_w_ < ctx_.u(900.0F) ? ctx_.u(62.0F) : ctx_.u(196.0F);
+  const float sw = compact_shell_ ? ctx_.u(72.0F) : ctx_.u(188.0F);
   draw_sidebar(pa.x, pa.y, sw, pb.y - pa.y);
   const float cx = pa.x + sw + ctx_.u(6.0F), cw = pb.x - cx - ctx_.u(4.0F), cy = pa.y + ctx_.u(4.0F), ch = pb.y - cy - ctx_.u(4.0F);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ctx_.u(18.0F), ctx_.u(14.0F)));
+  const float pad_x = ctx_.u(compact_shell_ ? sp::s3 + 2.0F : sp::s5 + 2.0F), pad_y = ctx_.u(compact_shell_ ? sp::s3 : sp::s4);  // content padding: narrow 12-16, normal 20-24
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad_x, pad_y));
   ImGui::SetCursorScreenPos(ImVec2(cx, cy));
   ui::zone_capture = true;
   ui::zone_first = ui::ZoneEntry{};
   card_entry_ = ui::ZoneEntry{};
-  ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
+  // Settings has its own scrolling body (`##settings_body`) that fills this child; the page itself must not scroll too (a second scroll bar and a header that slid up by the
+  // few pixels of overflow whenever the wheel reached the end of the body). Every other page scrolls as a whole.
+  const ImGuiWindowFlags content_flags = ImGuiWindowFlags_NoBackground | (page_ == Page::settings ? (ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse) : ImGuiWindowFlags_None);
+  ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened, content_flags);
   if (SDL_getenv("SEGARECOMP_SHOT_SCROLL") && page_ != Page::settings) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid: lower part of a long page
   if (script_page_scroll_ >= 0.0F) { ImGui::SetScrollY(script_page_scroll_ > 1e8F ? ImGui::GetScrollMaxY() : script_page_scroll_); script_page_scroll_ = -1.0F; }
-  const float inner_w = cw - ctx_.u(36.0F) - ctx_.u(8.0F);
+  const float inner_w = cw - 2.0F * pad_x - ctx_.u(8.0F);
   switch (page_) {
     case Page::library: draw_library(inner_w, ch); break;
     case Page::details: draw_details(inner_w, ch); break;
     case Page::import_page: draw_import(inner_w, ch); break;
     case Page::storage: draw_storage(inner_w, ch); break;
     case Page::settings: draw_settings(inner_w, ch); break;
+    case Page::data_location: draw_data_location(inner_w, ch); break;
   }
   ImGui::EndChild();
   ui::zone_capture = false;
@@ -179,30 +190,44 @@ void App::draw() {
   draw_toasts(win_w_, win_h_);
   if (!sheet_was_open && modal_.kind == Modal::Kind::none && !picker_.open && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
     if (page_ == Page::details) close_details();
+    else if (page_ == Page::storage) go(storage_return_);
+    else if (page_ == Page::data_location) data_move_back();
     else if (page_ != Page::library) go(Page::library);
   }
+  nav_was_visible_ = ImGui::GetCurrentContext()->NavCursorVisible;
   if (!ImGui::GetIO().WantTextInput && modal_.kind == Modal::Kind::none && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) { if (page_ == Page::details) close_details(); go(Page::library); focus_search_ = true; }
 }
 
+// Toasts live in the hero band (the banner above the panel), right of the wordmark: no page control ever sits there, so a notification can never cover a primary
+// action or a Cancel button (F7). Newest on top; an older one that no longer fits the band waits, hidden and not aging, until the newer ones expire.
 void App::draw_toasts(float w, float h) {
   const Uint64 now = SDL_GetTicks();
-  toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(), [&](const Toast &t) { return now > t.until; }), toasts_.end());
+  // A toast ages only once it has been on screen: one still waiting for room keeps its full time (nothing is dropped unseen).
+  toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(), [&](const Toast &t) { return t.shown_at != 0 && now > t.shown_at + t.duration; }), toasts_.end());
+  toast_shown_ = 0;
+  toast_overlap_ = 0;
   if (toasts_.empty()) return;
   ImDrawList *dl = ImGui::GetForegroundDrawList();
-  float y = h - ctx_.u(18.0F);
-  const float px = ctx_.u(12.5F);
+  const float band = hero_height(w, h) - ctx_.u(6.0F), right = w - ctx_.u(sp::s3 + 4.0F);
+  const float px = ctx_.u(12.0F), line_h = px + ctx_.u(3.0F);
+  float y = ctx_.u(6.0F);
   for (auto it = toasts_.rbegin(); it != toasts_.rend(); ++it) {
-    const auto lines = wrap(ctx_.regular, px, std::min(w - ctx_.u(60.0F), ctx_.u(520.0F)), it->text);
+    auto lines = wrap(ctx_.regular, px, std::min(w * 0.60F, ctx_.u(440.0F)) - ctx_.u(50.0F), it->text);
+    if (lines.size() > 2) { lines.resize(2); lines.back() = ellipsize(ctx_.regular, px, std::min(w * 0.60F, ctx_.u(440.0F)) - ctx_.u(50.0F), lines.back() + " ..."); }
     float tw = 0;
     for (const auto &l : lines) tw = std::max(tw, text_width(ctx_.regular, px, l.c_str()));
-    const float bw = tw + ctx_.u(50.0F), bh = static_cast<float>(lines.size()) * (px + ctx_.u(3.0F)) + ctx_.u(18.0F);
-    const ImVec2 a((w - bw) * 0.5F, y - bh);
+    const float bw = tw + ctx_.u(50.0F), bh = static_cast<float>(lines.size()) * line_h + ctx_.u(14.0F);
+    if (y + bh > band && it != toasts_.rbegin()) break;   // the newest always shows; older ones wait
+    const ImVec2 a(right - bw, y);
+    ++toast_shown_;
+    if (it->shown_at == 0) { it->shown_at = now; trace("toast_visible=" + it->text); }
+    for (const ImRect &r : ui::button_rects) if (r.Min.x < a.x + bw && r.Max.x > a.x && r.Min.y < a.y + bh && r.Max.y > a.y) ++toast_overlap_;
     dl->AddRectFilled(a, ImVec2(a.x + bw, a.y + bh), col::panel_dark, ctx_.u(6.0F));
     dl->AddRect(a, ImVec2(a.x + bw, a.y + bh), it->error ? col::err : col::glow, ctx_.u(6.0F), 0, std::max(1.0F, ctx_.u(1.4F)));
-    icon_image(dl, ctx_.icon(it->error ? "warning" : "info"), ImVec2(a.x + ctx_.u(12.0F), a.y + (bh - ctx_.u(16.0F)) * 0.5F), ctx_.u(16.0F), it->error ? col::err : col::info);
-    float ly = a.y + ctx_.u(9.0F);
-    for (const auto &l : lines) { draw_text(dl, ctx_.regular, px, col::text, ImVec2(a.x + ctx_.u(36.0F), ly), l.c_str()); ly += px + ctx_.u(3.0F); }
-    y = a.y - ctx_.u(6.0F);
+    icon_image(dl, ctx_.icon(tone_icon(it->error ? col::err : col::info)), ImVec2(a.x + ctx_.u(12.0F), a.y + (bh - ctx_.u(16.0F)) * 0.5F), ctx_.u(16.0F), it->error ? col::err : col::info);
+    float ly = a.y + ctx_.u(7.0F);
+    for (const auto &l : lines) { draw_text(dl, ctx_.regular, px, col::text, ImVec2(a.x + ctx_.u(36.0F), ly), l.c_str()); ly += line_h; }
+    y = a.y + bh + ctx_.u(4.0F);
   }
 }
 
@@ -210,15 +235,17 @@ void App::draw_toasts(float w, float h) {
 
 void App::draw_sidebar(float x, float y, float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool wide = w > ctx_.u(100.0F);
-  const float pad = ctx_.u(10.0F);
+  const bool wide = !compact_shell_;
+  const float pad = ctx_.u(sp::s2 + 2.0F);
   float cy = y + pad + ctx_.u(2.0F);
-  // The primary navigation is exactly the four application areas. Game Details is contextual (a card, a row action or a context menu opens it)
-  // and never a sidebar entry; while it is open, the area it was opened from stays highlighted.
-  struct Nav { Page page; const char *label; const char *icon; };
-  constexpr int kNav = 4;
-  const Nav items[kNav] = {{Page::library, "Library", "library"}, {Page::import_page, "Import ROMs", "import"}, {Page::storage, "Storage", "storage"}, {Page::settings, "Settings", "settings"}};
-  const Page highlighted = page_ == Page::details ? (previous_page_ == Page::details ? Page::library : previous_page_) : page_;
+  // Two destinations (Library, Settings) plus one primary action: Add game opens the Import page. Game Details is contextual (a card, a row action or a
+  // context menu opens it) and never a sidebar entry; Storage is reached from Settings, so while either is open Settings stays highlighted, and while
+  // Details is open the area it was opened from stays highlighted. The Page enum is the route seam for any later destination.
+  struct Nav { Page page; const char *label; const char *icon; bool primary; };
+  constexpr int kNav = 3;
+  const Nav items[kNav] = {{Page::library, "Library", "library", false}, {Page::settings, "Settings", "settings", false}, {Page::import_page, "Add game", "import", true}};
+  const Page origin = page_ == Page::details ? (previous_page_ == Page::details ? Page::library : previous_page_) : page_;
+  const Page highlighted = origin == Page::storage || origin == Page::data_location ? Page::settings : origin;
   ImGuiID nav_ids[kNav]{};
   ImRect nav_rects[kNav];
   int nav_target = -1;
@@ -227,6 +254,7 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     const auto &item = items[index];
     nav_items_ += (index == 0 ? "" : ",") + std::string(item.label);
     const bool active = highlighted == item.page;
+    if (item.primary) cy += ctx_.u(sp::s3);  // the primary action stands apart from the two destinations
     ImGui::SetCursorScreenPos(ImVec2(x + pad, cy));
     const ImVec2 size(w - 2 * pad, ctx_.u(46.0F));  // contiguous hit boxes: Down/Up stay inside the sidebar instead of jumping to the content beside it
     ImGui::PushID(item.label);
@@ -247,13 +275,27 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     ImGui::PopID();
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImVec2(ImGui::GetItemRectMax().x, ImGui::GetItemRectMin().y + ctx_.u(38.0F));
     const bool current = page_ == item.page;  // on Details the origin area is marked, but not as the open page
-    dl->AddRectFilled(a, b, current ? rgba(52, 128, 238) : (active ? rgba(20, 52, 112) : (hovered ? col::panel_hover : rgba(10, 24, 56))), ctx_.u(5.0F));
-    dl->AddRect(a, b, current ? rgba(120, 190, 255) : (active ? rgba(64, 140, 230) : rgba(34, 70, 140)), ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.2F)));
-    if (current) dl->AddLine(ImVec2(a.x + ctx_.u(5.0F), a.y + ctx_.u(1.5F)), ImVec2(b.x - ctx_.u(5.0F), a.y + ctx_.u(1.5F)), rgba(170, 225, 255, 130), 1.0F);
+    const float r = ctx_.u(rad::control);
+    // The filled blue belongs to the primary action alone; the open destination is a raised navy tile with a bright edge and an accent bar.
+    ImU32 fill = current ? rgba(24, 60, 128) : (active ? rgba(20, 52, 112) : (hovered ? col::panel_hover : rgba(10, 24, 56)));
+    ImU32 edge = current ? col::btn_top : (active ? rgba(64, 140, 230) : rgba(34, 70, 140));
+    if (item.primary) { fill = current || hovered ? col::btn_hover : col::btn; edge = current ? col::focus : col::btn_top; }  // the one filled primary: always blue
+    dl->AddRectFilled(a, b, fill, r);
+    dl->AddRect(a, b, edge, r, 0, std::max(1.0F, ctx_.u(1.2F)));
+    if (item.primary) dl->AddLine(ImVec2(a.x + ctx_.u(5.0F), a.y + ctx_.u(1.5F)), ImVec2(b.x - ctx_.u(5.0F), a.y + ctx_.u(1.5F)), rgba(170, 225, 255, 130), 1.0F);
+    if (current && !item.primary) dl->AddRectFilled(ImVec2(a.x, a.y + ctx_.u(6.0F)), ImVec2(a.x + ctx_.u(3.0F), b.y - ctx_.u(6.0F)), col::btn_top, ctx_.u(1.5F));
     const float isz = ctx_.u(16.0F);
-    icon_image(dl, ctx_.icon(item.icon), ImVec2(wide ? a.x + ctx_.u(12.0F) : (a.x + b.x) * 0.5F - isz * 0.5F, (a.y + b.y) * 0.5F - isz * 0.5F), isz);
-    if (wide) draw_text(dl, ctx_.bold, ctx_.u(13.0F), current ? col::btn_text : col::text, ImVec2(a.x + ctx_.u(40.0F), (a.y + b.y) * 0.5F - ctx_.u(13.0F) * 0.55F), item.label);
-    if (!wide && hovered) tooltip(ctx_, item.label);
+    const ImU32 label_col = current || item.primary ? col::btn_text : col::text;
+    if (wide) {
+      icon_image(dl, ctx_.icon(item.icon), ImVec2(a.x + ctx_.u(12.0F), (a.y + b.y) * 0.5F - isz * 0.5F), isz);
+      draw_text(dl, ctx_.bold, ctx_.u(type::body), label_col, ImVec2(a.x + ctx_.u(40.0F), (a.y + b.y) * 0.5F - ctx_.u(type::body) * 0.55F), item.label);
+    } else {  // compact: the icon over a short label, so no entry depends on a tooltip alone
+      const float lpx = ctx_.u(10.5F);
+      icon_image(dl, ctx_.icon(item.icon), ImVec2((a.x + b.x) * 0.5F - isz * 0.5F, a.y + ctx_.u(sp::s1)), isz);
+      const std::string shown = ellipsize(ctx_.bold, lpx, b.x - a.x - ctx_.u(sp::s1), item.label);
+      draw_text(dl, ctx_.bold, lpx, label_col, ImVec2((a.x + b.x) * 0.5F - text_width(ctx_.bold, lpx, shown.c_str()) * 0.5F, b.y - lpx - ctx_.u(sp::s1)), shown.c_str());
+      if (hovered) tooltip(ctx_, item.label);
+    }
     if (focused) focus_ring(ctx_, dl, a, b);
     if (pressed) go(item.page);
     cy += ctx_.u(46.0F);
@@ -314,9 +356,12 @@ void App::draw_sidebar(float x, float y, float w, float h) {
       left_pending_ = false;
     } else if (free_to_hop && in_settings_body) {
       const bool stuck_left = left_pending_ && g.NavId == left_pending_id_;
-      const ui::ZoneEntry &tab = settings_tab_entry_[std::clamp(settings_tab_, 0, 5)];
+      const ui::ZoneEntry &tab = settings_tab_entry_[std::clamp(settings_tab_, 0, 3)];
       bool hopped = false;
-      if (settings_narrow_ && up && g.NavId == settings_body_entry_.id && tab.id != 0) { focus_item(tab.id, tab.window, tab.rect); hopped = true; }   // Up from the body's first control: the drop-down
+      // Up from the body's first row (a row can hold several controls: Grid / List): the drop-down. ImGui alone would leave the page for the sidebar.
+      const ImRect now = g.NavWindow != nullptr ? ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[g.NavLayer]) : ImRect();
+      const bool first_row = g.NavId == settings_body_entry_.id || (settings_body_entry_.id != 0 && g.NavWindow == settings_body_window_ && std::abs(now.Min.y - settings_body_entry_.rect.Min.y) < ctx_.u(6.0F));
+      if (settings_narrow_ && up && first_row && tab.id != 0) { focus_item(tab.id, tab.window, tab.rect); hopped = true; }
       else if (stuck_left && tab.id != 0) { focus_item(tab.id, tab.window, tab.rect); hopped = true; }
       left_pending_ = !hopped && (settings_narrow_ ? up : left);
       left_pending_id_ = g.NavId;
@@ -377,37 +422,35 @@ void App::draw_sidebar(float x, float y, float w, float h) {
 void App::draw_drop_zone(float w, float h, bool compact_box) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 origin = ImGui::GetCursorScreenPos();
-  // once there are import results the drop zone shrinks so the results are visible without scrolling
-  const float bw = w, bh = compact_box ? ctx_.u(!import_results_.empty() || scd_form_open_ ? 150.0F : (win_h_ < ctx_.u(600.0F) ? 200.0F : 322.0F)) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
+  const float bw = w;
+  // The box is as tall as its content needs (icon, headline, file types, the Browse and Sega CD buttons) and never shorter: a fixed height let the Sega CD button
+  // spill over the dashed edge in a short window. With a review above it, or the Sega CD form below it, only the content height is used.
+  const bool slim = !review_.empty() || win_h_ < ctx_.u(600.0F);
+  const bool with_icon = !slim;
+  const float isz = ctx_.u(compact_box ? 52.0F : 64.0F), hpx = ctx_.u(compact_box ? 18.0F : 21.0F), npx = ctx_.u(12.0F);
+  const float content_h = (with_icon ? isz + ctx_.u(10.0F) : 0.0F) + hpx + ctx_.u(8.0F) + npx + ctx_.u(6.0F) + npx + ctx_.u(14.0F) + ctx_.u(36.0F);
+  const float bh = compact_box ? std::max(content_h + ctx_.u(34.0F), ctx_.u(slim ? 0.0F : 300.0F)) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
   const ImVec2 a(origin.x, origin.y), b(a.x + bw, a.y + bh);
   const bool hover = ImGui::IsMouseHoveringRect(a, b, false);
   const bool active = dragging_;
   dl->AddRectFilled(a, b, active ? rgba(10, 34, 70) : (hover ? col::panel_hover : rgba(8, 18, 42)), ctx_.u(8.0F));
   dashed_rect(dl, ImVec2(a.x + ctx_.u(6.0F), a.y + ctx_.u(6.0F)), ImVec2(b.x - ctx_.u(6.0F), b.y - ctx_.u(6.0F)), active ? col::dash_hover : col::dash, std::max(1.0F, std::round(ctx_.u(2.0F))), ctx_.u(10.0F), ctx_.u(7.0F));
   const float cx = (a.x + b.x) * 0.5F;
-  const bool tiny = bh < ctx_.u(170.0F);
-  float cy = a.y + (bh - (tiny ? ctx_.u(108.0F) : (compact_box ? ctx_.u(170.0F) : ctx_.u(210.0F)))) * 0.5F;
-  if (SDL_Texture *drop = tiny ? nullptr : ctx_.asset("icon-drop.png")) { const float isz = ctx_.u(compact_box ? 52.0F : 64.0F); icon_image(dl, drop, ImVec2(cx - isz * 0.5F, cy), isz, active ? rgba(150, 235, 255) : IM_COL32_WHITE); cy += isz + ctx_.u(10.0F); }
-  const char *headline = active ? "Release to add the ROMs" : "Drag & drop ROM files here";
-  const float hpx = ctx_.u(compact_box ? 18.0F : 21.0F);
+  float cy = a.y + (bh - content_h) * 0.5F;
+  if (SDL_Texture *drop = with_icon ? ctx_.asset("icon-drop.png") : nullptr) { icon_image(dl, drop, ImVec2(cx - isz * 0.5F, cy), isz, active ? rgba(150, 235, 255) : IM_COL32_WHITE); }
+  if (with_icon) cy += isz + ctx_.u(10.0F);
+  const char *headline = active ? "Release to review these files" : (review_.empty() ? "Drag & drop game files here" : "Drop more files to review");
   draw_text(dl, ctx_.bold, hpx, col::text, ImVec2(cx - text_width(ctx_.bold, hpx, headline) * 0.5F, cy), headline);
   cy += hpx + ctx_.u(8.0F);
-  const char *note = "Genesis / Mega Drive and Master System ROMs, or ZIP archives";
-  const float npx = ctx_.u(12.0F);
+  const char *note = "Genesis / Mega Drive and Master System games, ZIP archives, or a Sega CD disc (.cue)";
   draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, note) * 0.5F, cy), note);
-  cy += npx + ctx_.u(16.0F);
-  // SEG-078-T002: a Sega CD game is a BIOS plus a disc, not a dropped file: its own small form opens below, and the drop zone makes room for it.
-  const float bw1 = ctx_.u(180.0F), bw2 = ctx_.u(200.0F), gap2 = ctx_.u(10.0F);
-  const char *scd_label_text = scd_form_open_ ? "Hide Sega CD form" : "Add Sega CD game...";
-  if (tiny) {
-    ImGui::SetCursorScreenPos(ImVec2(cx - (bw1 + gap2 + bw2) * 0.5F, cy));
-  } else {
-    ImGui::SetCursorScreenPos(ImVec2(cx - bw1 * 0.5F, cy));
-  }
-  if (button(ctx_, "dz_browse", "Browse for ROMs...", ImVec2(bw1, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("folder"))) browse_import();
-  if (tiny) ImGui::SetCursorScreenPos(ImVec2(cx - (bw1 + gap2 + bw2) * 0.5F + bw1 + gap2, cy));
-  else ImGui::SetCursorScreenPos(ImVec2(cx - bw2 * 0.5F, cy + ctx_.u(44.0F)));
-  if (button(ctx_, "dz_scd", scd_label_text, ImVec2(bw2, tiny ? ctx_.u(36.0F) : ctx_.u(30.0F)), Style::ghost, true, ctx_.icon("controller"))) scd_form_open_ = !scd_form_open_;
+  cy += npx + ctx_.u(6.0F);
+  const std::string types = "File types: " + import_extension_pattern("  ", ".");   // read from the same list the choosers use
+  draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, types.c_str()) * 0.5F, cy), types.c_str());
+  cy += npx + ctx_.u(14.0F);
+  const float bw1 = ctx_.u(180.0F);
+  ImGui::SetCursorScreenPos(ImVec2(cx - bw1 * 0.5F, cy));
+  if (button(ctx_, "dz_browse", "Choose files...", ImVec2(bw1, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("folder"))) browse_import();
   ImGui::SetCursorScreenPos(ImVec2(origin.x, b.y + ctx_.u(8.0F)));
   ImGui::Dummy(ImVec2(w, ctx_.u(2.0F)));
 }
@@ -437,6 +480,25 @@ static void card_focus_bookkeeping(const std::string &id, std::string &return_fo
   }
 }
 
+// The one main action of a game, drawn on its card or row. Pointer shortcut (not a D-pad stop, like the favorite star was): a controller reaches the same actions
+// through the card's menu (North) and the details page.
+void App::draw_main_action(const LibraryEntry &entry, const StatusInfo &info, ImVec2 pos, ImVec2 size) {
+  const std::string label = main_action_label(entry, info);
+  const bool play_action = label == "Play";
+  const bool enabled = label != "Stopping..." && (!play_action || can_play(info));
+  ImGui::SetCursorScreenPos(pos);
+  ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+  const bool pressed = button(ctx_, "main", label.c_str(), size, play_action ? Style::primary : Style::secondary, enabled);
+  ImGui::PopItemFlag();
+  if (play_action) play_rects_[entry.id()] = ImRect(pos, ImVec2(pos.x + size.x, pos.y + size.y));
+  if (pressed && !select_mode_) run_main_action(entry.id());
+}
+
+namespace {
+// The press that activated the focused control came from the keyboard (Return / Space), not from the pointer or the controller.
+bool keyboard_activated() { return ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) || ImGui::IsKeyPressed(ImGuiKey_Space, false); }
+} // namespace
+
 void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const StatusInfo &info = status_of(entry.id());
@@ -464,19 +526,31 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     const float pad = ctx_.u(8.0F), art_w = ctx_.u(52.0F);
     draw_cover(dl, entry, ImVec2(x + pad, y + pad), ImVec2(x + pad + art_w, y + h - pad), ctx_.u(3.0F));
     const float tx = x + art_w + pad * 2, available = w - art_w - pad * 3;
-    draw_text(dl, ctx_.bold, ctx_.u(13.5F), col::text, ImVec2(tx, y + pad), ellipsize(ctx_.bold, ctx_.u(13.5F), available - (entry.favorite ? ctx_.u(18.0F) : 0.0F), entry.title()).c_str());
-    if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(b.x - pad - ctx_.u(14.0F), y + pad), ctx_.u(14.0F), col::warn);
-    draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::info, ImVec2(tx, y + ctx_.u(29.0F)), platform_region(entry).c_str());
+    // Rows top to bottom: name, platform, the ONE state at the full card width (it is the important text and is never shortened for the button), then a bottom row that carries the
+    // action on the right and the secondary "last played / built" text on the left (the first thing to give way when the card is narrow).
+    const float btn_w = ctx_.u(104.0F), btn_h = ctx_.u(26.0F), btn_y = y + h - ctx_.u(6.0F) - btn_h;
+    draw_text(dl, ctx_.bold, ctx_.u(13.5F), col::text, ImVec2(tx, y + ctx_.u(6.0F)), ellipsize(ctx_.bold, ctx_.u(13.5F), available - (entry.favorite ? ctx_.u(18.0F) : 0.0F), entry.title()).c_str());
+    if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(b.x - pad - ctx_.u(14.0F), y + ctx_.u(6.0F)), ctx_.u(14.0F), col::warn);
+    draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::info, ImVec2(tx, y + ctx_.u(24.0F)), ellipsize(ctx_.regular, ctx_.u(11.5F), available, platform_region(entry)).c_str());
     const Badge short_badge = badge_for(entry, info);
-    if (short_badge.spinner) spinner(ctx_, dl, ImVec2(tx + ctx_.u(5.0F), y + ctx_.u(53.0F)), ctx_.u(4.5F), short_badge.color);
-    else dl->AddCircleFilled(ImVec2(tx + ctx_.u(4.0F), y + ctx_.u(53.0F)), ctx_.u(4.0F), short_badge.color);
-    draw_text(dl, ctx_.bold, ctx_.u(12.0F), short_badge.color, ImVec2(tx + ctx_.u(13.0F), y + ctx_.u(46.0F)), short_badge.label.c_str());
-    draw_text(dl, ctx_.regular, ctx_.u(11.0F), info.rom_missing ? col::warn : col::dim, ImVec2(tx, y + ctx_.u(64.0F)), info.rom_missing ? "ROM file missing" : activity_line(entry, now).c_str());
+    const float state_y = y + ctx_.u(40.0F);
+    if (short_badge.spinner) spinner(ctx_, dl, ImVec2(tx + ctx_.u(5.0F), state_y + ctx_.u(7.0F)), ctx_.u(4.5F), short_badge.color);
+    else tone_mark(ctx_, dl, ImVec2(tx + ctx_.u(5.0F), state_y + ctx_.u(7.0F)), ctx_.u(11.0F), short_badge.color);
+    const std::string shown_state = ellipsize(ctx_.bold, ctx_.u(12.0F), available - ctx_.u(13.0F), short_badge.label);
+    if (shown_state != short_badge.label) ++states_clipped_;   // test seam: an important status text was cut
+    draw_text(dl, ctx_.bold, ctx_.u(12.0F), short_badge.color, ImVec2(tx + ctx_.u(13.0F), state_y), shown_state.c_str());
+    if (!select_mode_) {
+      draw_main_action(entry, info, ImVec2(b.x - pad - btn_w, btn_y), ImVec2(btn_w, btn_h));
+      if (!info.rom_missing)   // "Game file missing" is already the state: the line would only repeat it
+        draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::dim, ImVec2(tx, btn_y + (btn_h - ctx_.u(11.0F)) * 0.5F), ellipsize(ctx_.regular, ctx_.u(11.0F), std::max(0.0F, available - btn_w - ctx_.u(8.0F)), activity_line(entry, now)).c_str());
+    } else if (!info.rom_missing) {
+      draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::dim, ImVec2(tx, y + ctx_.u(62.0F)), ellipsize(ctx_.regular, ctx_.u(11.0F), available, activity_line(entry, now)).c_str());
+    }
     if (focused) focus_ring(ctx_, dl, a, b);
     ImGui::PopID();
     if (pressed) {
       if (select_mode_) { if (selected) selected_.erase(entry.id()); else selected_.insert(entry.id()); }
-      else open_details(entry.id());
+      else { open_by_keyboard_ = keyboard_activated(); open_details(entry.id()); }
     }
     return;
   }
@@ -501,45 +575,27 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     ImGui::SetCursorScreenPos(ImVec2(ca.x + ctx_.u(5.0F), ca.y + ctx_.u(5.0F)));
     if (checkbox(ctx_, "sel", "", &on)) { if (on) selected_.insert(entry.id()); else selected_.erase(entry.id()); }
   }
-  // the build state sits on the art's lower edge, where a box-art library shows it
-  {
-    const Badge badge = badge_for(entry, info);
-    const std::string &label = badge.label;
-    const ImU32 c = badge.color;
-    const float px = ctx_.u(11.5F), bw = text_width(ctx_.bold, px, label.c_str()) + ctx_.u(26.0F), bh = px + ctx_.u(10.0F);
-    const ImVec2 p0(ca.x + ctx_.u(6.0F), cb.y - bh - ctx_.u(6.0F));
-    dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), rgba(4, 10, 26, 225), ctx_.u(4.0F));
-    dl->AddRect(p0, ImVec2(p0.x + bw, p0.y + bh), (c & 0x00FFFFFFU) | 0x90000000U, ctx_.u(4.0F));
-    if (badge.spinner) spinner(ctx_, dl, ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(4.0F), c);
-    else dl->AddCircleFilled(ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(3.5F), c);
-    draw_text(dl, ctx_.bold, px, c, ImVec2(p0.x + ctx_.u(18.0F), p0.y + (bh - px) * 0.5F - ctx_.u(1.0F)), label.c_str());
-  }
+  // name, platform, ONE state (symbol + color + text), and the game's one main action
   const float tpx = ctx_.u(14.0F), spx = ctx_.u(11.5F);
-  float ty = cb.y + ctx_.u(9.0F);
+  float ty = cb.y + ctx_.u(8.0F);
   const std::string shown_title = ellipsize(ctx_.bold, tpx, cw, entry.title());
   draw_text(dl, ctx_.bold, tpx, col::text, ImVec2(ca.x, ty), shown_title.c_str());
   if (shown_title != entry.title() && hovered) tooltip(ctx_, entry.title().c_str());
-  ty += tpx + ctx_.u(8.0F);
-  icon_image(dl, ctx_.icon("controller"), ImVec2(ca.x, ty - ctx_.u(1.0F)), ctx_.u(14.0F), col::info);
-  // The platform and region take what they need (they identify the game); the "last played / added" text uses what remains.
-  const std::string where = ellipsize(ctx_.regular, spx, cw - ctx_.u(19.0F), platform_region(entry));
-  const float where_w = text_width(ctx_.regular, spx, where.c_str());
-  const std::string act = activity_line(entry, now);
-  const std::string act_shown = ellipsize(ctx_.regular, spx, std::max(0.0F, cw - ctx_.u(19.0F) - where_w - ctx_.u(8.0F)), act);
-  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x + ctx_.u(19.0F), ty), where.c_str());
-  draw_text(dl, ctx_.regular, spx, col::dim, ImVec2(cb.x - text_width(ctx_.regular, spx, act_shown.c_str()), ty), act_shown.c_str());
-  if (info.runnable() && !select_mode_ && (pointer_over || focused)) {
-    const float ps = ctx_.u(40.0F);
-    ImGui::SetCursorScreenPos(ImVec2(ca.x + (cw - ps) * 0.5F, ca.y + (chh - ps) * 0.5F));
-    play_rects_[entry.id()] = ImRect(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + ps, ImGui::GetCursorScreenPos().y + ps));
-    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // pointer shortcut: a controller plays through Details or the card's menu
-    if (icon_button(ctx_, "play", ctx_.icon("play"), ps, true, can_play(info), "Play")) play(entry.id());
-    ImGui::PopItemFlag();
+  ty += tpx + ctx_.u(5.0F);
+  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x, ty), ellipsize(ctx_.regular, spx, cw, platform_region(entry)).c_str());
+  ty += spx + ctx_.u(7.0F);
+  {
+    const Badge badge = badge_for(entry, info);
+    if (badge.spinner) spinner(ctx_, dl, ImVec2(ca.x + ctx_.u(6.0F), ty + ctx_.u(7.0F)), ctx_.u(4.5F), badge.color);
+    else tone_mark(ctx_, dl, ImVec2(ca.x + ctx_.u(6.0F), ty + ctx_.u(7.0F)), ctx_.u(12.0F), badge.color);
+    draw_text(dl, ctx_.bold, ctx_.u(12.0F), badge.color, ImVec2(ca.x + ctx_.u(17.0F), ty), ellipsize(ctx_.bold, ctx_.u(12.0F), cw - ctx_.u(17.0F), badge.label).c_str());
   }
+  ty += ctx_.u(12.0F) + ctx_.u(7.0F);
+  if (!select_mode_) draw_main_action(entry, info, ImVec2(ca.x, ty), ImVec2(cw, ctx_.u(26.0F)));
   ImGui::PopID();
   if (pressed) {
     if (select_mode_) { if (selected) selected_.erase(entry.id()); else selected_.insert(entry.id()); }
-    else open_details(entry.id());
+    else { open_by_keyboard_ = keyboard_activated(); open_details(entry.id()); }
   }
 }
 
@@ -570,20 +626,27 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   draw_cover(dl, entry, ImVec2(x, a.y + pad), ImVec2(x + tw, a.y + pad + th), ctx_.u(3.0F));
   x += tw + pad * 1.6F;
   const float px = ctx_.u(14.0F), spx = ctx_.u(11.5F);
-  const float actions_w = ctx_.u(info.runnable() && !select_mode_ ? 74.0F : 40.0F);
+  const float row_main_w = w > ctx_.u(640.0F) ? 128.0F : 104.0F;
+  const float actions_w = ctx_.u(select_mode_ ? 40.0F : 40.0F + row_main_w + 6.0F);
   const bool wide_row = w > ctx_.u(640.0F);
-  const float title_w = std::max(ctx_.u(120.0F), w * (wide_row ? 0.32F : 0.38F));
-  draw_text(dl, ctx_.bold, px, col::text, ImVec2(x, a.y + h * 0.5F - px * 1.1F), ellipsize(ctx_.bold, px, title_w - (entry.favorite ? ctx_.u(20.0F) : 0.0F), entry.title()).c_str());
-  if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(x + std::min(title_w - ctx_.u(16.0F), text_width(ctx_.bold, px, entry.title().c_str()) + ctx_.u(6.0F)), a.y + h * 0.5F - px * 1.1F), ctx_.u(14.0F), col::warn);
-  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(x, a.y + h * 0.5F + ctx_.u(3.0F)), platform_region(entry).c_str());
-  x += title_w + pad;
+  // The state is the important text: it gets the width it needs (up to its column) and the title gives way, never the other way round.
   const Badge row_badge = badge_for(entry, info);
   const std::string &label = row_badge.label;
   const ImU32 sc = row_badge.color;
+  const float state_need = ctx_.u(23.0F) + text_width(ctx_.bold, ctx_.u(12.5F), label.c_str());
+  const float state_limit = b.x - actions_w - pad * 1.5F;   // right edge of the state text: before the action buttons
+  const float title_room = state_limit - x - pad - std::min(state_need, ctx_.u(150.0F));
+  const float title_w = std::clamp(title_room, ctx_.u(80.0F), std::max(ctx_.u(120.0F), w * (wide_row ? 0.32F : 0.38F)));
+  draw_text(dl, ctx_.bold, px, col::text, ImVec2(x, a.y + h * 0.5F - px * 1.1F), ellipsize(ctx_.bold, px, title_w - (entry.favorite ? ctx_.u(20.0F) : 0.0F), entry.title()).c_str());
+  if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(x + std::min(title_w - ctx_.u(16.0F), text_width(ctx_.bold, px, entry.title().c_str()) + ctx_.u(6.0F)), a.y + h * 0.5F - px * 1.1F), ctx_.u(14.0F), col::warn);
+  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(x, a.y + h * 0.5F + ctx_.u(3.0F)), ellipsize(ctx_.regular, spx, title_w, platform_region(entry)).c_str());
+  x += title_w + pad;
   if (row_badge.spinner) spinner(ctx_, dl, ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(5.0F), sc);
-  else dl->AddCircleFilled(ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(4.5F), sc);
-  draw_text(dl, ctx_.bold, ctx_.u(12.5F), sc, ImVec2(x + ctx_.u(15.0F), a.y + h * 0.5F - ctx_.u(12.5F) * 0.55F), label.c_str());
-  x += ctx_.u(150.0F);
+  else tone_mark(ctx_, dl, ImVec2(x + ctx_.u(6.0F), a.y + h * 0.5F), ctx_.u(12.0F), sc);
+  const std::string shown_state = ellipsize(ctx_.bold, ctx_.u(12.5F), std::max(ctx_.u(40.0F), state_limit - x - ctx_.u(15.0F)), label);
+  if (shown_state != label) ++states_clipped_;   // test seam: an important status text was cut
+  draw_text(dl, ctx_.bold, ctx_.u(12.5F), sc, ImVec2(x + ctx_.u(15.0F), a.y + h * 0.5F - ctx_.u(12.5F) * 0.55F), shown_state.c_str());
+  x += wide_row ? ctx_.u(150.0F) : std::min(state_need, ctx_.u(150.0F)) + pad;
   if (wide_row) {
     draw_text(dl, ctx_.regular, spx, col::text2, ImVec2(x, a.y + h * 0.5F - spx * 0.55F), activity_line(entry, std::time(nullptr)).c_str());
     x += ctx_.u(140.0F);
@@ -599,27 +662,126 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
     ImGui::PopItemFlag();
     bx -= ps2 + ctx_.u(6.0F);
   }
-  if (info.runnable() && !select_mode_) {
-    ImGui::SetCursorScreenPos(ImVec2(bx, a.y + (h - ps2) * 0.5F));
-    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
-    if (icon_button(ctx_, "play", ctx_.icon("play"), ps2, true, can_play(info), "Play")) play(entry.id());
-    ImGui::PopItemFlag();
+  if (!select_mode_) {
+    const float mw = ctx_.u(row_main_w);
+    draw_main_action(entry, info, ImVec2(bx - mw + ps2, a.y + (h - ctx_.u(30.0F)) * 0.5F), ImVec2(mw, ctx_.u(30.0F)));
   }
   ImGui::PopID();
   ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + ctx_.u(6.0F)));
   ImGui::Dummy(ImVec2(w, 1));
   if (pressed) {
     if (select_mode_) { if (selected) selected_.erase(entry.id()); else selected_.insert(entry.id()); }
-    else open_details(entry.id());
+    else { open_by_keyboard_ = keyboard_activated(); open_details(entry.id()); }
+  }
+}
+
+// A new profile's first screen: what the product does, one primary action, and a way past it. It never appears for a profile that has a library or has
+// already answered the first-run question, and it stores nothing (skipping lasts for the session).
+void App::draw_welcome(float w, float h) {
+  (void)h;
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 a = ImGui::GetCursorScreenPos();
+  const float pad = ctx_.u(22.0F), iw = w - 2 * pad;
+  float y = a.y + pad;
+  const float top = a.y;
+  dl->ChannelsSplit(2);   // the card is painted last, behind the content
+  dl->ChannelsSetCurrent(1);
+  draw_text(dl, ctx_.display, ctx_.u(16.0F), rgba(120, 205, 255), ImVec2(a.x + pad, y), "WELCOME TO SEGARECOMP");
+  y += ctx_.u(34.0F);
+  const auto body = [&](ImFont *font, float px, ImU32 color, const std::string &text) {
+    for (const auto &l : wrap(font, px, iw, text)) { draw_text(dl, font, px, color, ImVec2(a.x + pad, y), l.c_str()); y += px + ctx_.u(4.0F); }
+    y += ctx_.u(6.0F);
+  };
+  body(ctx_.bold, ctx_.u(15.0F), col::text, "Turn your own Sega game files into native games for this computer.");
+  body(ctx_.regular, ctx_.u(12.5F), col::text2, "Add a game file, check what Segarecomp found, then prepare it. Preparing builds a playable version here; it can take a few minutes the first time. Your original files are never changed or uploaded.");
+  y += ctx_.u(4.0F);
+  const char *steps[] = {"Add a game file (Genesis / Mega Drive, Master System, a ZIP, or a Sega CD disc .cue)", "Review the result: valid, already added, or needs a choice", "Prepare and play, when you decide to"};
+  for (int i = 0; i < 3; ++i) {
+    step_circle(ctx_, dl, ImVec2(a.x + pad + ctx_.u(11.0F), y + ctx_.u(10.0F)), ctx_.u(11.0F), i + 1);
+    const auto lines = wrap(ctx_.regular, ctx_.u(12.5F), iw - ctx_.u(34.0F), steps[i]);
+    float ly = y + ctx_.u(3.0F);
+    for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text, ImVec2(a.x + pad + ctx_.u(30.0F), ly), l.c_str()); ly += ctx_.u(16.0F); }
+    y += std::max(ctx_.u(26.0F), ly - y + ctx_.u(6.0F));
+  }
+  y += ctx_.u(10.0F);
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+  if (button(ctx_, "welcome_add", "Add game", ImVec2(ctx_.u(170.0F), ctx_.u(40.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
+  // F10: the first Tab a keyboard user presses on the welcome lands on its one action (it used to be the fourth stop, after the three sidebar entries). Only the keyboard is
+  // affected: a controller keeps its D-pad route, and nothing here changes focus unless the navigation ring was hidden (nobody was navigating yet).
+  if (ImGui::IsKeyPressed(ImGuiKey_Tab, false) && !ImGui::GetIO().KeyShift && !nav_was_visible_ && !import_job_.valid()) {
+    ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+    ImGui::SetNavCursorVisible(true);
+  }
+  ImGui::SameLine(0.0F, ctx_.u(10.0F));
+  if (button(ctx_, "welcome_skip", "Skip to Library", ImVec2(ctx_.u(160.0F), ctx_.u(40.0F)), Style::secondary)) { welcome_dismissed_ = true; trace("welcome=skipped"); }
+  y += ctx_.u(40.0F) + pad;
+  dl->ChannelsSetCurrent(0);
+  card(ctx_, dl, ImVec2(a.x, top), ImVec2(a.x + w, y), false, false, rgba(8, 19, 46, 240));
+  dl->ChannelsMerge();
+  ImGui::SetCursorScreenPos(ImVec2(a.x, y));
+  ImGui::Dummy(ImVec2(w, 1));
+}
+
+void App::draw_empty_library(float w, float h) {
+  (void)h;
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 a = ImGui::GetCursorScreenPos();
+  const float pad = ctx_.u(22.0F), iw = w - 2 * pad;
+  float y = a.y + pad;
+  dl->ChannelsSplit(2);
+  dl->ChannelsSetCurrent(1);
+  draw_text(dl, ctx_.bold, ctx_.u(17.0F), col::text, ImVec2(a.x + pad, y), "Your library is empty");
+  y += ctx_.u(30.0F);
+  const std::string text = "Add a game file to get started. You review it before anything is added. Accepted: " + import_extension_pattern(" ", ".") + " (Genesis / Mega Drive, Master System, a ZIP that contains one, or the .cue of a Sega CD disc).";
+  for (const auto &l : wrap(ctx_.regular, ctx_.u(12.5F), iw, text)) { draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text2, ImVec2(a.x + pad, y), l.c_str()); y += ctx_.u(17.0F); }
+  y += ctx_.u(12.0F);
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+  if (button(ctx_, "empty_add", "Add game", ImVec2(ctx_.u(170.0F), ctx_.u(40.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
+  y += ctx_.u(40.0F) + pad;
+  dl->ChannelsSetCurrent(0);
+  card(ctx_, dl, a, ImVec2(a.x + w, y), false, false, rgba(8, 19, 46, 240));
+  dl->ChannelsMerge();
+  ImGui::SetCursorScreenPos(ImVec2(a.x, y));
+  ImGui::Dummy(ImVec2(w, 1));
+}
+
+// One concise, non-blocking notice for a condition that stays true until it is fixed: it is drawn on the Library and on the Game page (never as a toast, never modal,
+// no control of its own so the keyboard / pad order of the page is unchanged) and disappears by itself when refresh_health() finds the cause gone.
+void App::draw_health_notice(float w) {
+  struct Line { const char *title; std::string text; };
+  std::vector<Line> lines;
+  if (!layout_.problem.empty()) lines.push_back({"Installation incomplete", layout_.problem + " Games cannot be prepared until it is repaired."});
+  if (!library_unwritable_.empty() && !catalog_.read_only()) {
+    std::string pending;   // what would be lost, so the notice is as concrete as the damage
+    if (catalog_unsaved_) pending = unsaved_games_ > 0 ? std::to_string(unsaved_games_) + (unsaved_games_ == 1 ? " game is" : " games are") + " not saved yet. " : std::string("Recent changes are not saved yet. ");
+    health_pending_text_ = pending.empty() ? std::string() : pending.substr(0, pending.size() - 1);
+    lines.push_back({"Your library cannot be saved", "Segarecomp cannot save to its library folder (" + library_unwritable_ + "). " + pending + "Anything not saved would be lost when you close it. Fix the folder and it will be saved by itself, or choose another in Settings > Storage & Data."});
+  }
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const float px = ctx_.u(12.0F), title_px = ctx_.u(12.5F), pad = ctx_.u(9.0F);
+  for (const Line &l : lines) {
+    health_notice_text_ += (health_notice_text_.empty() ? "" : ",") + std::string(l.title);
+    const auto wrapped = wrap(ctx_.regular, px, w - 2.0F * pad - ctx_.u(26.0F), l.text);
+    const float h = pad * 2.0F + title_px + ctx_.u(4.0F) + static_cast<float>(wrapped.size()) * (px + ctx_.u(3.0F));
+    const ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + w, a.y + h);
+    dl->AddRectFilled(a, b, rgba(54, 40, 8, 200), ctx_.u(6.0F));
+    dl->AddRect(a, b, col::warn, ctx_.u(6.0F), 0, std::max(1.0F, ctx_.u(1.2F)));
+    icon_image(dl, ctx_.icon("warning"), ImVec2(a.x + pad, a.y + pad - ctx_.u(1.0F)), ctx_.u(16.0F), col::warn);
+    draw_text(dl, ctx_.bold, title_px, col::warn, ImVec2(a.x + pad + ctx_.u(24.0F), a.y + pad), l.title);
+    float y = a.y + pad + title_px + ctx_.u(4.0F);
+    for (const auto &t : wrapped) { draw_text(dl, ctx_.regular, px, col::text, ImVec2(a.x + pad + ctx_.u(24.0F), y), t.c_str()); y += px + ctx_.u(3.0F); }
+    ImGui::Dummy(ImVec2(w, h + ctx_.u(8.0F)));
   }
 }
 
 void App::draw_library(float w, float h) {
   const auto &all = catalog_.entries();
-  page_header(ctx_, w, "LIBRARY HOME", "Browse, search and manage your recompiled games.");
+  const bool welcome = all.empty() && welcome_armed_ && !welcome_dismissed_;
+  if (!welcome) page_header(ctx_, w, "LIBRARY HOME", "Browse, search and manage your recompiled games.");   // the welcome card carries its own title
+  draw_health_notice(w);
   if (all.empty()) {
     if (!catalog_notice_.empty() || catalog_.read_only()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, catalog_.notice());
-    draw_import_body(w, h);
+    if (welcome) draw_welcome(w, h); else draw_empty_library(w, h);
     return;
   }
   // SEG-069-T004: the search row, the filters and the game grid live in ONE scrolling child. ImGui's directional navigation is scored per window, and a
@@ -648,7 +810,7 @@ void App::draw_library(float w, float h) {
     input_text(ctx_, "search", search_, sizeof search_, std::max(ctx_.u(140.0F), w - import_w - ctx_.u(12.0F) - (narrow ? tools + ctx_.u(10.0F) : 0.0F)), ImGui::GetIO().ConfigMacOSXBehaviors ? "Search games...  (Cmd+F)" : "Search games...  (Ctrl+F)");
     if (narrow) { ImGui::SameLine(0.0F, ctx_.u(10.0F)); view_tools(); }
     ImGui::SameLine(0.0F, ctx_.u(narrow ? 8.0F : 12.0F));
-    if (button(ctx_, "lib_import", "Import ROMs", ImVec2(import_w, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
+    if (button(ctx_, "lib_import", "Add game", ImVec2(import_w, ctx_.u(36.0F)), Style::secondary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
   }
   ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
   {
@@ -659,7 +821,7 @@ void App::draw_library(float w, float h) {
     const float dw = narrow ? std::max(ctx_.u(104.0F), (w - ctx_.u(16.0F)) / 3.0F) : ctx_.u(160.0F);
     if (dropdown(ctx_, "pf", {"All Platforms", "Genesis", "Master System", "Sega CD"}, &platform, dw, narrow ? nullptr : ctx_.icon("controller"))) platform_filter_ = platform;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    if (dropdown(ctx_, "sf", {"All Statuses", "Ready", "Needs build", "Failed", "Missing ROM"}, &status, dw)) status_filter_ = status;
+    if (dropdown(ctx_, "sf", {"All Statuses", "Ready", "Needs preparing", "Failed", "Game file missing"}, &status, dw)) status_filter_ = status;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (dropdown(ctx_, "so", {"Last Played", "Title", "Last Built", "Date Added", "Size"}, &sort, dw)) { settings_.sort = sort_ids[sort]; save_settings(); }
     if (!narrow) {
@@ -709,7 +871,7 @@ void App::draw_library(float w, float h) {
     const float usable = w - ctx_.u(14.0F);
     const int columns = std::max(1, static_cast<int>((usable + gap) / (card_w + gap)));
     const float cw = card_w + (usable + gap - static_cast<float>(columns) * (card_w + gap)) / static_cast<float>(columns);
-    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) / kCoverAspect + ctx_.u(66.0F);
+    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) / kCoverAspect + ctx_.u(104.0F);
     const int rows = (static_cast<int>(visible.size()) + columns - 1) / columns;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGuiListClipper clipper;
@@ -748,10 +910,14 @@ void App::draw_library(float w, float h) {
 void App::remember_focus_for_sheet(bool sheet_open) {
   ImGuiContext &g = *ImGui::GetCurrentContext();
   if (sheet_open && !modal_return_.armed) {
-    if (g.NavId != 0 && g.NavWindow != nullptr && g.NavWindow->ID != ImGui::GetID("##modal") && g.NavWindow->ID != ImGui::GetID("##picker")) {
+    // A sheet raised by an action that also changed the page (Add & prepare leaves the Add game review for the Library, then asks the first-run question) finds NavId still on a control of the
+    // page that is gone: remembering it would strand keyboard navigation (Tab did nothing once the sheet closed). Such a sheet has nothing to return to; the new page's entry gets focus instead.
+    const bool stale = frame_ <= page_changed_frame_ + 1;
+    if (!stale && g.NavId != 0 && g.NavWindow != nullptr && g.NavWindow->ID != ImGui::GetID("##modal") && g.NavWindow->ID != ImGui::GetID("##picker")) {
       modal_return_ = FocusMemory{g.NavId, g.NavWindow, g.NavWindow->NavRectRel[ImGuiNavLayer_Main], true};
     } else {
       modal_return_.armed = true;  // nothing to return to
+      modal_return_stale_ = stale;
     }
   } else if (!sheet_open && modal_return_.armed) {
     if (modal_return_.id != 0 && modal_return_.window != nullptr) {
@@ -761,6 +927,7 @@ void App::remember_focus_for_sheet(bool sheet_open) {
       g.NavHighlightItemUnderNav = true;
     }
     modal_return_ = FocusMemory{};
+    if (std::exchange(modal_return_stale_, false)) nav_reset_ = true;   // ImGui itself returns to the page's last focused control, which is gone: start on the new page's entry
   }
 }
 
@@ -791,6 +958,7 @@ void App::draw_modal(float w, float h) {
     subtitle = modal_.plan.entry_ids.empty() ? "This will permanently delete the selected files to free up disk space."
                                               : "This will permanently delete the selected files for " + std::to_string(modal_.plan.entry_ids.size()) + " game(s) to free up disk space.";
     keeps = modal_.plan.remains;
+    if (modal_.plan.kind != PlanKind::remove_from_library) keeps.push_back("Saves, save states, input recordings, your ROMs and mod approvals (never a cleanup target)");   // SEG-150-T007
     notes = modal_.plan.notes;
     for (const auto &e : modal_.plan.excluded) notes.push_back("Excluded: " + e);
     notes.push_back("This cannot be undone. Original ROM files are never touched.");
@@ -807,35 +975,36 @@ void App::draw_modal(float w, float h) {
   } else if (modal_.kind == Modal::Kind::clear_library) {
     subtitle = "Every game is removed from the library and the launcher forgets its history.";
     keeps = {"Build folders in the cache (use Storage to delete them)", "Your ROM files", "ROM copies extracted from ZIP archives", "Save data and input recordings of Sega CD games"};
-  } else if (modal_.kind == Modal::Kind::first_run_intermediates) {
-    subtitle = "While building, Segarecomp creates intermediate files: generated C, object files and logs. They help with debugging but take disk space. Removing them after a successful build keeps the playable game and its essential metadata and diagnostics.";
-    keeps = {"Your ROM files (never touched)", "The playable game and its metadata after each build"};
-    notes = {"You can change this any time in Settings > Build & Runtime.", "Press Esc (or B on a controller) to decide later."};
-    if (!modal_.lines.empty()) for (const auto &l : modal_.lines) notes.push_back(l);
-    body.clear();
   } else if (modal_.kind == Modal::Kind::restore_defaults) {
     subtitle = "Launcher preferences (view, sort, compact mode, cleanup policy, region order) return to their defaults.";
     keeps = {"The library and builds", "Viewer controls and video settings"};
   } else if (modal_.kind == Modal::Kind::install_patch) {
     subtitle = modal_.code_bearing
-                   ? "WARNING: this patch contains executable C source code that will run, unsandboxed, with this program's permissions once you build it. Approve it only if you trust where it came from."
-                   : "The package was verified against your original game. Installing it only adds the patch to this game; nothing is built or switched yet.";
-    keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences for this game"};
-    notes = modal_.lines;   // what was verified: compatibility, purpose, validated width, identity
-    notes.push_back("The patched version is a separate program built from the patched image. Choose Patched, then Build patched version, when you want it.");
+                   ? "This mod contains executable C source code. Once you prepare it, it runs with your user account's permissions and is NOT sandboxed. Approve it only if you trust where it came from."
+                   : "The package was verified against your original game. Installing it only adds the mod to this game; nothing is prepared or switched yet.";
+    keeps = {"Your original ROM file (never modified)", "The Vanilla build, its settings and its save data", "Your widescreen preferences for this game"};
+    notes = modal_.lines;   // what was verified, who made it, what it targets and reads, the exact identity
+    notes.push_back("The mod is a separate program prepared from this package. Choose Use this mod, then Prepare selected mod, when you want it; Cancel installs and approves nothing.");
   } else if (modal_.kind == Modal::Kind::remove_patch) {
-    subtitle = "The patch package is removed from this game. Vanilla stays exactly as it is.";
+    subtitle = "The mod package is removed from this game. The original game (Vanilla) stays exactly as it is.";
     keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences, recordings and saves"};
   }
   const std::vector<std::string> wrapped_sub = modal_.kind == Modal::Kind::message ? std::vector<std::string>{} : wrap(ctx_.regular, px, inner - ctx_.u(54.0F), subtitle);
-  std::vector<std::string> msg_lines, note_lines;
+  std::vector<std::string> msg_lines;
+  std::vector<std::pair<std::string, ImU32>> note_lines;   // wrapped note text and its color
+  const bool install_sheet = modal_.kind == Modal::Kind::install_patch;   // SEG-150-T006: verification facts first, what stays untouched after them, the executable-code warning in the warning tone
   for (const auto &l : body) for (const auto &x : wrap(ctx_.regular, px, inner, l)) msg_lines.push_back(x);
-  for (const auto &l : notes) for (const auto &x : wrap(ctx_.regular, ctx_.u(11.5F), inner, l)) note_lines.push_back(x);
+  for (const auto &l : notes) {
+    const ImU32 color = install_sheet ? (l.rfind("Executable code", 0) == 0 ? col::warn : col::text2) : col::dim;
+    for (const auto &x : wrap(ctx_.regular, ctx_.u(install_sheet ? 12.0F : 11.5F), inner - ctx_.u(18.0F), l)) note_lines.push_back({x, color});
+    if (install_sheet && !note_lines.empty()) note_lines.push_back({std::string(), color});   // an empty line separates the facts
+  }
   const float line_h = px + ctx_.u(5.0F);
   float ph = ctx_.u(30.0F) + ctx_.u(52.0F) + static_cast<float>(wrapped_sub.size()) * line_h + static_cast<float>(msg_lines.size()) * line_h;
   if (!cats.empty()) ph += static_cast<float>(cats.size()) * ctx_.u(26.0F) + ctx_.u(14.0F);
   if (!keeps.empty()) ph += ctx_.u(28.0F) + static_cast<float>(keeps.size()) * ctx_.u(21.0F);
-  ph += static_cast<float>(note_lines.size()) * (ctx_.u(11.5F) + ctx_.u(4.0F)) + ctx_.u(8.0F);
+  const float note_step = ctx_.u(install_sheet ? 12.0F : 11.5F) + ctx_.u(4.0F);
+  ph += static_cast<float>(note_lines.size()) * note_step + ctx_.u(8.0F) + (install_sheet ? ctx_.u(26.0F) : 0.0F);
   if (modal_.kind == Modal::Kind::remove_entries || modal_.kind == Modal::Kind::remove_patch || (is_plan && modal_.plan.kind == PlanKind::failed_partial)) ph += ctx_.u(34.0F);
   if (is_plan) ph += ctx_.u(46.0F);
   ph += ctx_.u(70.0F);
@@ -854,11 +1023,12 @@ void App::draw_modal(float w, float h) {
   if (modal_.kind != Modal::Kind::message) {
     const bool destructive = is_plan || modal_.kind == Modal::Kind::remove_entries || modal_.kind == Modal::Kind::clear_library || modal_.kind == Modal::Kind::remove_patch;
     const float isz = ctx_.u(40.0F);
-    dl->AddRectFilled(ImVec2(lx, y), ImVec2(lx + isz, y + isz), destructive ? rgba(60, 20, 30) : rgba(14, 40, 92), ctx_.u(6.0F));
-    icon_image(dl, ctx_.icon(destructive ? "trash" : "info"), ImVec2(lx + ctx_.u(8.0F), y + ctx_.u(8.0F)), ctx_.u(24.0F), destructive ? col::err : col::info);
+    const bool code_warning = modal_.kind == Modal::Kind::install_patch && modal_.code_bearing;   // executable code: the warning symbol and tone, never the neutral info mark
+    dl->AddRectFilled(ImVec2(lx, y), ImVec2(lx + isz, y + isz), destructive ? rgba(60, 20, 30) : (code_warning ? rgba(70, 50, 14) : rgba(14, 40, 92)), ctx_.u(6.0F));
+    icon_image(dl, ctx_.icon(destructive ? "trash" : (code_warning ? "warning" : "info")), ImVec2(lx + ctx_.u(8.0F), y + ctx_.u(8.0F)), ctx_.u(24.0F), destructive ? col::err : (code_warning ? col::warn : col::info));
     draw_text(dl, ctx_.bold, ctx_.u(17.0F), col::text, ImVec2(lx + isz + ctx_.u(14.0F), y), ellipsize(ctx_.bold, ctx_.u(17.0F), inner - isz - ctx_.u(40.0F), modal_.title).c_str());
     float sy = y + ctx_.u(24.0F);
-    for (const auto &l : wrapped_sub) { draw_text(dl, ctx_.regular, px, col::text2, ImVec2(lx + isz + ctx_.u(14.0F), sy), l.c_str()); sy += line_h; }
+    for (const auto &l : wrapped_sub) { draw_text(dl, ctx_.regular, px, code_warning ? col::warn : col::text2, ImVec2(lx + isz + ctx_.u(14.0F), sy), l.c_str()); sy += line_h; }
     y = std::max(sy, y + isz) + ctx_.u(12.0F);
   } else {
     draw_text(dl, ctx_.bold, ctx_.u(16.0F), col::text, ImVec2(lx, y), ellipsize(ctx_.bold, ctx_.u(16.0F), inner, modal_.title).c_str());
@@ -877,6 +1047,11 @@ void App::draw_modal(float w, float h) {
     }
     y += ctx_.u(14.0F);
   }
+  const auto draw_notes = [&] {
+    if (install_sheet) { draw_text(dl, ctx_.bold, px, col::text, ImVec2(lx, y), "What was checked, before you decide"); y += ctx_.u(26.0F); }
+    for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(install_sheet ? 12.0F : 11.5F), l.second, ImVec2(lx, y), l.first.c_str()); y += l.first.empty() ? ctx_.u(5.0F) : note_step; }
+  };
+  const auto draw_keeps = [&] {
   if (!keeps.empty()) {
     draw_text(dl, ctx_.bold, px, col::text, ImVec2(lx, y), "Keep the following (not removed):");
     y += ctx_.u(26.0F);
@@ -886,10 +1061,11 @@ void App::draw_modal(float w, float h) {
       y += ctx_.u(21.0F);
     }
   }
-  for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::dim, ImVec2(lx, y), l.c_str()); y += ctx_.u(11.5F) + ctx_.u(4.0F); }
+  };
+  if (install_sheet) { draw_notes(); draw_keeps(); } else { draw_keeps(); draw_notes(); }
   y += ctx_.u(6.0F);
   if (modal_.kind == Modal::Kind::remove_entries) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete their generated build folders", &modal_.delete_cache); y += ctx_.u(34.0F); }
-  if (modal_.kind == Modal::Kind::remove_patch) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete the patched build (generated files only)", &modal_.delete_cache); y += ctx_.u(34.0F); }
+  if (modal_.kind == Modal::Kind::remove_patch) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete this mod's prepared build (generated files only)", &modal_.delete_cache); y += ctx_.u(34.0F); }
   if (is_plan && modal_.plan.kind == PlanKind::failed_partial) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_logs", "Keep build.log and status.json of failed builds", &modal_.keep_logs); y += ctx_.u(34.0F); }
   if (is_plan) {
     draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text2, ImVec2(lx, y + ctx_.u(10.0F)), "Total space to free:");
@@ -903,16 +1079,10 @@ void App::draw_modal(float w, float h) {
   ImGui::EndChild();
   ImGui::PopStyleVar();
   const float bw = (inner - ctx_.u(12.0F)) * 0.5F, bh = ctx_.u(38.0F), by = b.y - ctx_.u(24.0F) - bh;
-  bool confirm = false, cancel = false, choose_keep = false, choose_remove = false;
-  if (modal_.kind == Modal::Kind::first_run_intermediates) {
-    ImGui::SetCursorScreenPos(ImVec2(lx, by));
-    choose_keep = button(ctx_, "mod_keep", "Keep intermediates", ImVec2(bw, bh), Style::primary);
-    if (!modal_focus_done_) { ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); ImGui::SetNavCursorVisible(true); modal_focus_done_ = true; }  // focus starts inside the sheet
-    ImGui::SetCursorScreenPos(ImVec2(lx + bw + ctx_.u(12.0F), by));
-    choose_remove = button(ctx_, "mod_remove", "Remove after builds", ImVec2(bw, bh), Style::secondary);
-  } else if (modal_.kind != Modal::Kind::message) {
+  bool confirm = false, cancel = false;
+  if (modal_.kind != Modal::Kind::message) {
     const bool primary_confirm = modal_.kind == Modal::Kind::restore_defaults || modal_.kind == Modal::Kind::install_patch;
-    const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : (modal_.kind == Modal::Kind::install_patch ? (modal_.code_bearing ? "Approve and install" : "Install patch") : "Remove"));
+    const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : (modal_.kind == Modal::Kind::install_patch ? (modal_.code_bearing ? "Approve and install" : "Install mod") : "Remove"));
     ImGui::SetCursorScreenPos(ImVec2(lx, by));
     cancel = button(ctx_, "mod_cancel", "Cancel", ImVec2(bw, bh), Style::secondary);
     ImGui::SetCursorScreenPos(ImVec2(lx + bw + ctx_.u(12.0F), by));
@@ -923,16 +1093,6 @@ void App::draw_modal(float w, float h) {
   }
   if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) cancel = true;  // Esc / East: back out
   ImGui::End();
-  if (modal_.kind == Modal::Kind::first_run_intermediates) {
-    if (choose_keep || choose_remove) {
-      if (apply_intermediates_choice(choose_remove)) { modal_ = Modal{}; toast(choose_remove ? "Intermediates will be removed after successful builds." : "Intermediates will be kept."); }
-      else { modal_.lines = {"Your choice could not be saved. Try again."}; toast("Settings could not be saved.", true); }
-    } else if (cancel) {
-      modal_ = Modal{};  // decide later: nothing is recorded; the question is asked again at the next start unless a setting or the library was saved meanwhile (then the profile is no longer new)
-      trace("onboarding=intermediates_deferred");
-    }
-    return;
-  }
   if (confirm) {
     const Modal m = modal_;
     modal_ = Modal{};
@@ -963,12 +1123,14 @@ void App::draw_modal(float w, float h) {
     } else if (m.kind == Modal::Kind::remove_patch) {
       patch_remove_confirmed(m);
     } else if (m.kind == Modal::Kind::restore_defaults) {
+      const bool legacy_marker = settings_.intermediates_choice_made;
       settings_ = default_launcher_settings();
-      settings_.intermediates_choice_made = true;  // restoring defaults never re-asks the one-time first-run question
+      settings_.intermediates_choice_made = legacy_marker;  // a legacy record of an earlier release's question: preserved verbatim, never read
       save_settings();
       toast("Launcher preferences restored.");
     }
   } else if (cancel) {
+    if (modal_.kind == Modal::Kind::install_patch) trace(modal_.code_bearing ? "patch=declined_approval" : "patch=declined");   // nothing was installed or approved
     modal_ = Modal{};
   }
 }

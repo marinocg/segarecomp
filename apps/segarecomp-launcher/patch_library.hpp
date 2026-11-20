@@ -48,4 +48,32 @@ bool remove_patch(LibraryEntry &entry, const std::string &identity, const std::f
 // "<name> <version>" label of an installed patch.
 [[nodiscard]] std::string patch_label(const InstalledPatch &patch);
 
+// SEG-150-T006: the vocabulary of the per-game Mods tab. Pure functions of recorded facts (nothing is guessed: an unknown author or capability list is reported as unknown).
+// Mods are admitted for Genesis games only (verify_mod / install_patch refuse every other platform); "" = available, otherwise the plain-language reason.
+[[nodiscard]] std::string mods_unavailable_reason(const std::string &platform_id);
+// What the package carries, from the record: "Native C source (runs with host-process permissions)", "Luau script", "ROM data edits" or "Patched game image".
+[[nodiscard]] std::string mod_kind_label(const InstalledPatch &patch);
+// The capabilities the record names ("work RAM snapshot, VDP state, ..."); "" when the record does not hold them (a schema 3 mod names its capabilities only on the install sheet).
+[[nodiscard]] std::string mod_capabilities_label(const InstalledPatch &patch);
+
+// The action that follows a refusal (the refusal text itself stays the product's typed message): keyed on what the refusal says, never invented for an unknown one.
+[[nodiscard]] std::string mod_refusal_next_step(const std::string &refusal);
+
+enum class ModTone { neutral, ok, warn, err };
+struct ModStatusInput {
+  bool selected = false;
+  bool built = false;             // a published build of THIS mod exists
+  bool package_present = true;    // the installed package file is a regular file in the library
+  bool failed = false;            // the last preparation of the selected variant failed
+  std::string failure;            // its plain-language reason
+};
+struct ModStatus {
+  std::string code;               // stable: installed | installed_prepared | selected_needs_preparation | selected_prepared | needs_approval | incompatible_package_missing | preparation_failed
+  std::string label;              // what the row says
+  std::string reason;             // typed reason for a blocked state ("" otherwise)
+  std::string next;               // the action that resolves it ("" when nothing is needed)
+  ModTone tone = ModTone::neutral;
+};
+[[nodiscard]] ModStatus mod_status(const InstalledPatch &patch, const ModStatusInput &in);
+
 }  // namespace launcher

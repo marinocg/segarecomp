@@ -122,4 +122,13 @@ bool picker_accept(const fs::path &root, const fs::path &path, const std::vector
   return true;
 }
 
+bool picker_accept_folder(const fs::path &root, const fs::path &path, std::string *reason) {
+  const auto fail = [&](const char *text) { if (reason != nullptr) *reason = text; return false; };
+  if (!picker_contains(root, path)) return fail("That folder is outside the chosen location.");
+  std::error_code ec;
+  const auto status = fs::symlink_status(path, ec);
+  if (ec || status.type() != fs::file_type::directory) return fail("That is not a plain folder.");
+  return true;
+}
+
 } // namespace launcher

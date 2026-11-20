@@ -2,12 +2,15 @@
 
 #include "cover_download.hpp"
 #include "covers.hpp"
+#include "launcher_core.hpp"
 #include "launcher_settings.hpp"
 #include "library_catalog.hpp"
 #include "library_view.hpp"
 #include "pixel_assets.hpp"
 #include "rom_zip.hpp"
 #include "segarecomp/sha256.hpp"
+
+#include <SDL3/SDL.h>
 
 #include "zlib.h"  // the vendored deflate subset: the test builds real deflated archives
 
@@ -282,6 +285,51 @@ int run_tests() {
     LauncherSettings unanswered;
     expect(save_launcher_settings(unanswered, file) && !load_launcher_settings(file).intermediates_choice_made, "an unanswered marker round trips as unanswered");
   }
+  step("settings upgrade and effective paths");
+  {  // SEG-150-T007: the Settings regroup changes no file format. A profile written by the previous release loads with exactly its values, nothing is reset or
+     // silently re-decided (cleanup policy, answered first-run question, regions), and saving it back keeps the same keys: older releases can still read it.
+    const fs::path file = dir / "library" / "legacy-settings.json";
+    const std::string previous = "{\"schema\":1,\"view\":\"list\",\"sort\":\"title\",\"compact\":true,\"adopt_cache_on_start\":false,\"keep_old_artifacts\":true,"
+                                 "\"intermediates_choice_made\":true,\"cleanup_mode\":\"soft_limit\",\"keep_last_n\":12,\"soft_limit_mb\":2048,\"preferred_regions\":[\"Japan\",\"USA\"]}";
+    spit(file, previous);
+    const LauncherSettings old = load_launcher_settings(file);
+    expect(old.view == "list" && old.sort == "title" && old.compact && !old.adopt_cache_on_start && old.keep_old_artifacts && old.intermediates_choice_made, "a previous-format profile keeps every general value");
+    expect(old.cleanup.mode == "soft_limit" && old.cleanup.keep_last_n == 12 && old.cleanup.soft_limit_mb == 2048, "its cleanup policy is not changed by the upgrade");
+    expect(old.preferred_regions.size() == 2 && old.preferred_regions[0] == "Japan" && old.preferred_regions[1] == "USA", "its preferred regions keep their order");
+    expect(!old.provider_opt_in, "the reserved provider opt-in stays off");
+    expect(save_launcher_settings(old, file), "the upgraded profile saves");
+    const LauncherSettings again = load_launcher_settings(file);
+    expect(again.view == old.view && again.sort == old.sort && again.compact == old.compact && again.adopt_cache_on_start == old.adopt_cache_on_start && again.keep_old_artifacts == old.keep_old_artifacts &&
+               again.cleanup.mode == old.cleanup.mode && again.cleanup.keep_last_n == old.cleanup.keep_last_n && again.cleanup.soft_limit_mb == old.cleanup.soft_limit_mb && again.preferred_regions == old.preferred_regions,
+           "load, save and load again is the identity");
+    for (const char *key : {"schema", "view", "sort", "compact", "adopt_cache_on_start", "keep_old_artifacts", "intermediates_choice_made", "cleanup_mode", "keep_last_n", "soft_limit_mb", "preferred_regions"})
+      expect(slurp(file).find(std::string("\"") + key + "\"") != std::string::npos, std::string("the saved file still carries ") + key);
+    // the oldest shape (before the first-run question and the adopt/keep switches): defaults only where a member is missing, never a policy change
+    spit(file, "{\"view\":\"grid\",\"cleanup_mode\":\"intermediates\"}");
+    const LauncherSettings oldest = load_launcher_settings(file);
+    expect(oldest.cleanup.mode == "intermediates" && oldest.intermediates_choice_made && oldest.adopt_cache_on_start && !oldest.keep_old_artifacts && !oldest.compact, "the oldest profile keeps its cleanup mode and is not asked again");
+    // the Settings dialog edits nothing that is not in this struct: a new setting would have to default so that an old file means the old behaviour
+    const LauncherSettings defaults = default_launcher_settings();
+    expect(defaults.cleanup.mode == "never" && !defaults.keep_old_artifacts && defaults.adopt_cache_on_start && !defaults.intermediates_choice_made, "defaults are the documented ones");
+
+    // effective paths: which of the three locations an environment variable governs
+    const auto set = [](const char *name, const std::string &value) { SDL_SetEnvironmentVariable(SDL_GetEnvironment(), name, value.c_str(), true); };
+    const auto unset = [](const char *name) { SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), name); };
+    for (const char *name : {"SEGARECOMP_CACHE_DIR", "SEGARECOMP_LIBRARY_DIR", "SEGARECOMP_HOME"}) unset(name);
+    const EffectivePaths plain = effective_paths(locate_layout());
+    expect(!plain.cache_overridden && !plain.library_overridden && !plain.home_overridden && plain.library == plain.cache / "library", "without variables every location is the default and the library sits in the cache folder");
+    const fs::path cache_dir = dir / "env-cache", library_dir = dir / "env-library", home_dir = dir / "env-home";
+    set("SEGARECOMP_CACHE_DIR", cache_dir.string());
+    EffectivePaths with_cache = effective_paths(locate_layout());
+    expect(with_cache.cache_overridden && !with_cache.library_overridden && with_cache.cache == cache_dir && with_cache.library == cache_dir / "library", "SEGARECOMP_CACHE_DIR governs the cache and, by default, the library inside it");
+    set("SEGARECOMP_LIBRARY_DIR", library_dir.string());
+    EffectivePaths with_library = effective_paths(locate_layout());
+    expect(with_library.cache_overridden && with_library.library_overridden && with_library.library == library_dir && with_library.cache == cache_dir, "SEGARECOMP_LIBRARY_DIR governs the library separately");
+    set("SEGARECOMP_HOME", home_dir.string());
+    EffectivePaths with_home = effective_paths(locate_layout());
+    expect(with_home.home_overridden && with_home.home == home_dir && with_home.library == library_dir, "SEGARECOMP_HOME governs the installation location");
+    for (const char *name : {"SEGARECOMP_CACHE_DIR", "SEGARECOMP_LIBRARY_DIR", "SEGARECOMP_HOME"}) unset(name);
+  }
   step("library view helpers");
   {  // box-art frame, region column, build queue (SEG-067)
     const float frame_w = 162.0F, frame_h = frame_w / kCoverAspect;
@@ -300,6 +348,20 @@ int run_tests() {
     expect(std::string(region_label("genesis", "usa")) == "USA" && std::string(region_label("genesis", "japan")) == "Japan" && std::string(region_label("genesis", "europe")) == "Europe", "Genesis regions are named");
     expect(std::string(region_label("genesis", "")) == "Unknown" && std::string(region_label("genesis", "mars")) == "Unknown" && std::string(region_label("saturn", "usa")) == "Unknown", "an unavailable region reads Unknown");
     expect(std::string(region_label("master-system", "usa")) == "Export", "Master System shows its export baseline");
+    {  // T010: cutting text to fit never leaves a lone byte of a multi-byte sequence (it rendered as a replacement glyph)
+      std::string t = "Ab\xC3\x86";   // "AbÆ"
+      utf8_pop_back(t);
+      expect(t == "Ab", "utf8_pop_back removes a whole two-byte code point");
+      std::string e = "x\xE2\x80\x93";   // "x" + en dash (three bytes)
+      utf8_pop_back(e);
+      expect(e == "x", "utf8_pop_back removes a whole three-byte code point");
+      utf8_pop_back(e);
+      utf8_pop_back(e);
+      expect(e.empty(), "utf8_pop_back on an empty string is a no-op");
+      std::string lone = "ab\xC3";   // a truncated sequence is dropped entirely
+      utf8_pop_back(lone);
+      expect(lone == "ab", "utf8_pop_back drops a truncated lead byte");
+    }
 
     BuildQueue q;
     expect(q.empty() && q.size() == 0, "the queue starts empty");

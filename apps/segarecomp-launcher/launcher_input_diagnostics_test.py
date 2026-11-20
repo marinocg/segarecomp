@@ -42,7 +42,7 @@ def main():
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SDL_JOYSTICK_HIDAPI="0",
                    SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS="1", SEGARECOMP_CACHE_DIR=str(tmp / "cache"), SEGARECOMP_HOME=str(tmp / "no-package"))
         env.pop("SEGARECOMP_GAMEPAD_MAPPINGS", None)
-        head = ["settings_tab 4", "frames 6"]
+        head = ["settings_tab 1", "frames 6"]  # Appearance & Controls (the Input diagnostics block is its last section)
         # A: nothing is attached (the page works without any ROM)
         check("A", run(exe, env, head + ["expect page=settings", "expect pad_count=0", "expect input_state=A", "quit"], tmp), 3, failures)
         # B: a joystick without a gamepad mapping; raw button presses never turn it into a working gamepad

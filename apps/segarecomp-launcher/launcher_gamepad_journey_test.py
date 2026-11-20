@@ -9,8 +9,9 @@ presses one D-pad direction until the control holds focus (and records `expect o
   library       sidebar <-> grid hops, toolbar, secondary actions through the card menu (North), list view, Details and Back with focus restoration
   build         Details -> Build -> Cancel running build; a second game queued then removed from the queue; the Build/Cancel/Unqueue controls follow the build state
   older build   after an update the "playable older build" offers Play and Recompile, both reachable
-  settings      tabs, options, scrolling to the bottom; restore-defaults confirmation confirmed/cancelled
-  storage       the cleanup confirmation sheet is reachable, cancel leaves files, East backs out
+  settings      the four groups (General, Appearance & Controls, Storage & Data, Advanced), options, scrolling to the bottom; restore-defaults confirmation confirmed/cancelled
+  settings groups  every group and its last distinctive control (Input diagnostics included) are reachable
+  storage       Settings > Storage & Data opens the cleanup page, its confirmation sheet is reachable, cancel leaves files, East backs out to the group with focus restored
 
 Run at 1080x740 and 720x520 (SEGARECOMP_SHOT_SIZE).
 
@@ -123,20 +124,26 @@ class Runner:
 START = ["frames 10", "pad_attach", "frames 20"]
 
 
+def counted(script):
+    return sum(1 for step in script if step.startswith(("expect ", "pad_seek ")))
+
+
 def first_run(r, tmp, exe, fake_cli, fake_game, size):
-    p = Profile(tmp, "first-run", exe, fake_cli, fake_game)
-    script = START + expect(modal=1)
-    for d in DIRS:  # focus is trapped in the sheet: whatever the direction, it stays on one of its two choices
-        script += press(d)
-    script += expect(modal=1, focus_id="mod_remove")   # the last press was Right
-    script += press("dpad_left") + expect(focus_id="mod_keep") + press("dpad_right") + expect(focus_id="mod_remove") + press("dpad_left") + expect(focus_id="mod_keep")
-    script += press("east") + expect(modal=0, intermediates_choice=0)          # East defers: nothing recorded
-    script += ["quit"]
-    r.check("first run defer", p.run(script, {"SEGARECOMP_GUI_ONBOARDING": "always"}, size), 8)
-    script = START + expect(modal=1) + press("dpad_right") + press("south") + expect(modal=0, cleanup_mode="intermediates", intermediates_choice=1) + ["quit"]
-    r.check("first run choose", p.run(script, {"SEGARECOMP_GUI_ONBOARDING": "always"}, size), 4)
-    settings = json.loads((p.lib / "launcher-settings.json").read_text())
-    r.expect(settings.get("cleanup_mode") == "intermediates" and settings.get("intermediates_choice_made") is True, f"first run persisted: {settings}")
+    # SEG-150 round B: no question is asked before the first preparation (the non-deleting cleanup default applies); a fresh profile gets the skippable welcome.
+    always = {"SEGARECOMP_GUI_ONBOARDING": "always"}
+    p = Profile(tmp, "first-run", exe, fake_cli, fake_game, games=1)
+    open_game = press("dpad_down") + seek("card:game0", "dpad_right", 4) + press("south") + press("dpad_right") + expect(page="details")
+    script = START + expect(modal=0, welcome=0, build_count=0) + open_game + seek("build", "dpad_down", 14) + press("south") + expect(modal=0, cleanup_mode="never", cleanup_policy="never:10:4096")
+    script += ["wait_idle", "frames 60"] + expect(build_outcome="ok") + ["quit"]
+    r.check("first run prepare", p.run(script, always, size), counted(script))   # the preparation starts at once, with no sheet in between
+    r.expect(not (p.lib / "launcher-settings.json").exists(), "the first preparation records nothing in the settings file")
+    # a brand-new profile: the welcome (no modal over it), skippable with the pad, and skipping records nothing
+    w = Profile(tmp, "welcome", exe, fake_cli, fake_game, games=0)
+    script = START + expect(welcome=1, modal=0, library_size=0, intermediates_choice=0) + seek("welcome_skip", "dpad_right", 8) + press("south") + expect(welcome=0, page="library", modal=0, intermediates_choice=0) + ["quit"]
+    r.check("welcome skip", w.run(script, always, size), counted(script))
+    script = START + expect(welcome=1) + seek("welcome_add", "dpad_right", 8) + press("south") + expect(picker=1, modal=0, intermediates_choice=0) + ["quit"]
+    r.check("welcome add", w.run(script, always, size), counted(script))
+    r.expect(not (w.lib / "launcher-settings.json").exists() or json.loads((w.lib / "launcher-settings.json").read_text()).get("intermediates_choice_made") is not True, "welcome never records the first-run choice")
 
 
 def import_journey(r, tmp, exe, fake_cli, fake_game, size):
@@ -149,12 +156,13 @@ def import_journey(r, tmp, exe, fake_cli, fake_game, size):
     (root / "notes.txt").write_text("not a rom")
     env = {"SEGARECOMP_PICKER_ROOT": str(root)}
     # empty library: Browse (controller) -> picker -> into the folder -> tick both ROMs -> Import
-    script = START + seek("dz_browse", "dpad_right", 6) + press("south") + expect(picker=1, focus_id="pkrow#0")
+    script = START + expect(welcome=0) + seek("empty_add", "dpad_right", 6) + press("south") + expect(picker=1, focus_id="pkrow#0")
     script += press("south") + expect(picker_level="root")
     script += seek("pkrow#2", "dpad_down", 4) + press("south") + expect(picker_chosen=1)
     script += seek("pkrow#3", "dpad_down", 2) + press("south") + expect(picker_chosen=2)
-    script += seek("pk_cancel", "dpad_down", 3) + seek("pk_ok", "dpad_right", 3) + press("south") + ["frames 90"] + expect(picker=0, library_size=2) + ["quit"]
-    r.check("import via picker", p.run(script, env, size), 12)
+    script += seek("pk_cancel", "dpad_down", 3) + seek("pk_ok", "dpad_right", 3) + press("south") + ["wait_import", "frames 10"] + expect(picker=0, library_size=0, page="import", review="valid,valid")   # inspected, not added yet
+    script += seek("review_add", "dpad_right", 8) + press("south") + ["frames 20"] + expect(library_size=2, page="library", build_count=0, playing=0) + ["quit"]   # Add only: no build, no launch
+    r.check("import via picker", p.run(script, env, size), counted(script))
     # back / cancel semantics and root confinement: East goes up, then to the locations, then closes; nothing is imported
     script = START + press("dpad_down") + seek("card:a", "dpad_right", 3) + seek("lib_import", "dpad_up", 8) + press("south") + expect(picker=1)
     script += press("south") + expect(picker_level="root")
@@ -231,27 +239,54 @@ def older_build_journey(r, tmp, exe, fake_cli, fake_game, size):
     r.expect(any(l.startswith("run=older_build") for l in trace), f"Play did not start the earlier build: {trace!r}")
 
 
+def to_settings_group(size, index):
+    """The controller route from the library to Settings group `index` (0 General, 1 Appearance & Controls, 2 Storage & Data, 3 Advanced), focus on the group's selector."""
+    script = START + seek("Settings", "dpad_down", 4) + press("south") + press("dpad_right") + expect(page="settings")
+    if narrow(size):   # the four groups are a drop-down in a narrow window
+        script += expect(focus_id="settings_section") + press("south") + presses("dpad_down", index) + press("south") + expect(settings_tab=index)
+    else:
+        script += expect(focus_id="tab#0") + seek(f"tab#{index}", "dpad_down", 6) + press("south") + expect(settings_tab=index)
+    return script
+
+
 def settings_journey(r, tmp, exe, fake_cli, fake_game, size):
     p = Profile(tmp, "settings", exe, fake_cli, fake_game, games=1)
     script = START + seek("Settings", "dpad_down", 4) + press("south") + press("dpad_right") + expect(page="settings")
-    if narrow(size):   # the six sections are a drop-down in a narrow window
+    if narrow(size):   # the four groups are a drop-down in a narrow window
         pick = lambda index: press("south") + presses("dpad_down", index) + press("south")
-        script += expect(focus_id="settings_section") + pick(5) + expect(settings_tab=5)              # About
-        script += seek("settings_section", "dpad_up", 3) + pick(2) + expect(settings_tab=2)           # Build & Runtime: a long section
-        script += press("dpad_down") + seek("keep_old", "dpad_down", 4) + seek("go_storage", "dpad_down", 12)
-        script += seek("settings_section", "dpad_up", 40) + press("south") + press("south") + expect(settings_tab=0)   # first item = Library & Display
+        script += expect(focus_id="settings_section") + pick(3) + expect(settings_tab=3)              # Advanced
+        script += seek("settings_section", "dpad_up", 3) + pick(2) + expect(settings_tab=2)           # Storage & Data
+        script += press("dpad_down") + seek("go_storage", "dpad_down", 4) + seek("open_cache", "dpad_down", 12)
+        script += seek("settings_section", "dpad_up", 40) + press("south") + press("south") + expect(settings_tab=0)   # first item = General
         script += press("dpad_down")
     else:
         script += expect(focus_id="tab#0")
-        script += seek("tab#5", "dpad_down", 6) + press("south") + expect(settings_tab=5)              # About
-        script += seek("tab#2", "dpad_up", 6) + press("south") + expect(settings_tab=2)                # Build & Runtime: a long tab
-        script += seek("keep_old", "dpad_right", 3) + seek("go_storage", "dpad_down", 12)              # its options, down to the last control
+        script += seek("tab#3", "dpad_down", 6) + press("south") + expect(settings_tab=3)              # Advanced
+        script += seek("tab#2", "dpad_up", 6) + press("south") + expect(settings_tab=2)                # Storage & Data
+        script += seek("go_storage", "dpad_right", 3) + seek("open_cache", "dpad_down", 12)              # its options, down to the last control
         script += seek("tab#2", "dpad_left", 3) + seek("tab#0", "dpad_up", 3) + press("south") + expect(settings_tab=0)
         script += press("dpad_right")
-    script += seek("restore", "dpad_down", 40) + press("south") + expect(modal=1, focus_id="mod_cancel") + press("east") + expect(modal=0)   # restore defaults: East cancels
+    script += seek("restore", "dpad_down", 60) + press("south") + expect(modal=1, focus_id="mod_cancel") + press("east") + expect(modal=0)   # restore defaults: East cancels
     script += seek("restore", "dpad_down", 3) + press("south") + expect(modal=1) + seek("mod_ok", "dpad_right", 3) + press("south") + expect(modal=0)
     script += press("east") + expect(page="library") + ["quit"]
     r.check("settings", p.run(script, None, size), 21 if not narrow(size) else 19)
+
+
+def settings_groups_journey(r, tmp, exe, fake_cli, fake_game, size):
+    """SEG-150-T007: every Settings group, and its last distinctive control, is reachable with the controller alone (Input diagnostics included)."""
+    p = Profile(tmp, "groups", exe, fake_cli, fake_game, games=1)
+    targets = {0: "clear_lib", 1: "in_rescan", 2: "open_cache", 3: "adopt_now"}
+    script = to_settings_group(size, 0) + (press("dpad_down") if narrow(size) else press("dpad_right")) + seek("restore", "dpad_down", 60) + seek(targets[0], "dpad_right", 3) + seek("restore", "dpad_left", 3)
+    for index in (1, 2, 3):
+        if narrow(size):
+            script += seek("settings_section", "dpad_up", 80) + press("south") + presses("dpad_down", index) + press("south") + expect(settings_tab=index)   # the list opens on its first item
+            script += press("dpad_down")
+        else:
+            script += seek(f"tab#{index - 1}", "dpad_left", 6) + seek(f"tab#{index}", "dpad_down", 6) + press("south") + expect(settings_tab=index)
+            script += press("dpad_right")
+        script += seek(targets[index], "dpad_down", 80)
+    script += press("east") + expect(page="library") + ["quit"]
+    r.check("settings groups", p.run(script, None, size), sum(1 for l in script if l.startswith(("expect ", "pad_seek "))))
 
 
 def storage_journey(r, tmp, exe, fake_cli, fake_game, size):
@@ -260,12 +295,13 @@ def storage_journey(r, tmp, exe, fake_cli, fake_game, size):
     built = p.builds()[0]
     has_intermediates = lambda: (built / "generated.c").exists() or (built / "obj").exists()
     r.expect(has_intermediates(), "the setup build left intermediates")
-    script = START + seek("Storage", "dpad_down", 4) + press("south") + press("dpad_right") + expect(page="storage")
+    # Storage & Data is a Settings group; its button opens the cleanup page
+    script = to_settings_group(size, 2) + (press("dpad_down") if narrow(size) else press("dpad_right")) + seek("go_storage", "dpad_down", 6) + press("south") + press("dpad_right") + expect(page="storage")
     script += seek("sel", "dpad_down", 6) + press("south") + seek("act:a_zig", "dpad_down", 4) + seek("act:a_inter", "dpad_right", 2) + press("south") + expect(modal=1)
     script += press("east") + expect(modal=0)                                                       # cancel: nothing deleted
     script += press("south") + expect(modal=1) + seek("mod_ok", "dpad_right", 4) + press("south") + ["frames 60"] + expect(modal=0)
-    script += press("east") + expect(page="library") + ["quit"]
-    r.check("storage", p.run(script, None, size), 11)
+    script += press("east") + expect(page="settings", settings_tab=2, focus_id="go_storage") + press("east") + expect(page="library") + ["quit"]    # Back from Storage returns to Settings > Storage & Data, focus on the button that opened it
+    r.check("storage", p.run(script, None, size), sum(1 for l in script if l.startswith(("expect ", "pad_seek "))))
     r.expect(not has_intermediates(), "the confirmed cleanup removed the intermediates")
     r.expect((built / ("game" + EXE_SUFFIX)).exists(), "the playable executable stays after the cleanup")
 
@@ -282,7 +318,7 @@ def hotplug_journey(r, tmp, exe, fake_cli, fake_game, size):
     r.check("hotplug", p.run(script, None, size), 13)
 
 
-JOURNEYS = [first_run, import_journey, library_journey, build_journey, older_build_journey, settings_journey, storage_journey, hotplug_journey]
+JOURNEYS = [first_run, import_journey, library_journey, build_journey, older_build_journey, settings_journey, settings_groups_journey, storage_journey, hotplug_journey]
 
 
 def main():

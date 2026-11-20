@@ -1,4 +1,6 @@
 #include "launcher_core.hpp"
+
+#include "data_location.hpp"
 #include "cartridge_recognition.hpp"
 
 #include <cctype>
@@ -130,8 +132,7 @@ Layout locate_layout() {
   return layout;
 }
 
-fs::path cache_root() {
-  if (const char *override_dir = SDL_getenv("SEGARECOMP_CACHE_DIR")) return path_from_utf8(override_dir);
+fs::path default_cache_root() {
 #if defined(_WIN32)
   if (const char *local = SDL_getenv("LOCALAPPDATA")) return path_from_utf8(local) / "Segarecomp";
 #endif
@@ -141,9 +142,72 @@ fs::path cache_root() {
   return result;
 }
 
+// SEG-150-T008 (ADR 0317): the bootstrap file sits BESIDE the default data root (never inside it), so moving or cleaning a data root never moves or removes it.
+// SEGARECOMP_DATA_BOOTSTRAP replaces its location (a local test seam; never set by Segarecomp).
+fs::path data_bootstrap_file() {
+  if (const char *seam = SDL_getenv("SEGARECOMP_DATA_BOOTSTRAP")) return path_from_utf8(seam);
+  fs::path root = default_cache_root();
+  if (!root.has_filename()) root = root.parent_path();   // SDL_GetPrefPath ends with a separator
+  return root.parent_path() / "Segarecomp-data-location.json";
+}
+
+DataEnvironment data_environment() {
+  DataEnvironment env;
+  if (const char *cache = SDL_getenv("SEGARECOMP_CACHE_DIR")) env.cache_dir = cache;
+  if (const char *library = SDL_getenv("SEGARECOMP_LIBRARY_DIR")) env.library_dir = library;
+  if (const char *home = SDL_getenv("SEGARECOMP_HOME")) env.home_dir = home;
+  return env;
+}
+
+namespace {
+// Read once per process: a root change takes effect at the next start, never mid-run. A migration interrupted by a crash is recovered here, before any root is used.
+struct Startup { Bootstrap bootstrap; RecoveryResult recovery; };
+const Startup &startup_state() {
+  static const Startup state = [] {
+    Startup s;
+    const fs::path file = data_bootstrap_file();
+    static const InstanceMarker marker(file);   // every process that resolves the roots from the bootstrap (window or --import/--build/--sega-cd; not one with SEGARECOMP_CACHE_DIR set) is visible to a move or an old-root cleanup
+    s.recovery = recover_pending_migration(file);
+    s.bootstrap = read_bootstrap(file);
+    return s;
+  }();
+  return state;
+}
+const Bootstrap &startup_bootstrap() { return startup_state().bootstrap; }
+} // namespace
+
+RecoveryResult startup_recovery() {
+  if (SDL_getenv("SEGARECOMP_CACHE_DIR") != nullptr) return {};
+  return startup_state().recovery;
+}
+
+fs::path cache_root() {
+  if (const char *override_dir = SDL_getenv("SEGARECOMP_CACHE_DIR")) return path_from_utf8(override_dir);
+  const Bootstrap &boot = startup_bootstrap();
+  std::error_code ec;
+  if (boot.state == BootstrapState::valid && fs::is_directory(boot.root, ec)) return boot.root;
+  return default_cache_root();
+}
+
 fs::path library_root() {
   if (const char *override_dir = SDL_getenv("SEGARECOMP_LIBRARY_DIR")) return path_from_utf8(override_dir);
   return cache_root() / "library";
+}
+
+EffectivePaths effective_paths(const Layout &layout) {
+  EffectivePaths out;
+  out.cache = cache_root();
+  out.library = library_root();
+  out.home = layout.root;
+  out.cache_overridden = SDL_getenv("SEGARECOMP_CACHE_DIR") != nullptr;
+  out.library_overridden = SDL_getenv("SEGARECOMP_LIBRARY_DIR") != nullptr;
+  out.home_overridden = SDL_getenv("SEGARECOMP_HOME") != nullptr;
+  out.bootstrap_file = data_bootstrap_file();
+  const ResolvedRoots roots = resolve_roots(data_environment(), out.cache_overridden ? out.cache : default_cache_root(), out.bootstrap_file);
+  out.relocated = roots.cache_source == RootSource::bootstrap && roots.cache == out.cache;   // the saved root is the one this process resolved at start (a move made in this session is only used from the next start)
+  out.data_location_notice = roots.notice;
+  out.saved_location_unavailable = roots.bootstrap_ignored && !out.cache_overridden;
+  return out;
 }
 
 std::string clean_title(const std::string &raw) {

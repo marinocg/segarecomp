@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""SEG-069-T003: the one-time "keep or remove build intermediates" question, through the real window (SDL dummy video, virtual gamepad).
+"""The first-run experience, through the real window (SDL dummy video, virtual gamepad).
 
-Scripted windows skip the question unless `SEGARECOMP_GUI_ONBOARDING=1` forces it (so existing automation fixtures are never blocked); the test forces
-it on profiles that are, or are not, genuinely new. Checks: each choice persists the existing cleanup mode and the completion marker and is not asked again; a gamepad
-(D-pad focus + South) completes it; Esc/East defers without recording anything; an existing settings file (without the marker) is never asked and keeps its mode; a
-failed save keeps the question open; later builds obey the chosen mode (executable kept, intermediates removed or kept).
+History: SEG-069-T003 asked a one-time "keep or remove build intermediates" question at the first preparation. SEG-150 corrective round B (F30) removed it: a first-time user
+goes Add game -> Prepare -> Play with no compiler question. A fresh profile simply has the existing, NON-DELETING cleanup default (`cleanup_mode` "never"); Settings > General >
+Preparation changes it. `intermediates_choice_made` is a legacy marker: loaded and saved verbatim, never read.
+
+Scripted windows skip the welcome unless `SEGARECOMP_GUI_ONBOARDING=1` forces it (so existing automation fixtures are never blocked). Checks: a fresh profile never gets a sheet and keeps the
+intermediates (policy never); Add -> Prepare -> Play works on a brand-new profile; an upgraded profile (answered true or never asked, any policy) keeps its stored values, is never asked, and
+its settings file is byte-identical after a run that changed nothing; the setting is reachable with a gamepad and persists; keyboard focus after Add & prepare is not trapped (T010 F2).
 
 usage: launcher_first_run_test.py <Segarecomp> <fake_segarecomp> <fake_game>
 """
@@ -87,79 +90,93 @@ def main():
         if ok != expected:
             failures.append(f"{name}: {ok} of {expected} expectations ran: {trace!r}")
 
+    def has_intermediates(profile):
+        games = [g for g in (profile.cache / "games").iterdir() if g.is_dir() and not g.name.endswith((".partial", ".failed"))] if (profile.cache / "games").exists() else []
+        return [(g / "generated.c").exists() or (g / "obj").exists() for g in games]
+
     with tempfile.TemporaryDirectory() as d:
         tmp = pathlib.Path(d)
+        # No sheet, whatever the profile: opening a game and pressing Prepare must go straight to preparing.
+        OPEN = ["pad_attach", "frames 20", "expect modal=0", "focus_card 0", "frames 4", "key Return", "frames 8", "build", "frames 8"]
 
-        # 1. gamepad: the first button (Keep) has focus; South confirms. Persisted as the existing policy "never"; not asked again.
-        p = Profile(tmp, "keep", exe, fake_cli, fake_game)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=0", "expect cleanup_mode=never",
-                       "expect intermediates_choice=1", "quit"])
-        check_trace("keep", trace, 4)
-        s = p.settings()
-        expect(s is not None and s["cleanup_mode"] == "never" and s["intermediates_choice_made"] is True, f"keep persisted: {s}")
-        trace = p.run(["frames 20", "expect modal=0", "quit"])
-        check_trace("keep again", trace, 1)
+        # 1. a fresh profile (no settings file) is never asked; the policy is the non-deleting default; the build's intermediates are kept; nothing is written to the settings file.
+        p = Profile(tmp, "fresh", exe, fake_cli, fake_game)
+        p.add_game()
+        expect(p.settings() is None, "a fresh profile has no settings file before anything is changed")
+        trace = p.run(OPEN + ["expect modal=0", "expect cleanup_policy=never:10:4096", "wait_idle", "frames 60", "expect build_outcome=ok", "quit"])
+        check_trace("fresh", trace, 4)
+        expect(has_intermediates(p) == [True], f"fresh: the default policy keeps the build's intermediates: {has_intermediates(p)}")
+        expect(p.settings() is None, f"fresh: preparing a game writes no settings: {p.settings()}")
 
-        # 2. gamepad: D-pad moves to the second button; South removes. Policy "intermediates".
-        p = Profile(tmp, "remove", exe, fake_cli, fake_game)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad dpad_right down", "pad dpad_right up", "frames 4", "pad south down", "pad south up", "frames 8",
-                       "expect modal=0", "expect cleanup_mode=intermediates", "quit"])
-        check_trace("remove", trace, 3)
-        s = p.settings()
-        expect(s is not None and s["cleanup_mode"] == "intermediates" and s["intermediates_choice_made"] is True, f"remove persisted: {s}")
+        # 2. Add game -> Prepare -> Play on a brand-new profile, with the welcome forced: no question, one launch.
+        p = Profile(tmp, "add-prepare-play", exe, fake_cli, fake_game)
+        genesis_rom(p.dir / "k.md")
+        trace = p.run(["frames 20", "expect welcome=1", f"import_files {p.dir / 'k.md'}", "wait_import", "frames 8", "review_prepare", "frames 8", "expect modal=0", "expect page=library",
+                       "wait_idle", "frames 40", "expect build_outcome=ok", "expect main_action=Play", "main_action n:0", "frames 10", "wait_play_end", "frames 10", "quit"], extra_env={"FAKE_GAME_LOG": str(p.dir / "game.log")})
+        check_trace("add prepare play", trace, 5)
+        expect(sum(1 for l in trace if l.startswith("run=started")) == 1, f"add prepare play: the game started once: {trace!r}")
+        expect(not any(l.startswith("onboarding=intermediates") for l in trace), "no intermediates question was ever traced")
 
-        # 3. East / Escape defer: nothing is recorded and the question returns.
-        p = Profile(tmp, "defer", exe, fake_cli, fake_game)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad east down", "pad east up", "frames 8", "expect modal=0", "expect intermediates_choice=0", "quit"])
-        check_trace("defer east", trace, 3)
-        expect(p.settings() is None or p.settings().get("intermediates_choice_made") is not True, "a deferred question is not recorded")
-        trace = p.run(["frames 20", "expect modal=1", "key Escape", "frames 8", "expect modal=0", "quit"])
-        check_trace("defer escape", trace, 2)
+        # 3. an upgraded profile that ANSWERED the old question keeps its values; its settings file is byte-identical after a run that changed nothing (a build included).
+        p = Profile(tmp, "upgraded-answered", exe, fake_cli, fake_game)
+        p.add_game()
+        p.lib.mkdir(parents=True, exist_ok=True)
+        answered = json.dumps({"schema": 1, "view": "list", "cleanup_mode": "intermediates", "keep_last_n": 10, "soft_limit_mb": 4096, "intermediates_choice_made": True})
+        p.settings_file.write_text(answered)
+        trace = p.run(OPEN + ["expect modal=0", "expect cleanup_mode=intermediates", "expect intermediates_choice=1", "wait_idle", "frames 60", "expect build_outcome=ok", "quit"], force="1")
+        check_trace("upgraded answered", trace, 5)
+        expect(p.settings_file.read_text() == answered, "upgraded (answered): the settings file is byte-identical")
+        expect(has_intermediates(p) == [False], f"upgraded (answered, remove): the stored policy still removes intermediates: {has_intermediates(p)}")
 
-        # 4. an existing profile is never asked and keeps its policy (a settings file written before the marker existed).
+        # 4. an upgraded profile that was NEVER asked (marker false) keeps its policy and the marker untouched; no question; byte-identical file.
+        for mode in ("never", "keep_last_n"):
+            p = Profile(tmp, "upgraded-unasked-" + mode, exe, fake_cli, fake_game)
+            p.add_game()
+            p.lib.mkdir(parents=True, exist_ok=True)
+            unasked = json.dumps({"schema": 1, "cleanup_mode": mode, "keep_last_n": 7, "intermediates_choice_made": False})
+            p.settings_file.write_text(unasked)
+            trace = p.run(OPEN + ["expect modal=0", f"expect cleanup_policy={mode}:7:4096", "expect intermediates_choice=0", "wait_idle", "frames 60", "expect build_outcome=ok", "quit"], force="1")
+            check_trace("upgraded unasked " + mode, trace, 5)
+            expect(p.settings_file.read_text() == unasked, f"upgraded (never asked, {mode}): the settings file is byte-identical")
+
+        # 5. an existing profile (a settings file written before the marker existed) and a library without a settings file get no welcome and no question.
         p = Profile(tmp, "existing", exe, fake_cli, fake_game)
         p.lib.mkdir(parents=True)
-        p.settings_file.write_text(json.dumps({"schema": 1, "view": "grid", "cleanup_mode": "keep_last_n", "keep_last_n": 7}))
-        trace = p.run(["frames 20", "expect modal=0", "expect cleanup_mode=keep_last_n", "quit"], force="1")
-        check_trace("existing", trace, 2)
-        # ... and so is a profile that has a library but no settings file yet.
+        legacy = json.dumps({"schema": 1, "view": "grid", "cleanup_mode": "keep_last_n", "keep_last_n": 7})
+        p.settings_file.write_text(legacy)
+        trace = p.run(["frames 20", "expect modal=0", "expect welcome=0", "expect cleanup_mode=keep_last_n", "quit"], force="1")
+        check_trace("existing", trace, 3)
+        expect(p.settings_file.read_text() == legacy, "existing: the legacy settings file is byte-identical")
         p = Profile(tmp, "library-only", exe, fake_cli, fake_game)
         p.add_game()
-        trace = p.run(["frames 20", "expect modal=0", "quit"], force="1")
-        check_trace("library only", trace, 1)
-        # ... while a brand-new profile in an automated window is asked only when the test says so.
+        trace = p.run(["frames 20", "expect modal=0", "expect welcome=0", "quit"], force="1")
+        check_trace("library only", trace, 2)
+        # ... while a brand-new profile sees the welcome only when the test says so, and the welcome writes nothing.
         p = Profile(tmp, "automated-fresh", exe, fake_cli, fake_game)
-        check_trace("automation skips", p.run(["frames 20", "expect modal=0", "quit"], force=None), 1)
-        check_trace("automation opt-in", p.run(["frames 20", "expect modal=1", "key Escape", "frames 6", "quit"], force="1"), 1)
+        check_trace("automation skips", p.run(["frames 20", "expect modal=0", "expect welcome=0", "quit"], force=None), 2)
+        check_trace("automation opt-in", p.run(["frames 20", "expect welcome=1", "expect modal=0", "expect library_size=0", "quit"], force="1"), 3)
+        expect(p.settings() is None, "the welcome records nothing")
 
-        # 5. a failed save keeps the question open and records nothing; fixing the cause lets a retry succeed.
-        p = Profile(tmp, "failed-save", exe, fake_cli, fake_game)
-        blocker = p.lib / "launcher-settings.json.tmp"
-        (blocker / "x").mkdir(parents=True)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=1", "expect intermediates_choice=0", "quit"])
-        check_trace("failed save", trace, 3)
-        expect(not p.settings_file.exists(), "a failed save must not leave a settings file claiming success")
-        shutil.rmtree(blocker)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=0", "quit"])
-        check_trace("retry", trace, 2)
-        expect(p.settings() is not None and p.settings()["intermediates_choice_made"] is True, "the retry is recorded")
+        # 6. the policy is reachable in Settings > General > Preparation with the gamepad alone, persists, and is the same one a later build obeys.
+        p = Profile(tmp, "setting", exe, fake_cli, fake_game)
+        p.add_game()
+        trace = p.run(["pad_attach", "frames 20", "page settings", "settings_tab 0", "frames 10", "expect cleanup_mode=never", "pad dpad_right down", "pad dpad_right up", "frames 6", "pad_seek cleanup#0 dpad_down 80", "pad dpad_right down", "pad dpad_right up", "frames 6", "expect focus_id=cleanup#1", "pad south down", "pad south up", "frames 8",
+                       "expect cleanup_mode=intermediates", "quit"], force=None, extra_env={"SEGARECOMP_SHOT_SIZE": "1080x740"})
+        check_trace("setting", trace, 4)
+        s = p.settings()
+        expect(s is not None and s["cleanup_mode"] == "intermediates", f"setting persisted: {s}")
+        trace = p.run(OPEN + ["expect modal=0", "expect cleanup_mode=intermediates", "wait_idle", "frames 60", "expect build_outcome=ok", "quit"], force=None)
+        check_trace("setting obeyed", trace, 4)
+        expect(has_intermediates(p) == [False], f"setting: a later build removes intermediates as chosen: {has_intermediates(p)}")
 
-        # 6. later builds obey the choice; the executable is always kept.
-        for name, choose, expect_removed in (("build-remove", ["pad dpad_right down", "pad dpad_right up", "frames 4"], True), ("build-keep", [], False)):
-            p = Profile(tmp, name, exe, fake_cli, fake_game)
-            p.add_game()
-            script = ["pad_attach", "frames 20", "expect modal=1"] + choose + ["pad south down", "pad south up", "frames 8", "expect modal=0",
-                      "focus_card 0", "frames 4", "key Return", "frames 8", "build", "wait_idle", "frames 120", "expect build_outcome=ok", "quit"]
-            trace = p.run(script)
-            check_trace(name, trace, 3)
-            if not (p.cache / "games").exists():
-                failures.append(f"{name}: no build happened: {trace!r}")
-                continue
-            games = [g for g in (p.cache / "games").iterdir() if g.is_dir() and not g.name.endswith((".partial", ".failed"))]
-            expect(len(games) == 1 and (games[0] / ("game" + EXE_SUFFIX)).exists(), f"{name}: the executable must remain: {games}")
-            if games:
-                present = (games[0] / "generated.c").exists() or (games[0] / "obj").exists()
-                expect(present != expect_removed, f"{name}: intermediates present={present}, expected removed={expect_removed}")
+        # 7. SEG-150-T010 (F2): keyboard only. Add & prepare leaves the Add game review for the Library: focus must land on the Library's sidebar entry so Tab keeps working
+        #    (it once stayed on the vanished review button and Tab did nothing). Since round B no sheet is raised; the route is Tab, Tab, Return, then Tab through the sidebar.
+        p = Profile(tmp, "keyboard-after-prepare", exe, fake_cli, fake_game)
+        genesis_rom(p.dir / "k.md")
+        trace = p.run(["frames 10", f"import_files {p.dir / 'k.md'}", "wait_import", "frames 8", "key Tab", "frames 3", "key Tab", "frames 3", "expect focus_id=review_prepare", "key Return", "frames 8",
+                       "expect modal=0", "expect page=library", "expect focus=Library", "key Tab", "frames 3", "expect focus=Settings",
+                       "key Tab", "frames 3", "expect focus=Add game", "wait_idle", "frames 60", "expect build_outcome=ok", "quit"])
+        check_trace("keyboard after prepare", trace, 7)
 
     if failures:
         print("\n".join(failures))

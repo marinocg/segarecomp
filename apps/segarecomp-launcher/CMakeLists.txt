@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp cartridge_recognition.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp patch_library.cpp luau_variant.cpp storage.cpp launcher_settings.cpp sega_cd.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp cartridge_recognition.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp patch_library.cpp luau_variant.cpp storage.cpp launcher_settings.cpp sega_cd.cpp data_location.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media segarecomp::luau_host)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
@@ -47,7 +47,7 @@ target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 segarecomp_enable_warnings(segarecomp_launcher_ui_support)
 
-add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_sega_cd.cpp app_variants.cpp app_picker.cpp app_screens.cpp app_pages.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
+add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_sega_cd.cpp app_variants.cpp app_picker.cpp app_screens.cpp app_pages.cpp app_data_location.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
 if(WIN32)
   # The executable's own icon (Explorer, taskbar, shortcuts): a resource script embedding packaging/windows/Segarecomp.ico, when a resource compiler exists.
   include(CheckLanguage)
@@ -150,13 +150,32 @@ if(BUILD_TESTING)
   set_property(TEST launcher_audio_gui_test PROPERTY TIMEOUT 600)
 endif()
 
-# SEG-117: the Widescreen Mode selector of Settings -> Video & Controls (shared viewer settings, relaunch, game-return reload).
+# SEG-117: the Widescreen Mode selector of Settings -> Appearance & Controls (shared viewer settings, relaunch, game-return reload).
 if(BUILD_TESTING)
   add_test(NAME launcher_widescreen_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_widescreen_gui_test.py
     $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
   set_property(TEST launcher_widescreen_gui_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_widescreen_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_widescreen_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150-T007: Settings groups (General, Appearance & Controls, Storage & Data, Advanced): old-profile upgrade, keyboard/gamepad reach, effective paths.
+if(BUILD_TESTING)
+  add_test(NAME launcher_settings_groups_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_settings_groups_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_settings_groups_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_settings_groups_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_settings_groups_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150-T009 (ADR 0317): Settings > Storage & Data > Change data location drives the T008 core: plan, migration with phases and cancel, restart, previous-location cleanup,
+# recovery notice, environment override, busy guard and a controller-only run. Synthetic profiles only (private bootstrap file and data root).
+if(BUILD_TESTING)
+  add_test(NAME launcher_data_location_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_data_location_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_data_location_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_data_location_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_data_location_gui_test PROPERTY TIMEOUT 900)
 endif()
 
 # SEG-069-T003: the one-time first-run question about build intermediates (real window, virtual gamepad).
@@ -166,6 +185,51 @@ if(BUILD_TESTING)
   set_property(TEST launcher_first_run_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_first_run_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_first_run_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150 corrective round B: toasts never cover a control, an unsaved import is reported truthfully, standing notices for an unwritable library / incomplete installation.
+if(BUILD_TESTING)
+  add_test(NAME launcher_notifications_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_notifications_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_notifications_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_notifications_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_notifications_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150 corrective round B: a Game page opened by keyboard starts on its primary action, the welcome's Add game is the first Tab stop, focus after failure / cancel / sheet.
+if(BUILD_TESTING)
+  add_test(NAME launcher_keyboard_focus_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_keyboard_focus_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_keyboard_focus_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_keyboard_focus_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_keyboard_focus_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150 corrective round B: no state label of a library card / row is cut by an ellipsis at the compact (720x520) and the roomier sizes.
+if(BUILD_TESTING)
+  add_test(NAME launcher_compact_layout_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_compact_layout_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_compact_layout_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_compact_layout_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_compact_layout_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150-T003: the Add game review, explicit Add & prepare / Add only, queued and running cancel, Prepare & play (real window, product and game doubles).
+if(BUILD_TESTING)
+  add_test(NAME launcher_import_review_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_import_review_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_import_review_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_import_review_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_import_review_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150-T005: a Sega CD disc in the Add game review (tracks, typed layout refusals, the user's BIOS, remembered profiles revalidated at use, cancel). Synthetic fixture disc and BIOS doubles; no product build needed.
+if(BUILD_TESTING)
+  add_test(NAME launcher_sega_cd_review_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_sega_cd_review_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> ${PROJECT_SOURCE_DIR})
+  set_property(TEST launcher_sega_cd_review_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_sega_cd_review_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_sega_cd_review_gui_test PROPERTY TIMEOUT 600)
 endif()
 
 # SEG-069-T005: the playability predicate for builds of an earlier release (fail-closed, separate from the exact reuse identity).
@@ -288,7 +352,7 @@ endif()
 # SEG-069-T004: the launcher's ordinary journeys with a virtual gamepad only (no mouse event), at 1080x740 and 720x520, on the real window.
 if(BUILD_TESTING)
   # One test per journey and window size: they are independent, slow on some hosts, and `ctest -j` runs them side by side.
-  foreach(journey first_run import library build older_build settings storage hotplug)
+  foreach(journey first_run import library build older_build settings settings_groups storage hotplug)
     foreach(size wide:1080x740 narrow:720x520)
       string(REPLACE ":" ";" size_parts ${size})
       list(GET size_parts 0 size_name)
@@ -342,6 +406,15 @@ if(BUILD_TESTING)
   set_property(TEST launcher_gui_navigation_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endif()
 
+# SEG-150-T004: the Game page's tabs, focus and scroll restoration, the failed-state recovery (Retry) and the missing game file (Find game file).
+if(BUILD_TESTING)
+  add_test(NAME launcher_details_tabs_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_details_tabs_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_details_tabs_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_details_tabs_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_details_tabs_gui_test PROPERTY TIMEOUT 600)
+endif()
+
 # SEG-058 corrective delivery: the Input diagnostics classes A-F against real SDL events from virtual joysticks (never a physical-device claim).
 if(BUILD_TESTING)
   add_test(NAME launcher_input_diagnostics_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_input_diagnostics_test.py $<TARGET_FILE:segarecomp-launcher>)
@@ -384,6 +457,23 @@ if(BUILD_TESTING)
   set_property(TEST storage_test APPEND PROPERTY LABELS full fast)
 endif()
 
+# SEG-150-T008 (ADR 0317): data location bootstrap, journaled copy-verify-commit migration and old-root cleanup, on synthetic trees (no window).
+add_executable(data_location_test data_location_test.cpp)
+target_link_libraries(data_location_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(data_location_test)
+if(BUILD_TESTING)
+  add_test(NAME data_location_test COMMAND data_location_test)
+  set_property(TEST data_location_test APPEND PROPERTY LABELS full fast)
+  # Startup resolution through the real headless launcher (bootstrap, environment precedence, fallbacks).
+  find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME launcher_data_location_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_data_location_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp>)
+  add_dependencies(data_location_test segarecomp-launcher fake_segarecomp)
+  set_property(TEST launcher_data_location_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_data_location_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_data_location_test PROPERTY TIMEOUT 300)
+endif()
+
 include(${PROJECT_SOURCE_DIR}/packaging/install.cmake)
 
 # SEG-122-T001 (ADR 0266): Vanilla / Patched variants of one game through the real window and the product doubles.
@@ -400,4 +490,10 @@ if(BUILD_TESTING)
   set_property(TEST launcher_schema3_gui_test APPEND PROPERTY LABELS full)
   set_property(TEST launcher_schema3_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_schema3_gui_test PROPERTY TIMEOUT 900)
+  # SEG-150-T006 (delivery F30): the per-game Mods tab (status vocabulary, declined consent, refusal next step, single selection, blocked switching, platform availability).
+  add_test(NAME launcher_mods_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_mods_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
+  set_property(TEST launcher_mods_gui_test APPEND PROPERTY LABELS full)
+  set_property(TEST launcher_mods_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_mods_gui_test PROPERTY TIMEOUT 900)
 endif()

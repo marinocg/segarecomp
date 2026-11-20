@@ -111,6 +111,64 @@ PatchPreview verify(const LibraryEntry &entry, const fs::path &package, const fs
 
 std::string patch_label(const InstalledPatch &patch) { return patch.name + (patch.version.empty() ? std::string() : " " + patch.version); }
 
+std::string mods_unavailable_reason(const std::string &platform_id) {
+  if (platform_id == "genesis") return {};
+  const char *name = platform_id == "master-system" ? "Master System" : platform_id == "sega-cd" ? "Sega CD" : "this kind of";
+  return std::string("Mods are available for Genesis / Mega Drive games only. This is a ") + name + " game, so a mod package cannot be installed or played here. Nothing about this game is affected.";
+}
+
+std::string mod_kind_label(const InstalledPatch &patch) {
+  if (patch.has_native()) return "Native C source (runs with host-process permissions, not sandboxed)";
+  if (patch.schema3) return patch.mod_trust == "luau" ? "Luau script" : "ROM data edits";
+  return "Patched game image";
+}
+
+std::string mod_capabilities_label(const InstalledPatch &patch) {
+  std::string caps;
+  for (const auto &c : {std::pair<unsigned, const char *>{segarecomp::patch::kCapFrameWorkRam, "work RAM snapshot"}, {segarecomp::patch::kCapFrameVdp, "VDP state"},
+                        {segarecomp::patch::kCapSceneryWords, "scenery"}, {segarecomp::patch::kCapOverlayRgba, "overlay"}})
+    if ((patch.native_caps & c.first) != 0U) caps += (caps.empty() ? "" : ", ") + std::string(c.second);
+  return caps;
+}
+
+std::string mod_refusal_next_step(const std::string &refusal) {
+  const auto has = [&](const char *part) { return refusal.find(part) != std::string::npos; };
+  if (has("different game or revision")) return "Choose the package made for this exact game and revision. A mod is never applied to a similar image.";
+  if (has("different platform") || has("Genesis games only") || has("Genesis / Mega Drive games only")) return "Choose a package made for this platform. Mods are available for Genesis games only.";
+  if (has("original game file is needed") || has("no longer the original")) return "Find the original game file (Game > Advanced > Find game file), then choose the package again.";
+  if (has("changed after it was verified")) return "Nothing was installed. Choose the package again so it is verified as it is now.";
+  if (has("executable code")) return "Choose the package again and approve it, or leave it uninstalled.";
+  if (has("maximum number")) return "Remove a mod you no longer use, then install this one.";
+  if (has("read-only") || has("newer Segarecomp")) return "Use the newer Segarecomp that wrote this library, or leave mods unchanged.";
+  return "Choose a different package, or ask its author for one made for this game. Nothing was installed.";
+}
+
+ModStatus mod_status(const InstalledPatch &patch, const ModStatusInput &in) {
+  ModStatus s;
+  if (!in.package_present) {
+    s.code = "incompatible_package_missing"; s.label = "Incompatible"; s.tone = ModTone::err;
+    s.reason = "The installed package file is missing from the library, so this mod cannot be prepared or played.";
+    s.next = "Remove it and install the package again, or return to the original game.";
+  } else if (patch.has_native() && !patch.native_approved) {
+    s.code = "needs_approval"; s.label = "Needs approval"; s.tone = ModTone::warn;
+    s.reason = "This mod contains executable code that has not been approved on this computer, so it is never prepared or played.";
+    s.next = "Install the package again and approve it, or remove it.";
+  } else if (in.selected && in.failed) {
+    s.code = "preparation_failed"; s.label = "Selected - preparation failed"; s.tone = ModTone::err;
+    s.reason = in.failure.empty() ? std::string("The last preparation of this mod did not finish.") : in.failure;
+    s.next = "Retry preparing the selected mod, or return to the original game.";
+  } else if (in.selected) {
+    s.code = in.built ? "selected_prepared" : "selected_needs_preparation";
+    s.label = in.built ? "Selected - Prepared" : "Selected - Needs preparation";
+    s.tone = in.built ? ModTone::ok : ModTone::warn;
+    if (!in.built) s.next = "Prepare selected mod. The original game stays playable meanwhile; nothing falls back silently.";
+  } else {
+    s.code = in.built ? "installed_prepared" : "installed";
+    s.label = in.built ? "Installed - Prepared" : "Installed";
+  }
+  return s;
+}
+
 PatchPreview preview_patch(const LibraryEntry &entry, const fs::path &package, const fs::path &original_rom) { return verify(entry, package, original_rom, nullptr); }
 
 PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const fs::path &original_rom, const fs::path &library_root, long long now, bool trust_native) {

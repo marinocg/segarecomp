@@ -3,6 +3,7 @@
 // The launcher window: library, import, game details, storage and settings. Thin orchestration over launcher_core, library_catalog,
 // storage and covers; it owns no recompilation logic and never deletes anything except through storage.hpp's validated plans.
 
+#include "data_location.hpp"
 #include "file_picker.hpp"
 #include "launcher_core.hpp"
 #include "launcher_settings.hpp"
@@ -37,9 +38,14 @@ extern "C" {
 
 namespace launcher {
 
+// SEG-150-T009: the notice text for what the start-up recovery of an interrupted data move did ("" when nothing needs saying).
+[[nodiscard]] const char *recovery_message_text(RecoveryAction action);
+
 // `playable_older`: the current identity has no build, but an executable built by an earlier release is verifiably playable (older_build.hpp).
 enum class GameStatus { not_built, ready, metadata_only, stale, failed, playable_older };
-enum class Page { library, details, import_page, storage, settings };
+enum class Page { library, details, import_page, storage, settings, data_location };
+// The Game page's tabs (ordinary view state: nothing about them is stored). Mods exists only for a game that has real content there (Genesis patches).
+enum class DetailsTab { overview = 0, mods = 1, settings = 2, advanced = 3 };
 
 struct StatusInfo {
   GameStatus status = GameStatus::not_built;
@@ -77,16 +83,61 @@ struct StatusInfo {
   [[nodiscard]] bool runnable() const { return status == GameStatus::ready || older.playable; }
 };
 
-struct ImportItem {
-  std::string path;
-  std::string outcome;   // added | duplicate | location | unsupported | error
-  std::string title, message;
-  std::string entry_id;
-  bool needs_mapper = false;
+// The file types a game can be added from: the extensions rom_zip.cpp's rom_extension() recognises, plus ZIP archives (the content is still verified).
+// The single source of the file choosers, the built-in picker and the Add game page text.
+inline const std::vector<std::string> &rom_extensions() {
+  static const std::vector<std::string> list = {"md", "bin", "gen", "smd", "sms", "zip"};
+  return list;
+}
+// SEG-150-T005: what Add game accepts: the game files above plus the .cue of a Sega CD disc.
+inline const std::vector<std::string> &import_extensions() {
+  static const std::vector<std::string> list = {"md", "bin", "gen", "smd", "sms", "zip", "cue"};
+  return list;
+}
+inline std::string import_extension_pattern(const char *separator, const char *prefix = "") {
+  std::string out;
+  for (const auto &e : import_extensions()) out += (out.empty() ? "" : separator) + std::string(prefix) + e;
+  return out;
+}
+inline std::string rom_extension_pattern(const char *separator, const char *prefix = "") {
+  std::string out;
+  for (const auto &e : rom_extensions()) out += (out.empty() ? "" : separator) + std::string(prefix) + e;
+  return out;
+}
+
+// SEG-150-T005: what the review adds for a Sega CD disc (.cue): the disc verdict and the BIOS that will be used (never chosen silently).
+struct ScdReviewBios {
+  scd::BiosProfile profile;             // a remembered profile
+  scd::BiosCheckState state = scd::BiosCheckState::missing;   // measured at inspection (and again when it is used): ok / missing / changed ...
+  bool region_conflict = false;         // the BIOS header's region differs from the disc's
+};
+struct ScdReview {
+  scd::DiscInspection disc;
+  std::vector<ScdReviewBios> options;   // remembered BIOS profiles, revalidated
+  bool chosen = false;                  // a BIOS has been chosen and measured
+  std::string bios_path, bios_sha256, bios_region;
+  std::string note;                     // what the BIOS step says (request, ambiguity, refusal)
+  bool note_error = false;
+};
+
+// SEG-150-T003: one inspected file waiting in the Add game review. Nothing is in the library until the user confirms (Add & prepare / Add only).
+// invalid: cannot be added (reason + next action); duplicate: the same game (platform + SHA-256) is already in the library, never overwritten;
+// needs_choice: addable, but a required choice (the Master System mapper) is open, so it is never prepared and never guessed.
+struct ReviewItem {
+  enum class Verdict { valid, needs_choice, duplicate, invalid } verdict = Verdict::invalid;
+  std::string path, title, message, next_action;
+  std::string entry_id;   // duplicate: the existing entry
+  RomView rom;
+  bool selected = false;  // valid / needs_choice items start selected
+  bool sega_cd = false;   // SEG-150-T005: a disc (.cue); `scd` holds its verdict and BIOS step. Without a verified BIOS it is needs_choice but NOT addable (the BIOS is part of its identity).
+  ScdReview scd;
+  std::string prepare_blocked;   // why Add & prepare is unavailable for this item although it can be added ("" = none)
+  [[nodiscard]] bool selectable() const { return verdict == Verdict::valid || (verdict == Verdict::needs_choice && !sega_cd); }
+  [[nodiscard]] bool preparable() const { return verdict == Verdict::valid && prepare_blocked.empty(); }
 };
 
 struct Modal {
-  enum class Kind { none, message, plan, remove_entries, clear_library, restore_defaults, first_run_intermediates, install_patch, remove_patch } kind = Kind::none;
+  enum class Kind { none, message, plan, remove_entries, clear_library, restore_defaults, install_patch, remove_patch } kind = Kind::none;
   std::string title;
   std::vector<std::string> lines;
   Plan plan;
@@ -126,7 +177,7 @@ private:
   void draw_list_row(const LibraryEntry &entry, float w, float h);
   void draw_details(float w, float h);
   void draw_import(float w, float h);
-  void draw_import_body(float w, float h);  // drop zone, the three-step guide, results (also the empty library's page)
+  void draw_import_body(float w, float h);  // drop zone, accepted files, review
   void draw_storage(float w, float h);
   void draw_settings(float w, float h);
   void draw_input_diagnostics(float w);
@@ -160,19 +211,51 @@ private:
   // ---- data / actions ----
   [[nodiscard]] static long long now_seconds();
   void save_catalog();
+  bool try_save_catalog(std::string *error);   // no toast: the caller words the outcome
+  [[nodiscard]] static std::string probe_library_writable(const std::filesystem::path &dir);   // blocking: runs on the health worker, never per frame
+  void refresh_health();
+  void draw_health_notice(float w);   // the standing notice of Library and Game page: unwritable library, incomplete installation
   void save_settings();
   void request_status_refresh();
   void poll_status_refresh();
   void request_scan();
   void poll_scan();
-  void start_import(std::vector<std::string> paths, bool build_after);
+  void start_import(std::vector<std::string> paths);
   void poll_import();
+  // SEG-150-T003: the review's two explicit intents. `prepare` queues the selected, non-blocked new games; nothing is ever launched by either.
+  void commit_review(bool prepare);
+  void discard_review();
+  [[nodiscard]] static const char *verdict_name(ReviewItem::Verdict v);
+  [[nodiscard]] std::string review_summary() const;
+  [[nodiscard]] int review_count(ReviewItem::Verdict v, bool selected_only) const;
+  [[nodiscard]] int review_preparable_count() const;
+  void draw_review(float w);
+  void draw_welcome(float w, float h);
+  void draw_empty_library(float w, float h);
+  // The one main action of a game on a card or row (Play / Prepare & play / Cancel / Unqueue / Find file / Retry / Details): returns its label.
+  [[nodiscard]] std::string main_action_label(const LibraryEntry &entry, const StatusInfo &info) const;
+  void run_main_action(const std::string &id);
+  void draw_main_action(const LibraryEntry &entry, const StatusInfo &info, ImVec2 pos, ImVec2 size);   // inside the card/row's PushID scope
+  // Prepare & play: an explicit request that builds (when needed) and then launches ONCE from the revalidated build of that exact request.
+  void prepare_and_play(const std::string &id);
+  void request_prepare(const std::vector<std::string> &ids);
   void open_details(const std::string &id);
   // Leaves the contextual Details page for the page it was opened from; the library keeps its search, filters, sort, view, scroll and focus.
   void close_details();
   void go(Page page);
   // The Details page's build-identity facts and sections.
   void draw_details_identity(LibraryEntry &entry, const StatusInfo &info, float w, float cover_w);
+  // T004: Game > Overview / Mods / Game settings / Advanced. The tab strip, the Overview's notices and link rows, the Game settings cards, the build log panel.
+  [[nodiscard]] bool details_has_mods(const LibraryEntry &) const { return true; }   // the Mods tab is there for every game: where mods are not admitted (not Genesis) it says so honestly
+  void set_details_tab(DetailsTab tab);                                  // switches the tab, remembering the scroll of the one it leaves
+  void draw_details_tabs(const LibraryEntry &entry, float w);
+  void draw_details_overview(LibraryEntry &entry, const StatusInfo &info, float w);
+  float draw_library_entry_card(LibraryEntry &entry, const StatusInfo &info, float w);
+  float draw_display_audio_card(const LibraryEntry &entry, float w);
+  void draw_build_log(const LibraryEntry &entry, const StatusInfo &info, float w);
+  void remove_cover(LibraryEntry &entry);
+  [[nodiscard]] std::string details_primary_label(const LibraryEntry &entry, const StatusInfo &info) const;   // the one primary action of the header in this state (script `expect primary_action=`)
+  [[nodiscard]] std::string prepare_label(const LibraryEntry &entry, const StatusInfo &info) const;   // the Details primary action's words (the library's vocabulary)
   float draw_build_config(LibraryEntry &entry, const StatusInfo &info, float w);
   void draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w);
   // SEG-122 (ADR 0266): the Patches / Variants card of a Genesis game's Details page and its actions.
@@ -188,6 +271,11 @@ private:
   void patch_remove_confirmed(const Modal &sheet);     // the confirmed "Remove patch" sheet (also what the GUI script runs)
   void patch_modal_confirm();                          // the confirm button of whichever patch sheet is open (also what the GUI script runs)
   std::map<std::string, std::string> patch_notices_;   // id -> the last patch install / removal outcome (plain language)
+  std::set<std::string> patch_refused_;                // ids whose notice is a refusal (shown with its next step, in the error tone)
+  // SEG-150-T006: the Mods tab's vocabulary for one installed mod of `entry` (installed / selected / needs preparation / prepared / needs approval / incompatible) and what blocks switching.
+  [[nodiscard]] ModStatus mod_status_of(const LibraryEntry &entry, const StatusInfo &info, const InstalledPatch &patch) const;
+  [[nodiscard]] std::string mod_switch_block(const LibraryEntry &entry) const;   // "" = the selection may change now, otherwise the plain-language reason
+  void refuse_patch(const std::string &id, const std::string &error);
   std::string patch_expected_identity_;               // the identity the open install sheet showed
   std::filesystem::path patch_pending_;                // the package the open "Install patch" sheet is about
   float draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, ImVec2 a, float w);
@@ -235,12 +323,10 @@ private:
   struct Badge { std::string label; ImU32 color; bool spinner; };
   [[nodiscard]] Badge badge_for(const LibraryEntry &entry, const StatusInfo &info) const;
   void finish_build();
-  // SEG-069-T003: records the first-run answer (Keep -> cleanup.mode "never", Remove -> "intermediates"); false (and nothing changed) when it cannot be saved.
-  bool apply_intermediates_choice(bool remove_after_build);
   // SEG-069-T004: D-pad hops between the sidebar and the page (see ui::ZoneEntry).
   ui::ZoneEntry content_entry_;                  // where Right from the sidebar lands (the first game card on the library page, else the page's first control)
   ui::ZoneEntry card_entry_;                     // first game card/row submitted this frame
-  ui::ZoneEntry settings_tab_entry_[6];          // the Settings tab column (Right enters the body, Left from the body returns to the current tab)
+  ui::ZoneEntry settings_tab_entry_[4];          // the Settings tab column (Right enters the body, Left from the body returns to the current tab)
   ui::ZoneEntry settings_body_entry_;
   ui::ZoneEntry storage_header_, storage_first_row_, storage_last_row_, storage_after_;  // Storage: header checkbox, first/last row checkbox, first action button
   ImGuiWindow *settings_body_window_ = nullptr;
@@ -250,6 +336,8 @@ private:
   // SEG-069-T004: a sheet (modal or picker) returns keyboard/gamepad focus to the control that opened it.
   struct FocusMemory { ImGuiID id = 0; ImGuiWindow *window = nullptr; ImRect rel; bool armed = false; };
   FocusMemory modal_return_;
+  bool modal_return_stale_ = false;  // the sheet was raised in the same breath as a page change: on close focus restarts on the new page's entry
+  int page_changed_frame_ = -100;   // the frame of the last page change (a sheet raised in the same breath has no control of the new page to return to)
   void remember_focus_for_sheet(bool sheet_open);
   bool modal_focus_done_ = false;  // the first-run sheet puts keyboard/gamepad focus on its first choice once, when it opens
   // SEG-069-T002: the mode the game will really build as, for display: the stored intent, except a Master System game whose Optimized the product has
@@ -301,9 +389,22 @@ private:
   bool input_seen_gamepad_nav_ = false;
   BusyGuard busy_;
   std::string catalog_notice_;
+  std::string library_unwritable_;   // non-empty while the library folder cannot be written (startup probe or a failed save), cleared when it can again
+  Uint64 health_checked_ = 0;
+  // SEG-150 round C: a failed save leaves the catalog dirty. The standing notice names what is pending and is cleared only by a save that really succeeded; the periodic
+  // health probes run on a worker (a stalled network drive never freezes the window) and never overlap.
+  bool catalog_unsaved_ = false;
+  int unsaved_games_ = 0;
+  std::future<std::string> health_probe_;
+  std::future<Layout> layout_probe_;
+  int health_probes_started_ = 0;   // test seam
+  std::string health_pending_text_;   // test seam: what the library notice says is not saved yet
+  std::string health_notice_text_;   // test seam: titles of the standing notices drawn in the last frame
   // ---- navigation / library view ----
   Page page_ = Page::library;
   Page previous_page_ = Page::library;
+  Page storage_return_ = Page::library;  // where Back / Escape on Storage goes: Settings when Storage was opened from it
+  bool compact_shell_ = false;           // below 900 logical px: icon-over-label navigation, narrower content padding
   std::string detail_id_;
   char search_[96] = "";
   int platform_filter_ = 0;   // 0 all, 1 genesis, 2 master-system
@@ -321,8 +422,72 @@ private:
   ImVec2 script_mouse_{0, 0};
   std::pair<int, SDL_Event> script_mouse_up_{-1, SDL_Event{}};         // review aid: open the context menu of the card that receives the requested focus
   ImVec2 context_anchor_{0, 0};        // where the context menu opens: the mouse for a right click, beside the card for keyboard/gamepad
-  bool show_advanced_ = false;         // Details: the Advanced build options section is expanded
-  int settings_tab_ = 0;
+  bool show_advanced_ = false;         // Details: the Advanced build options section is expanded (Game settings)
+  DetailsTab details_tab_ = DetailsTab::overview;
+  float details_tab_scroll_[4] = {-1.0F, -1.0F, -1.0F, -1.0F};  // scroll of each tab when it was left (-1: never visited, keep the current position)
+  float details_scroll_now_ = 0.0F;                            // the content scroll as last drawn (script `expect details_scroll=`)
+  std::string details_tabs_text_;                              // the tabs drawn this frame, comma separated (script `expect details_tabs=`)
+  float details_scroll_pending_ = -1.0F;                       // applied once on the next frame after a tab switch
+  int settings_tab_ = 0;            // SEG-150-T007: the Settings group: 0 General, 1 Appearance & Controls, 2 Storage & Data, 3 Advanced (ordinary view state, ids tab#N)
+  bool settings_scan_asked_ = false;   // the Storage & Data group asked for one measurement for this visit to Settings
+  bool settings_focus_storage_ = false; // Back from the cleanup page lands on the button that opened it
+  bool settings_focus_move_ = false;    // SEG-150-T009: Back from the data-location page lands on the button that opened it
+
+  // ---- SEG-150-T009 (ADR 0317): Settings > Storage & Data > Change data location. The T008 core runs on worker threads; this is only its screen. ----
+  enum class MoveStage { choose, planning, plan, running, finished, cleanup_planning, cleanup, cleaning, cleaned };
+  struct DataMove {
+    MoveStage stage = MoveStage::choose;
+    std::filesystem::path destination, pending_destination, prev_source, prev_destination;
+    std::future<MigrationPlan> plan_job;
+    std::atomic<bool> plan_cancel{false};
+    MigrationPlan plan;
+    std::future<MigrationResult> run_job;
+    std::atomic<bool> cancel{false};
+    bool cancel_requested = false;
+    std::mutex mutex;
+    MigrationProgress progress;               // guarded by `mutex`: written by the worker's callback, read by the screen
+    MigrationResult result;
+    bool include_copies = false;
+    std::future<CleanupPlan> cleanup_plan_job;
+    CleanupPlan cleanup_plan;
+    std::future<CleanupResult> cleanup_job;
+    CleanupResult cleanup_result;
+    std::string cleanup_refusal;              // an app-level reason ("restart_needed") that makes the cleanup unavailable
+    bool focus_pending = false;               // a stage change moves keyboard / gamepad focus to that stage's safe default button
+  };
+  DataMove move_;
+  std::future<MigrationPlan> inventory_job_;   // the measured size of the data by class (a plan without a destination), one per visit to Storage & Data
+  MigrationPlan inventory_;
+  bool inventory_valid_ = false, inventory_asked_ = false;
+  CompletedMigration completed_move_;          // the completion record of a finished move whose previous folder has not been cleaned up or dismissed
+  RecoveryResult recovery_;                    // what the start-up recovery of a pending move did (shown once, in Storage & Data)
+  bool recovery_dismissed_ = false;
+  std::string dm_change_state_ = "-";           // test seam: the state of the Change data location button: enabled | disabled | progress
+  bool restart_needed_ = false;                // refresh_completed_move(): the saved location is not the one this process started with
+  bool move_done_this_session_ = false;        // a move committed in this process: the new location is used from the next start
+  void draw_data_location(float w, float h);
+  void data_move_enter();
+  void data_move_back();
+  void data_move_choose_folder();   // the native folder dialog, or the built-in picker (always for a controller)
+  void data_move_set_destination(const std::filesystem::path &destination);
+  void data_move_start_plan(const std::filesystem::path &destination);
+  void data_move_confirm();
+  void data_move_use_subfolder();
+  void data_move_request_cancel();
+  void data_move_reset();
+  void data_cleanup_open();
+  void data_cleanup_replan();
+  void data_cleanup_confirm();
+  void data_dismiss_previous();
+  void poll_data_move();
+  void refresh_completed_move();
+  void request_inventory();
+  [[nodiscard]] MigrationOptions data_move_options(const std::filesystem::path &destination) const;
+  [[nodiscard]] bool data_move_running() const { return move_.run_job.valid() || move_.cleanup_job.valid(); }
+  [[nodiscard]] bool maintenance_active() const { return maintenance_running_ || data_move_running(); }
+  [[nodiscard]] bool restart_needed_for_move() const;   // the saved location differs from the one this process resolved at start
+  [[nodiscard]] const char *move_stage_name() const;
+  void note_move_focus_default();                       // applies a pending default focus to the last drawn item
   bool focus_search_ = false;
   char title_edit_[200] = "";
   bool editing_title_ = false;
@@ -365,9 +530,21 @@ private:
   Uint64 live_log_at_ = 0;
   // ---- SEG-078-T002 (ADR 0204): Sega CD ----
   // The "Add a Sega CD game" form of the Import page: BIOS, CUE and an optional verified program, each chosen with the file picker.
-  struct ScdForm { std::string bios, cue, program, message; bool error = false; };
-  ScdForm scd_form_;
-  bool scd_form_open_ = false;                         // the form is shown on the Import page
+  // SEG-150-T005: a Sega CD game enters through the one Add game review; there is no separate form. A .cue is inspected on a worker (cancellable) and
+  // becomes a review item; the user's BIOS is chosen in that item and remembered as a local profile (verified identity + location, revalidated at every use).
+  struct ScdInspected { std::string path; scd::DiscInspection disc; std::vector<ScdReviewBios> options; };
+  std::future<std::vector<ScdInspected>> scd_inspect_job_;
+  std::atomic<bool> scd_inspect_cancel_{false};
+  std::atomic<int> scd_inspect_done_{0};
+  int scd_inspect_total_ = 0;
+  std::vector<scd::BiosProfile> bios_profiles_;
+  std::filesystem::path bios_profiles_file_;
+  void scd_start_inspect(std::vector<std::string> cue_paths);
+  void poll_scd_inspect();
+  void scd_review_choose_bios(std::size_t item, const std::filesystem::path &file, const std::string &expected_sha256);
+  void scd_review_use_profile(std::size_t item, std::size_t option);
+  bool scd_commit_review_item(ReviewItem &item, std::vector<std::string> &added_ids, std::vector<std::string> &prepare_ids);
+  void scd_remember_bios(const scd::BiosProfile &profile);
   std::future<scd::ImportResult> scd_import_job_;      // import / attach / re-verify on a worker (hashing a disc takes seconds)
   bool scd_import_reverify_ = false;                  // the running check is "Verify again" of the existing program
   std::string scd_import_target_;                      // entry id for attach / re-verify, empty for a new game
@@ -401,7 +578,6 @@ private:
   std::map<std::string, std::string> scd_last_outcome_;  // id -> the plain-language end of the last run of this session
   [[nodiscard]] std::filesystem::path scd_dir(const LibraryEntry &entry) const;
   [[nodiscard]] std::vector<std::filesystem::path> scd_recordings(const LibraryEntry &entry) const;
-  void draw_scd_import(float w);
   // The Sega CD games' extra Details section (input recording and replay): a product-specific feature, drawn as a section card after the shared ones.
   float draw_scd_recordings(LibraryEntry &entry, const StatusInfo &info, float w);
   // The fields of the shared Details cards that only a Sega CD game has (BIOS, disc, program, build mode, save data), drawn into the same card slots.
@@ -420,9 +596,10 @@ private:
   std::future<std::vector<std::pair<std::string, RomView>>> import_job_;
   std::atomic<int> import_done_{0};
   int import_total_ = 0;
-  bool import_build_after_ = false;
-  std::vector<ImportItem> import_results_;
-  bool import_build_option_ = false;
+  std::vector<ReviewItem> review_;
+  bool welcome_dismissed_ = false;           // session only: a fresh profile's welcome is skipped for this session
+  bool welcome_armed_ = false;               // the welcome is shown while the library is empty (profile is new, or a test forced it); no question is asked before the first preparation
+  std::string play_after_build_;             // Prepare & play in flight: launch this game once its own build succeeds and is revalidated
   // ---- dialog results ----
   struct DialogEvent { std::string purpose, key; std::vector<std::string> paths; std::string error; };
   std::mutex dialog_mutex_;
@@ -446,8 +623,10 @@ private:
   bool maintenance_running_ = false;
   // ---- overlays ----
   Modal modal_;
-  struct Toast { std::string text; bool error; Uint64 until; };
+  struct Toast { std::string text; bool error; Uint64 duration; Uint64 shown_at; };   // shown_at == 0: still waiting for room, not aging
   std::vector<Toast> toasts_;
+  int states_clipped_ = 0;   // test seam: state labels of library cards / rows cut by an ellipsis in the last frame (must be 0)
+  int toast_shown_ = 0, toast_overlap_ = 0;   // test seam: toasts drawn this frame, and how many button rectangles they cover (must be 0)
   std::vector<std::string> deferred_paths_;
   // ---- automation (review/test aids, not user features) ----
   bool autoplay_ = false, autoplay_pending_ = false, autoplay_started_ = false, autoplay_build_tried_ = false;
@@ -465,6 +644,7 @@ private:
   SDL_Joystick *script_joy_ = nullptr;
   std::vector<std::pair<int, int>> script_key_up_;  // (frame, scancode) key releases to deliver
   bool shot_modal_done_ = false;
+  bool nav_was_visible_ = false;  // the navigation ring was visible at the end of the previous frame (a keyboard / pad user is navigating)
   bool nav_reset_ = true;  // put keyboard/gamepad focus on the active sidebar entry (start-up and page changes)
   std::string nav_items_;    // the primary navigation entries drawn this frame (script `expect nav_items=`)
   // SEG-069-T004: keyboard/gamepad focus follows the build controls on Details. Build -> Cancel build or Unqueue (the same place), and either -> Build again,
@@ -472,6 +652,9 @@ private:
   std::string details_refocus_;                  // "" | "after_build" | "build"
   int details_refocus_ttl_ = 0;                  // frames the request stays valid (a refused build must not leave it pending)
   void take_details_focus(const char *id);
+  void claim_primary_focus(bool enabled);   // F10: a freshly opened Game page starts on its primary action (Play / Prepare / Retry / Find game file / Cancel), not on the sidebar
+  bool details_focus_primary_ = false;
+  bool open_by_keyboard_ = false;
   // SEG-109-T005 test aids (GUI script `layout`, `scroll_page`, `open_more`, `menu_items`): where the Details page drew its sections and actions this frame, relative to
   // the page's top-left, so three platforms' pages can be compared structurally. Never a user feature.
   struct LayoutRect { std::string name; ImRect rect; };
