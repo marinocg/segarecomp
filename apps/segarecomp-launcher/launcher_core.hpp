@@ -224,7 +224,7 @@ struct AudioReport {
   // ADR 0291 (record schema 2; schema 1 records leave these at their defaults, which read as "not recorded / automatic unknown")
   int schema = 0;
   std::string selection;           // automatic | developer_override | "" (schema 1: explicit)
-  std::string reason;              // original_supported | no_verified_replacement | original_aot_failure_verified_replacement | developer_override | explicit_selection
+  std::string reason;              // original_supported | no_verified_replacement | original_aot_failure_verified_replacement | original_with_structural_alternatives | developer_override | explicit_selection
   std::string save_states;         // supported | "" (not recorded: a build from before native save states)
   long long implementation_version = -1;
 };

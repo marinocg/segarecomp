@@ -126,3 +126,45 @@ cc -std=gnu11 -w -D__cdecl= -include string.h -I<GEMSPlay copy> -o harness tools
 python3 tools/gems_reference_check.py --rom <game>.md --native-log native.log --harness ./harness
 python3 tools/genesis_state_demo.py --rom <game>.md --work demo        # save / load while the driver plays
 ```
+
+## 10. Kid Chameleon (USA, Europe): diagnosis of the silence and its resolution (ADR 0291 Decision 6)
+
+Authorized local image, used ephemerally; aggregates and classes only. ROM SHA-256 `bc08b018...3d4d5baa` (the image of the public Kid Chameleon disassembly's reference build, identical digest).
+
+**Failure before the change** (`segarecomp build`, default policy, no sound option): build `ok`, `genesis_audio = degraded`, `z80_audio_outcome = structural_code_mismatch`, `audio_implementation`:
+`original_z80_aot / no_verified_replacement / degraded`. Two Z80 images, five epochs (a one-extent stub, an empty epoch, then the same one-extent driver three times); the sound CPU is isolated by a structural code mismatch at
+frame 190 in the last epoch, i.e. in the driver image. No image is in the verified catalog (neither signature is the 2.5 line). The 68000 does submit commands (its command-FIFO write pointer advances to 29 in a 40 M-dispatch
+run, 15,368 bus holds), the isolated sound CPU consumes none of them, there are 0 key-on and 0 DAC writes, 8 YM2612 and 16 PSG writes (boot only), PCM silent (`non_silent = false`), at virtual frame
+3,396 the game is running. Failure class: **1 (original Z80 isolated by unsupported structural self-modification)**, with 2 (image unknown to the catalog) as the reason no replacement applies; classes 3-7 are not reached.
+
+**Driver identity.** Compared (by structure, offline) with the published 2.0 / 2.5 / 2.8 driver sources and ports. It is not the verified 2.5 image and not byte-identical to any published build:
+
+| Aspect | Kid Chameleon driver | GEMS 2.0 source | GEMS 2.5 (verified image) |
+| --- | --- | --- | --- |
+| stack / mailboxes / command FIFO / CCBs / channel cache / DAC FIFO | `$1A20` / `$1A20` / `$1A40` / `$1A80` / `$1C80` / `$1F00` (stack init and FIFO references found in the code) | same | `$1B20` / `$1B20` / `$1B40` / ... (shifted) |
+| command ids dispatched | 0-7, 11-14, 16, 18, 20, 22, 23 (dispatch falls through to the main loop after 23) | the same plus 26-29 | the same plus 26-32 |
+| FIFO pointers | write `$36`, read `$37` | same | same |
+| driver size / code layout | 5,770 bytes, main loop and tables at their own addresses | about 5,750 bytes, other table addresses | 6,278 bytes (written extent 8 KiB) |
+| conclusion | an earlier / distinct 2.x build ("unknown GEMS 2.x variant, 2.0-style RAM map"); version not established | | |
+
+Protocol-level differences from the verified implementation therefore exist (RAM map, command set; sequence-event and sample-handling differences are suspected from the 2.0 port's diff against the 2.5 port and unmeasured). Binary-only differences cannot explain it. Per
+the task's decision order this is Case C for a **native** implementation: no independent reference for this exact build exists (the 2.0 port models the dev-kit build, which this image is not), so a native variant would not be reference-checked
+and is not added. The catalog is unchanged (revision 1); nothing is guessed compatible.
+
+**Resolution without a replacement.** The original driver executes correctly once its (statically closed: 1 image, 2 bytes, 4 forms) self-modification is covered by the existing compiled structural alternatives (ADR 0259).
+The default build now selects that automatically (Decision 6). Default `segarecomp build` of the same image: `genesis_audio = supported`, `audio_implementation.reason = original_with_structural_alternatives`,
+`original_aot = {structural_code_mismatch, frame 190}`, `structural_alternatives = {requested, 1 image, 2 bytes, 4 entries, 4 forms}`, build time about twice (two passes).
+
+Same run (40 M dispatches, virtual frame 3,396): sound fault none, 1,090,305 YM2612 writes (595 key-on events on five FM channels between frame 191 and 3,389, 261,765 DAC data writes), 1,258 PSG writes, PCM non-silent
+(2,110,475 sample changes), two runs bit-identical (chip-access log and PCM digest). The driver consuming the game's commands is shown by that activity, not by a separate counter; **not claimed**: that a particular sound
+effect was heard, a comparison with an independent reference (the original driver itself executes, so there is no second implementation to compare), nor audibility of a play session.
+
+**Save state while playing** (`tools/genesis_state_demo.py`, 20 M dispatches before the save, 4 M compared after): state of 146,669 bytes saved with the music running, restored equal to the saved one, and the continuation
+identical after the first and the second restore, non-silent.
+
+**GEMS 2.5 games.** The first pass of Cool Spot / Aladdin / Earthworm Jim / Jurassic Park still selects the verified replacement before the new step is reachable (the code path is unchanged); the Cool Spot build record is
+unchanged (see the PR for the exact result). The commercial reference rerun for the four games (352 / 352 commands, 2,117,208 operations for Cool Spot) was **not** repeated: the replacement code and catalog are untouched and the
+third-party reference harness is not vendored; the committed synthetic tests are unchanged and pass.
+
+**Follow-up (not in this change).** A native variant for this driver build would need: the 2.0-style RAM map as an immutable descriptor, a disassembly-level comparison of this exact image's sequence events and sample handling,
+and an independent reference for it. It is only worth doing if a game is found whose driver the structural alternatives cannot close.

@@ -477,6 +477,13 @@ def sound_smc_driver():
     return z80(".org 0x0000\n        ld sp,0x1F00\n        ld a,0x3C\n        ld (patch),a\npatch:  nop\nloop:   jr loop\n")
 
 
+def sound_smc_dynamic_driver():
+    """Like sound_smc_psg_driver, but the byte stored over the next instruction is LOADED from RAM at run time: a value the static structural analysis cannot model, so the compiled
+    structural alternatives cannot close it (ADR 0291 Decision 6: such a driver stays degraded)."""
+    return z80(".org 0x0000\n        ld sp,0x1F00\n        ld a,0x9F\n        ld (0x7F11),a\n        ld a,(0x1800)\n        add a,0x3C\n        ld (patch),a\n"
+               "patch:  nop\n        ld a,0x8A\n        ld (0x7F11),a\nloop:   jr loop\n")
+
+
 def sound_smc_psg_driver():
     """One PSG write, then a structural self-modification of the next instruction (z80_code_mismatch), then PSG writes that must never
     be executed: the isolated sound CPU performs no write after the fault."""
@@ -617,6 +624,16 @@ def fixture_sound_smc_fault():
     return build_sound([("raw", "s"), ("delay", SOUND_DELAY), ("raw", "a")], {"s": sound_smc_psg_driver(), "a": sound_driver(1)})
 
 
+def fixture_sound_smc_dynamic():
+    """One driver whose structural self-modification stores a RAM-loaded value (not closable by the static structural alternatives)."""
+    return build_sound([("raw", "s")], {"s": sound_smc_dynamic_driver()})
+
+
+def fixture_sound_smc_dynamic_second_image():
+    """The two-image shape of sound_smc_second_image with a self-modifying driver the structural alternatives cannot close."""
+    return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("raw", "s")], {"a": sound_driver(1), "s": sound_smc_dynamic_driver()})
+
+
 def fixture_sound_smc_second_image():
     """Two images: a well-behaved driver in the first epoch, then, after a delay, a structurally self-modifying one that isolates the sound CPU: the faulting image is the SECOND one
     (ADR 0291: the automatic sound selection must tie the fault to the catalog-qualified image, not to any image of the program)."""
@@ -706,7 +723,8 @@ def fixture_static_kos_beyond_ram():
 
 FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control,
             "sound_raw": fixture_sound_raw, "sound_multi_epoch": fixture_sound_multi_epoch, "sound_decoded": fixture_sound_decoded,
-            "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_smc_second_image": fixture_sound_smc_second_image, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch,
+            "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_smc_second_image": fixture_sound_smc_second_image, "sound_smc_dynamic": fixture_sound_smc_dynamic,
+            "sound_smc_dynamic_second_image": fixture_sound_smc_dynamic_second_image, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch,
             "sound_domestic_gated": fixture_sound_domestic_gated, "sound_domestic_gated_overseas_header": fixture_sound_domestic_gated_overseas_header,
             "static_kos": fixture_static_kos, "static_stub_driver": fixture_static_stub_driver, "static_kos_unrecognised": fixture_static_kos_unrecognised,
             "static_kos_work_ram": fixture_static_kos_work_ram, "static_ram_count": fixture_static_ram_count,

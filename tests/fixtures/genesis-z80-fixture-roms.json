@@ -40,6 +40,14 @@
       "sha256": "50cf09b94e8ece9135b926ad2187a0c398dc5c3f6afcb8c330436348e58d0b63",
       "size": 16384
     },
+    "sound_smc_dynamic": {
+      "sha256": "5e25fe8083d5966f6c0f9d5006e356cbf9891287e247a9bb77b2c34f9560a74b",
+      "size": 16384
+    },
+    "sound_smc_dynamic_second_image": {
+      "sha256": "934be7a5df4d6f6214f85abe8510cce0711bae209ef6b558672e44820521e938",
+      "size": 16384
+    },
     "sound_smc_fault": {
       "sha256": "fb8d4ca5984a2dba9c0ba41cd3460ae3a8aa425597f27f7531dd9f8d0532aefd",
       "size": 16384

@@ -119,3 +119,20 @@ state came with the snapshot) and cannot fail. A faulted replacement is recorded
 
 The save-state tests are in `docs/testing/genesis-native-gems-validation.md` (driver-level deterministic continuation and refusals, machine-level snapshot test on the real
 runtime, local reference demonstration).
+
+## Decision 6 - the original driver with its compiled structural alternatives is tried before "degraded" (amendment, Kid Chameleon)
+
+Kid Chameleon uses a GEMS driver that is **not** the verified 2.5 image and **not** a build any published source reproduces (see `docs/testing/genesis-native-gems-validation.md`, section 10): its RAM map is the
+earlier 2.x layout (stack and mailboxes below the command FIFO at a different base), its command dispatch ends at command 23 (the published 2.0 source has four more, 2.5 seven more) and its code layout and size
+match neither. Serving it natively would need a new driver variant *and* an independent reference for that exact build, which does not exist; ADR 0291's rule (a replacement only for a verified image) therefore
+leaves it out. But the same game's **original** generated-native Z80 is not hopeless: its self-modification is the small, statically closed family the ADR 0259 structural alternatives already compile (1 image,
+2 bytes, 4 forms), exactly like Krusty's Super Fun House in ADR 0134. With `--z80-alternatives 1` the sound CPU stays healthy for the whole start-up window and the game plays its own music through its own driver.
+
+Decision: the automatic policy gets one more deterministic step, and still no user option. If the first pass isolated the sound CPU by a structural code mismatch **and** no verified replacement applies, the build
+runs **one** more pass of the same program with the compiled structural alternatives (`z80_alternatives = true`, the existing emitter mechanism, static analysis only - no observation-driven compile/fault/recompile
+loop: the second pass is one fixed configuration, not an iteration). If that pass's own start-up run meets no sound fault the executable is the game's own driver as generated-native Z80
+(`reason: original_with_structural_alternatives`, `audio_status: supported`, the first pass's failure recorded as `original_aot`); otherwise the record is the degraded `no_verified_replacement` with the alternatives
+disclosed. If the second pass fails to build, the first configuration is built as before this decision (never a failed build for a game that built). A verified replacement keeps precedence (decided on the first pass,
+unchanged), `--sound-driver original` never compiles alternatives, and no unknown GEMS image is guessed compatible. The launcher shows "Original Z80 (generated-native, with structural alternatives)" and says why; the
+cache identity of a build carries a policy token (`alt1`) so that an older degraded build is never reused. Cost: a game that is isolated and not closable builds twice (about 2x the sound passes); every other game is unchanged.
+No emulator, interpreter, JIT, runtime decoder, title test or hard-coded sound is involved; save states and rewind are those of the generated-native Z80 (no new state).
