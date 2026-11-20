@@ -132,6 +132,9 @@ def main():
         files = ";".join(str(p.dir / n) for n in ("fresh.md", "have copy.md", "notes.txt", "needs.sms"))
         trace = p.run([f"import_files {files}", "wait_import", "frames 6", "expect review=valid,duplicate,invalid,needs_choice", "expect review_selected=2", "review_toggle 1", "review_toggle 2",
                        "expect review_selected=2", "expect library_size=1", "review_prepare", "wait_idle", "frames 60", "expect library_size=3", "expect build_outcome=ok", "expect playing=0", "quit"])
+        summary = [l for l in trace if l.startswith("import=summary")]
+        if not summary or "1 needs a choice first" not in summary[0] or "1 need a choice" in summary[0]:   # round C P3: singular grammar
+            failures.append(f"review summary grammar: {summary!r}")
         check("batch", trace, 7)
         after = p.catalog()
         expect(len(after) == 3, f"batch: expected 3 entries, got {len(after)}")

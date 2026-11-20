@@ -146,6 +146,92 @@ def main():
         proc.wait(timeout=120)
         check(p.trace(), "unwritable notice", 3)
 
+        # 5. round C P1-1: a game added while the library could not be saved is written once the folder works again; the notice names what is pending and clears only
+        #    after the save really succeeded. A save that still fails keeps the notice; quitting while it fails does not crash.
+        def unsaved_profile(name, repaired):
+            q = Profile(tmp, name, exe, fake_cli, fake_game)
+            blocker = q.dir / "afile"
+            blocker.write_text("x")
+            genesis_rom(q.roms / "q.md", 9)
+            env = {"SEGARECOMP_LIBRARY_DIR": str(blocker / "lib"), "SEGARECOMP_CACHE_DIR": str(blocker / "cache")}
+            go, done = q.dir / "go", q.dir / "go2"
+            script = ["frames 14", f"import_files {q.roms / 'q.md'}", "wait_import", "frames 8", "review_add", "frames 8", "expect unsaved_games=1",
+                      "expect health_pending=1 game is not saved yet.", "expect health_notice=Your library cannot be saved", f"wait_file {go}", f"wait_file {done}", "frames 10"]
+            script += repaired
+            return q, blocker, go, done, env, script
+
+        q, blocker, go, done, env, script = unsaved_profile("pending-saved", ["expect unsaved_games=0", "expect health_notice=-", "quit"])
+        proc = q.start(script, "720x520", env)
+        time.sleep(2.5)
+        blocker.unlink()
+        blocker.mkdir()
+        go.write_text("1")
+        saved_file = blocker / "lib" / "library.json"
+        for _ in range(100):   # the 3 s health re-check finds the folder writable and saves what was pending
+            if saved_file.exists():
+                break
+            time.sleep(0.2)
+        expect(saved_file.exists(), "pending: the library file exists after the folder is repaired, without a restart")
+        expect(saved_file.exists() and "GAME NUMBER 009" in saved_file.read_text(), "pending: the saved catalog holds the game added while unwritable")
+        done.write_text("1")
+        proc.wait(timeout=120)
+        trace = q.trace()
+        check(trace, "pending saved", 5)
+        expect("health=saved_pending" in trace, f"pending: the save is traced: {trace!r}")
+
+        q, blocker, go, done, env, script = unsaved_profile("pending-still-failing", ["expect unsaved_games=1", "expect health_notice=Your library cannot be saved", "quit"])
+        proc = q.start(script, "720x520", env)
+        time.sleep(2.5)
+        blocker.unlink()
+        (blocker / "lib" / "library.json").mkdir(parents=True)   # the folder is writable now, but the catalog file itself still cannot be written
+        (blocker / "lib" / "library.json" / "keep").write_text("x")
+        go.write_text("1")
+        time.sleep(4.5)
+        done.write_text("1")
+        proc.wait(timeout=120)
+        trace = q.trace()
+        check(trace, "pending still failing", 5)
+        expect("health=save_still_failing" in trace, f"pending: a failed retry is traced and keeps the notice: {trace!r}")
+        expect("shutdown=unsaved_lost" in trace and "shutdown=done" in trace, f"pending: quitting while still failing ends cleanly: {trace!r}")
+
+        # a quit while the folder works again but before the next re-check still saves (shutdown attempt)
+        q, blocker, go, done, env, script = unsaved_profile("pending-shutdown", ["quit"])
+        proc = q.start(script, "720x520", env)
+        time.sleep(2.5)
+        blocker.unlink()
+        blocker.mkdir()
+        go.write_text("1")
+        done.write_text("1")
+        proc.wait(timeout=120)
+        expect((blocker / "lib" / "library.json").exists(), "pending: closing saves a catalog that could not be saved before")
+
+        # 6. round C P2-4: the periodic probe runs on a worker: a stalled drive does not stop the window, and no second probe starts while one is pending.
+        q = Profile(tmp, "stalled-probe", exe, fake_cli, fake_game)
+        blocker = q.dir / "afile"
+        blocker.write_text("x")
+        go = q.dir / "go"
+        env = {"SEGARECOMP_LIBRARY_DIR": str(blocker / "lib"), "SEGARECOMP_CACHE_DIR": str(blocker / "cache"), "SEGARECOMP_GUI_PROBE_DELAY_MS": "7000"}
+        proc = q.start(["frames 14", "expect health_probes=1", f"wait_file {go}", "frames 30", "expect health_probes=1", "expect health_notice=Your library cannot be saved", "quit"], "720x520", env)
+        time.sleep(5.5)   # a probe is due every 3 s; the first stalls for 7 s, so a second must not start meanwhile
+        go.write_text("1")
+        proc.wait(timeout=120)
+        check(q.trace(), "stalled probe", 3)
+
+        # 7. round C P2-3: a toast that waits for room does not age until it is shown; every one of them is seen, an error included.
+        q = Profile(tmp, "toast-queue", exe, fake_cli, fake_game)
+        go = q.dir / "go"
+        proc = q.start(["frames 14", "toast_error First error"] + [f"toast Note {i}" for i in range(2, 8)] + ["frames 6", "expect toasts=1", "expect toasts_hidden=some", "expect toasts_pending=7", f"wait_file {go}", "frames 6", "quit"], "720x520")
+        for _ in range(200):   # a visible toast lives 4.2 s (an error 6.5 s); the rest waits without aging for its turn
+            if "toast_visible=Note 2" in q.trace():
+                break
+            time.sleep(0.2)
+        go.write_text("1")
+        proc.wait(timeout=120)
+        trace = q.trace()
+        check(trace, "toast queue", 3)
+        for text in ["First error"] + [f"Note {i}" for i in range(2, 8)]:
+            expect(f"toast_visible={text}" in trace, f"toast queue: '{text}' was shown before it expired: {trace!r}")
+
         # 4. a healthy profile shows no notice at all.
         p = Profile(tmp, "healthy", exe, fake_cli, fake_game, games=1)
         check(p.run(["frames 20", "expect health_notice=-", "focus_card 0", "frames 4", "key Return", "frames 12", "expect health_notice=-", "quit"], "720x520"), "healthy", 2)

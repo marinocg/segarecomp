@@ -988,6 +988,69 @@ void test_instance_started_during_move() {
 #endif
 } // namespace
 
+// P2-2 (round C): a destination folder that is a link into the old root makes old and new the same file; removing the old path would delete the only copy.
+#if !defined(_WIN32)
+void test_cleanup_refuses_destination_links() {
+  const std::vector<std::pair<std::string, std::vector<std::string>>> layouts = {{"library", {"library"}}, {"saves", {"library", "saves"}}};
+  for (const auto &layout : layouts) {
+    const World w = make_world("p22_link_" + layout.first);
+    BusyGuard busy;
+    DataEnvironment none;
+    expect(run_migration(options_for(w), busy).ok(), "migration (" + layout.first + ")");
+    fs::path rel;
+    for (const auto &part : layout.second) rel /= part;
+    fs::remove_all(w.D / rel);
+    fs::create_directory_symlink(w.S / rel, w.D / rel);
+    const fs::path save_old = w.S / "library" / "saves" / "genesis" / sha64('a') / "save.srm";
+    const fs::path save_new = w.D / "library" / "saves" / "genesis" / sha64('a') / "save.srm";
+    const CleanupPlan plan = plan_old_root_cleanup(w.bootstrap, none, true);
+    bool offered_save = false;
+    for (const auto &item : plan.items) offered_save |= item.path == save_old;
+    expect(!offered_save, "a destination folder that is a link into the old root keeps the old save out of the plan (" + layout.first + ")");
+    expect(!plan.kept.empty(), "the plan says what was kept (" + layout.first + ")");
+    const CleanupResult r = run_old_root_cleanup(w.bootstrap, none, true, busy);
+    (void)r;
+    expect(fs::is_regular_file(save_old) && fs::is_regular_file(save_new), "old and new saves still exist after the cleanup (" + layout.first + ")");
+    expect(slurp(save_old) == std::string(64, 's'), "the save content is intact (" + layout.first + ")");
+    fs::remove_all(w.base);
+  }
+  {
+    const World w = make_world("p22_link_toctou");
+    BusyGuard busy;
+    DataEnvironment none;
+    expect(run_migration(options_for(w), busy).ok(), "migration (toctou)");
+    CleanupHooks hooks;
+    hooks.before_remove = [&](const fs::path &next) {
+      if (next != w.S / "library" / "saves" / "genesis" / sha64('a') / "save.srm" || fs::is_symlink(w.D / "library" / "saves")) return;
+      fs::remove_all(w.D / "library" / "saves");
+      fs::create_directory_symlink(w.S / "library" / "saves", w.D / "library" / "saves");
+    };
+    (void)run_old_root_cleanup(w.bootstrap, none, true, busy, nullptr, &hooks);
+    expect(fs::is_regular_file(w.S / "library" / "saves" / "genesis" / sha64('a') / "save.srm"), "a link swapped in after the plan keeps the original save");
+    fs::remove_all(w.base);
+  }
+  {   // harmless: a link to an unrelated folder (kept out of the old root) still lets the verified copy be offered, and the normal cleanup works
+    const World w = make_world("p22_link_harmless");
+    BusyGuard busy;
+    DataEnvironment none;
+    expect(run_migration(options_for(w), busy).ok(), "migration (harmless)");
+    const fs::path elsewhere = w.base / "elsewhere";
+    fs::create_directories(elsewhere.parent_path());
+    fs::rename(w.D / "library" / "covers", elsewhere);
+    fs::create_directory_symlink(elsewhere, w.D / "library" / "covers");
+    const CleanupPlan plan = plan_old_root_cleanup(w.bootstrap, none, true);
+    bool cover_offered = false, save_offered = false;
+    for (const auto &item : plan.items) { cover_offered |= item.path.filename() == "a.png"; save_offered |= item.path.filename() == "save.srm"; }
+    expect(!cover_offered, "a destination folder that is a link is never trusted, even to an unrelated folder");
+    expect(save_offered, "ordinary verified copies are still offered");
+    (void)run_old_root_cleanup(w.bootstrap, none, true, busy);
+    expect(fs::is_regular_file(w.S / "library" / "covers" / "a.png"), "the cover whose new folder is a link keeps its original");
+    expect(!fs::exists(w.S / "library" / "saves" / "genesis" / sha64('a') / "save.srm") && fs::is_regular_file(w.D / "library" / "saves" / "genesis" / sha64('a') / "save.srm"), "the normal cleanup still removes a verified original");
+    fs::remove_all(w.base);
+  }
+}
+#endif
+
 int main() {
   test_plain_text_for_every_reason();
   test_bootstrap_and_resolution();
@@ -1006,6 +1069,7 @@ int main() {
   test_cleanup_revalidates_before_delete();
   test_cleanup_refuses_active_environment();
 #if !defined(_WIN32)
+  test_cleanup_refuses_destination_links();
   test_other_instance_blocks_move_and_cleanup();
   test_instance_started_during_move();
 #endif

@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdio>
 #include <fstream>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -160,8 +161,14 @@ void App::trace(const std::string &line) {
 
 void App::toast(const std::string &text, bool error) {
   trace(std::string("toast=") + (error ? "error " : "") + text);   // test seam: what the user was told
-  toasts_.push_back({text, error, SDL_GetTicks() + (error ? 6500U : 4200U)});
-  if (toasts_.size() > 4) toasts_.erase(toasts_.begin());
+  toasts_.push_back({text, error, error ? 6500U : 4200U, 0});
+  // A toast waits (without aging) until the band has room for it. When many pile up the oldest already-seen or plain one goes first; an error is never dropped unseen.
+  while (toasts_.size() > 8) {
+    auto victim = std::find_if(toasts_.begin(), toasts_.end(), [](const Toast &t) { return !t.error; });
+    if (victim == toasts_.end()) victim = std::find_if(toasts_.begin(), toasts_.end(), [](const Toast &t) { return t.shown_at != 0; });
+    if (victim == toasts_.end()) break;
+    toasts_.erase(victim);
+  }
 }
 
 void App::show_message(const std::string &title, const std::vector<std::string> &lines) {
@@ -177,11 +184,14 @@ bool App::try_save_catalog(std::string *error) {
   if (catalog_.read_only()) return true;
   std::string why;
   if (!catalog_.save(&why)) {
+    catalog_unsaved_ = true;
     library_unwritable_ = "it cannot be written";   // the system's own wording names a local path: it is kept for the trace / the typed callers, not for the notice
     if (error != nullptr) *error = why.empty() ? library_unwritable_ : why;
     return false;
   }
   library_unwritable_.clear();
+  catalog_unsaved_ = false;
+  unsaved_games_ = 0;
   return true;
 }
 
@@ -191,13 +201,14 @@ void App::save_catalog() {
 }
 
 // The library folder can be created and written (a throw-away file is created and removed in an existing folder). Empty text when it can, else why not.
-std::string App::probe_library_writable() const {
+std::string App::probe_library_writable(const fs::path &dir) {
   std::error_code ec;
-  if (!fs::is_directory(library_dir_, ec)) {
-    fs::create_directories(library_dir_, ec);
-    return ec || !fs::is_directory(library_dir_, ec) ? "it cannot be created" : std::string();
+  if (!fs::is_directory(dir, ec)) {
+    fs::create_directories(dir, ec);
+    return ec || !fs::is_directory(dir, ec) ? "it cannot be created" : std::string();
   }
-  const fs::path probe = library_dir_ / ".write-probe";
+  const fs::path probe = dir / ".write-probe";
+  fs::remove(probe, ec);   // a leftover of a crash between write and remove
   {
     std::ofstream out(probe, std::ios::binary | std::ios::trunc);
     out << 'x';
@@ -207,19 +218,35 @@ std::string App::probe_library_writable() const {
   return std::string();
 }
 
-// Standing health of the installation and of the library folder, re-checked every few seconds so a notice disappears once its cause is fixed (no restart).
+// Standing health of the installation and of the library folder, re-checked every few seconds so a notice disappears once its cause is fixed (no restart). The checks run on
+// a worker and are polled; one is never started while another is pending. A library that became writable again first saves what a failed save left in memory: the notice
+// goes away only when that save really succeeded.
 void App::refresh_health() {
-  const Uint64 now = SDL_GetTicks();
-  if (health_checked_ != 0 && now - health_checked_ < 3000U) return;
-  health_checked_ = now;
-  if (!layout_.problem.empty()) {   // an installation that was repaired while the window is open
-    const Layout fresh = locate_layout();
-    if (fresh.problem.empty()) {
+  if (health_probe_.valid() && health_probe_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+    const std::string why = health_probe_.get();
+    if (!why.empty()) library_unwritable_ = why;
+    else if (catalog_unsaved_) { std::string error; if (try_save_catalog(&error)) trace("health=saved_pending"); else trace("health=save_still_failing"); }
+    else library_unwritable_.clear();
+  }
+  if (layout_probe_.valid() && layout_probe_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+    const Layout fresh = layout_probe_.get();
+    if (fresh.problem.empty() && !layout_.problem.empty()) {   // an installation that was repaired while the window is open
       layout_ = fresh;
       sms_probe_ = std::async(std::launch::async, [lay = layout_] { return sms_optimized_available_blocking(lay); });
     }
   }
-  if (!library_unwritable_.empty() && !catalog_.read_only()) library_unwritable_ = probe_library_writable();   // only a standing failure is polled; a healthy library is not
+  const Uint64 now = SDL_GetTicks();
+  if (health_checked_ != 0 && now - health_checked_ < 3000U) return;
+  health_checked_ = now;
+  if (!layout_.problem.empty() && !layout_probe_.valid()) layout_probe_ = std::async(std::launch::async, [] { return locate_layout(); });
+  if (!library_unwritable_.empty() && !catalog_.read_only() && !health_probe_.valid()) {   // only a standing failure is polled; a healthy library is not
+    ++health_probes_started_;
+    trace("health=probe_started");
+    health_probe_ = std::async(std::launch::async, [dir = library_dir_] {
+      if (const char *delay = SDL_getenv("SEGARECOMP_GUI_PROBE_DELAY_MS")) std::this_thread::sleep_for(std::chrono::milliseconds(std::atoi(delay)));   // test seam: a stalled drive
+      return probe_library_writable(dir);
+    });
+  }
 }
 
 void App::save_settings() {
@@ -348,6 +375,12 @@ void App::shutdown() {
   if (move_.cleanup_plan_job.valid()) move_.cleanup_plan_job.wait();
   if (inventory_job_.valid()) inventory_job_.wait();
   if (sms_probe_.valid()) sms_probe_.wait();
+  if (health_probe_.valid()) health_probe_.wait();
+  if (layout_probe_.valid()) layout_probe_.wait();
+  if (catalog_unsaved_) {   // a last attempt at what a failed save left in memory
+    std::string error;
+    trace(try_save_catalog(&error) ? "shutdown=saved_pending" : "shutdown=unsaved_lost");
+  }
   if (hid_job_.valid()) hid_job_.wait();
   cover_cancel_ = true;
   if (cover_job_.valid()) cover_job_.wait();
@@ -759,6 +792,7 @@ void App::poll_import() {
   go(Page::import_page);
   trace("import=reviewed total=" + std::to_string(review_.size()) + " valid=" + std::to_string(review_count(ReviewItem::Verdict::valid, false)) + " needs_choice=" + std::to_string(review_count(ReviewItem::Verdict::needs_choice, false)) +
         " duplicate=" + std::to_string(review_count(ReviewItem::Verdict::duplicate, false)) + " invalid=" + std::to_string(review_count(ReviewItem::Verdict::invalid, false)));
+  trace("import=summary " + review_summary());   // test seam: the sentence the review shows
   if (!deferred_paths_.empty()) { auto next = std::move(deferred_paths_); deferred_paths_.clear(); start_import(std::move(next)); }
 }
 
@@ -772,7 +806,7 @@ std::string App::review_summary() const {
   const int dup = review_count(ReviewItem::Verdict::duplicate, false), bad = review_count(ReviewItem::Verdict::invalid, false);
   const int bios = static_cast<int>(std::count_if(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.sega_cd && i.verdict == ReviewItem::Verdict::needs_choice; }));
   std::string text = std::to_string(add + choice) + " selected to add";
-  if (add + choice > 0) text += ": " + std::to_string(prep) + " can be prepared" + (choice > 0 ? ", " + std::to_string(choice) + " need a choice first (added, not prepared)" : std::string()) + (add - prep > 0 ? ", " + std::to_string(add - prep) + " can only be added here" : std::string());
+  if (add + choice > 0) text += ": " + std::to_string(prep) + " can be prepared" + (choice > 0 ? ", " + std::to_string(choice) + (choice == 1 ? " needs" : " need") + " a choice first (added, not prepared)" : std::string()) + (add - prep > 0 ? ", " + std::to_string(add - prep) + " can only be added here" : std::string());
   text += ".";
   if (bios > 0) text += " " + std::to_string(bios) + (bios == 1 ? " disc needs" : " discs need") + " your BIOS before it can be added.";
   if (dup > 0) text += " " + std::to_string(dup) + " already in your library (skipped).";
@@ -821,6 +855,7 @@ void App::commit_review(bool prepare) {
   request_scan();
   queue_auto_covers(added_ids);
   trace("import=done added=" + std::to_string(added_ids.size()) + " total=" + std::to_string(total) + " prepare=" + (prepare ? std::to_string(prepare_ids.size()) : std::string("0")));
+  if (!saved) unsaved_games_ += static_cast<int>(added_ids.size());
   if (!saved && !added_ids.empty()) {   // the truthful outcome only: nothing is claimed as added, nothing starts, the standing notice explains the next step
     trace("import=not_saved added=" + std::to_string(added_ids.size()));
     if (review_.empty()) go(Page::library);
@@ -1651,6 +1686,8 @@ void App::run_script() {
       rest = cut == std::string::npos ? std::string() : rest.substr(cut + 1);
     }
     start_import(std::move(paths));
+  } else if (cmd == "toast" || cmd == "toast_error") {   // round C: raise a notification as the product does (the toast seams then show what the user saw)
+    toast(arg, cmd == "toast_error");
   } else if (cmd == "wait_import") {  // hold the script until the inspection has finished
     if (import_job_.valid()) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "review_toggle") {  // flip the selection of review item <n> (selectable items only)
@@ -1909,6 +1946,12 @@ void App::run_script() {
     else if (key == "health_notice") actual = health_notice_text_.empty() ? "-" : health_notice_text_;
     else if (key == "states_clipped") actual = std::to_string(states_clipped_);
     else if (key == "toasts") actual = toast_shown_ > 0 ? "1" : "0";
+    else if (key == "toasts_shown") actual = std::to_string(toast_shown_);
+    else if (key == "toasts_hidden") actual = static_cast<int>(toasts_.size()) > toast_shown_ ? "some" : "none";   // waiting for room
+    else if (key == "toasts_pending") actual = std::to_string(toasts_.size());
+    else if (key == "health_pending") actual = health_pending_text_.empty() ? "-" : health_pending_text_;
+    else if (key == "unsaved_games") actual = std::to_string(unsaved_games_);
+    else if (key == "health_probes") actual = std::to_string(health_probes_started_);
     else if (key == "toast_overlap") actual = std::to_string(toast_overlap_);
     else if (key == "toast_text") { actual = "-"; if (!toasts_.empty()) actual = toasts_.back().text.substr(0, 40); }
     else if (key == "welcome") actual = page_ == Page::library && catalog_.entries().empty() && welcome_armed_ && !welcome_dismissed_ ? "1" : "0";
@@ -2001,7 +2044,7 @@ int App::run() {
       trace("onboarding=armed");
     }
   }
-  if (const std::string why = probe_library_writable(); !why.empty()) { library_unwritable_ = why; }
+  if (const std::string why = probe_library_writable(library_dir_); !why.empty()) { library_unwritable_ = why; }   // the one synchronous probe: a fresh profile must know before its first frame
   if (layout_.problem.empty()) sms_probe_ = std::async(std::launch::async, [lay = layout_] { return sms_optimized_available_blocking(lay); });
   if (!catalog_notice_.empty()) toast(catalog_notice_, true);
   autoplay_ = SDL_getenv("SEGARECOMP_GUI_AUTOPLAY") != nullptr;

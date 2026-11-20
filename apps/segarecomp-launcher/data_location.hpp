@@ -65,7 +65,7 @@ struct PlainText { std::string what, next; };
 struct Refused { MigrationRefusal code; std::string detail; };
 
 // ---- cooperative multi-process marker (SEG-150 corrective round A) ----
-// Every Segarecomp process that resolves the data roots registers `<bootstrap>.instances/<pid>` (removed at exit; a marker whose pid is no longer alive is ignored and
+// Every Segarecomp process that resolves the data roots from the bootstrap pointer (not one started with SEGARECOMP_CACHE_DIR set) registers `<bootstrap>.instances/<pid>` (removed at exit; a marker whose pid is no longer alive is ignored and
 // deleted). A move or an old-root cleanup REFUSES while a live marker of ANOTHER process exists. Guarantee: two processes that both follow this protocol never move or
 // clean the data at the same time as the other is running. It does NOT stop an instance started after the check, a third-party writer, or a pid that the OS reused for an
 // unrelated program (the marker then names the file to delete); a change made by such a writer during a move is detected only by the final source digest re-check.

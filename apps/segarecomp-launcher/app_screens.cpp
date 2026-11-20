@@ -100,6 +100,7 @@ void App::draw() {
   states_clipped_ = 0;
   refresh_health();
   health_notice_text_.clear();
+  health_pending_text_.clear();
   int ww = 0, wh = 0;
   SDL_GetWindowSize(window_, &ww, &wh);
   win_w_ = static_cast<float>(ww);
@@ -198,10 +199,11 @@ void App::draw() {
 }
 
 // Toasts live in the hero band (the banner above the panel), right of the wordmark: no page control ever sits there, so a notification can never cover a primary
-// action or a Cancel button (F7). Newest on top; an older one that no longer fits the band waits, hidden, until the newer ones expire.
+// action or a Cancel button (F7). Newest on top; an older one that no longer fits the band waits, hidden and not aging, until the newer ones expire.
 void App::draw_toasts(float w, float h) {
   const Uint64 now = SDL_GetTicks();
-  toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(), [&](const Toast &t) { return now > t.until; }), toasts_.end());
+  // A toast ages only once it has been on screen: one still waiting for room keeps its full time (nothing is dropped unseen).
+  toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(), [&](const Toast &t) { return t.shown_at != 0 && now > t.shown_at + t.duration; }), toasts_.end());
   toast_shown_ = 0;
   toast_overlap_ = 0;
   if (toasts_.empty()) return;
@@ -218,6 +220,7 @@ void App::draw_toasts(float w, float h) {
     if (y + bh > band && it != toasts_.rbegin()) break;   // the newest always shows; older ones wait
     const ImVec2 a(right - bw, y);
     ++toast_shown_;
+    if (it->shown_at == 0) { it->shown_at = now; trace("toast_visible=" + it->text); }
     for (const ImRect &r : ui::button_rects) if (r.Min.x < a.x + bw && r.Max.x > a.x && r.Min.y < a.y + bh && r.Max.y > a.y) ++toast_overlap_;
     dl->AddRectFilled(a, ImVec2(a.x + bw, a.y + bh), col::panel_dark, ctx_.u(6.0F));
     dl->AddRect(a, ImVec2(a.x + bw, a.y + bh), it->error ? col::err : col::glow, ctx_.u(6.0F), 0, std::max(1.0F, ctx_.u(1.4F)));
@@ -748,8 +751,12 @@ void App::draw_health_notice(float w) {
   struct Line { const char *title; std::string text; };
   std::vector<Line> lines;
   if (!layout_.problem.empty()) lines.push_back({"Installation incomplete", layout_.problem + " Games cannot be prepared until it is repaired."});
-  if (!library_unwritable_.empty() && !catalog_.read_only())
-    lines.push_back({"Your library cannot be saved", "Segarecomp cannot save to its library folder (" + library_unwritable_ + "). Games added now would be lost when you close it. Fix the folder, or choose another in Settings > Storage & Data."});
+  if (!library_unwritable_.empty() && !catalog_.read_only()) {
+    std::string pending;   // what would be lost, so the notice is as concrete as the damage
+    if (catalog_unsaved_) pending = unsaved_games_ > 0 ? std::to_string(unsaved_games_) + (unsaved_games_ == 1 ? " game is" : " games are") + " not saved yet. " : std::string("Recent changes are not saved yet. ");
+    health_pending_text_ = pending.empty() ? std::string() : pending.substr(0, pending.size() - 1);
+    lines.push_back({"Your library cannot be saved", "Segarecomp cannot save to its library folder (" + library_unwritable_ + "). " + pending + "Anything not saved would be lost when you close it. Fix the folder and it will be saved by itself, or choose another in Settings > Storage & Data."});
+  }
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const float px = ctx_.u(12.0F), title_px = ctx_.u(12.5F), pad = ctx_.u(9.0F);
   for (const Line &l : lines) {

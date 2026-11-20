@@ -1066,6 +1066,27 @@ std::string active_environment_reason(const DataEnvironment &env, const fs::path
   return "";
 }
 
+// The verified new copy is only a safe stand-in for the old file when it is a separate file in the new root: no directory of its path under the new root is a link (a link
+// into the old root would make "old" and "new" the same inode, and removing the old path would delete the only copy), it resolves outside the old root and it is
+// not the same file. Empty when trusted, otherwise the note for the kept item.
+std::string new_copy_doubt(const fs::path &old_root, const fs::path &new_root, const fs::path &rel, const fs::path &old_file) {
+  std::error_code ec;
+  const fs::path new_file = new_root / rel;
+  fs::path walk = new_root;
+  const fs::path parent = rel.parent_path();
+  for (const auto &part : parent) {
+    if (part.empty() || part == ".") continue;
+    walk /= part;
+    if (path_is_link(walk)) return "a folder of the new copy is a link; kept";
+  }
+  if (path_is_link(new_file)) return "the new copy is a link; kept";
+  const fs::path canon_new = fs::weakly_canonical(new_file, ec);
+  if (ec || physically_inside(old_root, canon_new)) return "the new copy lies inside the old folder; kept";
+  const bool same = fs::equivalent(old_file, new_file, ec);
+  if (ec || same) return "the new copy is the same file as the original; kept";
+  return {};
+}
+
 void add_cleanup_dir(CleanupPlan &plan, const fs::path &dir, const std::string &area) {
   const TreeMeasure m = measure_tree(dir);
   if (m.has_symlink || m.truncated) { plan.kept.push_back(u8(dir.filename()) + ": contains a link or is too large to examine; kept"); return; }
@@ -1110,6 +1131,7 @@ CleanupPlan plan_old_root_cleanup(const fs::path &bootstrap_file, const DataEnvi
         if (catalog_check.old_refs.count(fs::weakly_canonical(old_file, ec)) != 0) { note("the new catalog still refers to this file; kept"); continue; }
         if (path_is_link(old_file) || !fs::is_regular_file(old_file, ec)) { note("no longer a regular file; kept"); continue; }
         if (!fs::is_regular_file(new_file, ec) || path_is_link(new_file)) { note("no copy at the new location; kept"); continue; }
+        if (const std::string doubt = new_copy_doubt(S, j.dest, e.rel, old_file); !doubt.empty()) { plan.kept.push_back(u8(e.rel) + ": " + doubt); continue; }
         const scd::Digest d = scd::hash_file(old_file, hash_limit);
         if (!d.ok || d.size != e.size || d.sha256 != e.sha) { note("changed since the move; kept"); continue; }
         // The new copy must still match what was verified at the move. The catalog is the one file the move rewrites by design (and the user may have updated it since): it was
@@ -1153,6 +1175,9 @@ CleanupResult run_old_root_cleanup(const fs::path &bootstrap_file, const DataEnv
       res.removed += static_cast<std::size_t>(removed);
     } else {
       if (!fs::is_regular_file(item.path, ec)) { res.problems.push_back("changed, skipped: " + shown); continue; }
+      if (item.kind == CleanupKind::migrated_copy) {   // re-checked at the moment of deletion: the original is removed only while a separate verified copy stands
+        if (const std::string doubt = new_copy_doubt(S, j.dest, item.path.lexically_relative(S), item.path); !doubt.empty()) { res.problems.push_back("kept " + shown + ": " + doubt); continue; }
+      }
       if (!fs::remove(item.path, ec) || ec) { res.problems.push_back("could not remove " + shown); continue; }
       ++res.removed;
       for (fs::path d = item.path.parent_path(); is_within(S, d); d = d.parent_path()) parents.insert(d);

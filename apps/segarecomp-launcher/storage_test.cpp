@@ -555,7 +555,7 @@ int main() {
     expect(candidates.size() == 1 && candidates[0] == entry('2').id(), "eviction skips favorites and active games");
     policy.mode = "never";
     expect(policy_eviction_candidates(p, rep, policy, {}).empty(), "no eviction unless the policy is on");
-    expect(describe_policy(policy).find("Nothing is cleaned automatically") == 0, "policy text states exactly what happens");
+    expect(describe_policy(policy).find("Finished builds are not removed to save space") == 0 && describe_policy(policy).find("Recompiling") != std::string::npos, "policy text states exactly what happens, without contradicting the recompile option");
   }
   {  // SEG-150-T007 (Settings > Storage & Data): EVERY cleanup plan, executed on a library that holds the player's own data, reclaims exactly the bytes its preview named
      // and leaves saves, save states, input recordings, mod approvals, covers, the catalog, settings and the ROM byte-identical.

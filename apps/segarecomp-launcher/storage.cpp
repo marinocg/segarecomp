@@ -649,7 +649,7 @@ std::string describe_policy(const CleanupPolicy &policy) {
            " playable ones are reduced to metadata only (build deleted, entry kept). Favorites, running games and games being built are never reduced.";
   if (policy.mode == "soft_limit")
     return "When builds use more than " + std::to_string(policy.soft_limit_mb) + " MiB, the launcher shows a reminder and opens Storage. Nothing is deleted without confirmation.";
-  return "Nothing is cleaned automatically. Use Settings > Storage & Data to reclaim space.";
+  return "Finished builds are not removed to save space. (Recompiling a game still replaces its older builds unless the keep-old-builds option is on.) Use Settings > Storage & Data to reclaim space.";
 }
 
 std::vector<std::string> policy_eviction_candidates(const Catalog &catalog, const StorageReport &report, const CleanupPolicy &policy, const std::set<std::string> &active_ids) {

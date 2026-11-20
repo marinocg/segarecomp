@@ -212,7 +212,7 @@ private:
   [[nodiscard]] static long long now_seconds();
   void save_catalog();
   bool try_save_catalog(std::string *error);   // no toast: the caller words the outcome
-  std::string probe_library_writable() const;
+  [[nodiscard]] static std::string probe_library_writable(const std::filesystem::path &dir);   // blocking: runs on the health worker, never per frame
   void refresh_health();
   void draw_health_notice(float w);   // the standing notice of Library and Game page: unwritable library, incomplete installation
   void save_settings();
@@ -391,6 +391,14 @@ private:
   std::string catalog_notice_;
   std::string library_unwritable_;   // non-empty while the library folder cannot be written (startup probe or a failed save), cleared when it can again
   Uint64 health_checked_ = 0;
+  // SEG-150 round C: a failed save leaves the catalog dirty. The standing notice names what is pending and is cleared only by a save that really succeeded; the periodic
+  // health probes run on a worker (a stalled network drive never freezes the window) and never overlap.
+  bool catalog_unsaved_ = false;
+  int unsaved_games_ = 0;
+  std::future<std::string> health_probe_;
+  std::future<Layout> layout_probe_;
+  int health_probes_started_ = 0;   // test seam
+  std::string health_pending_text_;   // test seam: what the library notice says is not saved yet
   std::string health_notice_text_;   // test seam: titles of the standing notices drawn in the last frame
   // ---- navigation / library view ----
   Page page_ = Page::library;
@@ -615,7 +623,7 @@ private:
   bool maintenance_running_ = false;
   // ---- overlays ----
   Modal modal_;
-  struct Toast { std::string text; bool error; Uint64 until; };
+  struct Toast { std::string text; bool error; Uint64 duration; Uint64 shown_at; };   // shown_at == 0: still waiting for room, not aging
   std::vector<Toast> toasts_;
   int states_clipped_ = 0;   // test seam: state labels of library cards / rows cut by an ellipsis in the last frame (must be 0)
   int toast_shown_ = 0, toast_overlap_ = 0;   // test seam: toasts drawn this frame, and how many button rectangles they cover (must be 0)

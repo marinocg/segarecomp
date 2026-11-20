@@ -166,7 +166,7 @@ const Startup &startup_state() {
   static const Startup state = [] {
     Startup s;
     const fs::path file = data_bootstrap_file();
-    static const InstanceMarker marker(file);   // every process that resolves the data roots (window or --import/--build/--sega-cd) is visible to a move or an old-root cleanup
+    static const InstanceMarker marker(file);   // every process that resolves the roots from the bootstrap (window or --import/--build/--sega-cd; not one with SEGARECOMP_CACHE_DIR set) is visible to a move or an old-root cleanup
     s.recovery = recover_pending_migration(file);
     s.bootstrap = read_bootstrap(file);
     return s;
