@@ -8,7 +8,7 @@ Target names: **Library**, **Add game**, **Game > Overview / Mods / Game setting
 
 | Page (`Page` enum) | Contents | Target |
 | --- | --- | --- |
-| `library` | cover grid or list, search (Ctrl+F), platform/status filter, sort, favorites, Select mode with bulk actions, context menu, Import ROMs button, free-space and build-slot footer | Library |
+| `library` | cover grid or list, search (Ctrl+F, Cmd+F on macOS), platform/status filter, sort, favorites, Select mode with bulk actions, context menu, Import ROMs button, free-space and build-slot footer | Library |
 | `details` | cover and metadata editing, favorite, Play/Build/More, status line, Build configuration, Patches / Variants, Build provenance, Build log, Input recording, per-game storage card | Game |
 | `import_page` | file picker, drag and drop, results list, optional "Also build each newly added game", Sega CD form (CUE, BIOS, prebuilt program) | Add game |
 | `storage` | per-game and total build storage by category, cleanup plans with confirmation | Settings > Storage & Data |
@@ -28,8 +28,11 @@ Target names: **Library**, **Add game**, **Game > Overview / Mods / Game setting
 | Game | older playable builds, build identity, provenance, build log panel | `app_details.cpp` | Game > Advanced |
 | Game | patches and variants (schema 1/2/3 install, approve, select, uninstall) | `app_variants.cpp` | Game > Mods |
 | Game | input recording and replay options | `app_details.cpp` | Game > Game settings |
-| Game | change cover; cover/metadata fetching is not packaged (the provider opt-in toggle is shown disabled) | `covers.*`, `cover_download.*` | Game > Overview |
-| Game | remove from library, clean intermediates; a game whose ROM moved is shown as metadata only (the recovery path is re-adding the file; no separate relink action exists today) | `app_details.cpp`, `app_screens.cpp`, `storage.*` | Game > Game settings / Advanced |
+| Game | change cover (user-chosen image); automatic cover fetching is not packaged (the provider opt-in toggle is shown disabled); "Find cover online" only opens the browser | `covers.*`, `cover_download.*` | Game > Overview |
+| Game | Sega CD: Locate BIOS... and Locate disc... (relink moved BIOS/CUE with the same SHA-256, context menu and details file rows) | `app_details.cpp`, `app_picker.cpp` | Game > Advanced, Add game |
+| Game | Remove from build queue (queued game), Cancel build / Stopping build (running game); also in the details menu | `app_details.cpp` | Game > Overview |
+| Game | context menu: Find cover online (opens the browser, nothing uploaded), Copy ROM SHA-256 / Copy game identity | `app_details.cpp` | Game > Overview |
+| Game | remove from library, clean intermediates; a game whose ROM moved is shown as metadata only and offers Locate ROM... (relink a moved file with the same SHA-256; context menu, primary button when the ROM is missing, and the Locate button on the details "ROM file" row) | `app_details.cpp`, `app_screens.cpp`, `storage.*` | Game > Game settings / Advanced |
 | Storage | per-game and bulk cleanup plans, free-space, cache folder | `storage.*`, `app_pages.cpp` | Settings > Storage & Data |
 
 ## Persistent settings (`launcher_settings.hpp`)
@@ -38,7 +41,7 @@ view (grid/list), sort, compact, keep build logs on cleanup, keep old build arti
 
 ## Statuses (must stay distinct)
 
-not built, ready, building (running), queued, failed, cancelled, stale, metadata only (ROM moved), playable older build, missing tool/package, unsupported selection (for example an undeclared SMS mapper).
+Catalog `GameStatus` values: not built, ready, metadata only (ROM moved), stale, failed, playable older build. Derived runtime states shown on top of them: queued, building (running), stopping, cancelled, missing tool/package, unsupported selection (for example an undeclared SMS mapper), and the Sega CD refusals (BIOS or disc missing).
 
 ## Modals and overlays
 
@@ -46,4 +49,4 @@ first-run "Keep build intermediates?", cleanup confirmation, delete confirmation
 
 ## Input paths
 
-mouse; keyboard (Tab/arrows, Enter, Esc, Ctrl+F, scripted via `SEGARECOMP_GUI_SCRIPT`); gamepad zones (`app_input.cpp`: D-pad/stick navigation, A confirm, B back, West/Y context). Existing journey suites: `launcher_gamepad_journey_*`, `launcher_gui_navigation_test`, `launcher_parity_gui_*`.
+mouse; keyboard (Tab/arrows, Enter, Esc, Ctrl+F or Cmd+F, scripted via `SEGARECOMP_GUI_SCRIPT`); gamepad zones (`app_input.cpp`: D-pad/stick navigation, A confirm, B back, West/Y context). Existing journey suites: `launcher_gamepad_journey_*`, `launcher_gui_navigation_test`, `launcher_parity_gui_*`.
