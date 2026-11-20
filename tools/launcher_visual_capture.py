@@ -28,12 +28,13 @@ PAGES = [
     ("03h_details_sms_ready", "details:3", {}),
     ("04_import_empty_results", "import", {}),
     ("05_storage_cleanup_dialog", "storage-modal", {}), ("06_storage", "storage", {"SEGARECOMP_SHOT_SELECT": "1"}),
-    ("07_settings_library", "settings0", {}), ("08_settings_metadata", "settings1", {}),
-    ("09_settings_build_runtime", "settings2", {}), ("10_settings_video_controls", "settings3", {}),
-    ("11_input_diagnostics", "settings4", {}), ("12_settings_about", "settings5", {}),
+    # T007: Settings has four groups: 0 General, 1 Appearance & Controls (with Input diagnostics at its end), 2 Storage & Data, 3 Advanced
+    ("07_settings_library", "settings0", {}), ("08_settings_appearance_controls", "settings1", {}),
+    ("09_settings_storage_data", "settings2", {}), ("10_settings_advanced", "settings3", {}),
+    ("11_input_diagnostics", "settings1", {"SEGARECOMP_SHOT_SCROLL": "bottom"}), ("12_settings_about", "settings3", {"SEGARECOMP_SHOT_SCROLL": "bottom"}),
     ("13_library_select", "library", {"SEGARECOMP_SHOT_SELECT": "1"}),
     ("13b_library_context_menu", "library", {"SEGARECOMP_SHOT_MENU": "1"}),
-    ("15_settings_library_lower", "settings0", {"SEGARECOMP_SHOT_SCROLL": "bottom"}), ("16_settings_video_lower", "settings3", {"SEGARECOMP_SHOT_SCROLL": "bottom"}),
+    ("15_settings_library_lower", "settings0", {"SEGARECOMP_SHOT_SCROLL": "bottom"}), ("16_settings_appearance_mid", "settings1", {"SEGARECOMP_SHOT_SCROLL": "middle"}),
     ("17_storage_lower", "storage", {"SEGARECOMP_SHOT_SELECT": "1", "SEGARECOMP_SHOT_SCROLL": "bottom"}),
     ("18_details_lower", "details:0", {"SEGARECOMP_SHOT_SCROLL": "bottom"}),
     # T004: the Game page's tabs (the tab is a review aid: SEGARECOMP_SHOT_TAB=mods|settings|advanced; Overview is the default)
@@ -41,12 +42,12 @@ PAGES = [
     ("25_game_settings_advanced_options", "details:0", {"SEGARECOMP_SHOT_TAB": "settings", "SEGARECOMP_SHOT_ADVANCED": "1"}),
     ("26_game_advanced", "details:0", {"SEGARECOMP_SHOT_TAB": "advanced"}), ("27_game_failed_advanced", "details:4", {"SEGARECOMP_SHOT_TAB": "advanced", "SEGARECOMP_SHOT_LOG": "1"}),
     ("28_game_sms_mapper_settings", "details:5", {"SEGARECOMP_SHOT_TAB": "settings"}), ("29_game_metadata_only_advanced", "details:6", {"SEGARECOMP_SHOT_TAB": "advanced"}),
-    ("19_metadata_lower", "settings1", {"SEGARECOMP_SHOT_SCROLL": "bottom"}), ("20_about_lower", "settings5", {"SEGARECOMP_SHOT_SCROLL": "bottom"}),
+    ("20_about_lower", "settings3", {"SEGARECOMP_SHOT_SCROLL": "bottom"}),
 ]
 REFERENCES = {"01_library_home": "01_library_home", "03_game_details": "03_game_details",
               "04_import_empty_results": "02_import_empty", "05_storage_cleanup_dialog": "07_bulk_cleanup",
               "06_storage": "04_storage_management", "07_settings_library": "05_library_settings",
-              "09_settings_build_runtime": "06_build_runtime_settings"}
+              "09_settings_storage_data": "06_build_runtime_settings"}
 
 
 def main():

@@ -447,7 +447,7 @@ void App::pump_cleanup() {
     const StorageReport fresh = scan_storage(copy, cache_dir_, library_dir_);
     Plan plan;
     plan.kind = settings_.keep_old_artifacts ? PlanKind::intermediates : PlanKind::superseded;
-    // Recompiling replaces the game's older builds (Settings > Build & Runtime > "Keep old build artifacts" opts out); the build just produced
+    // Recompiling replaces the game's older builds (Settings > General > Preparation > "Keep old build artifacts" opts out); the build just produced
     // is the current one and stays. Intermediates inside a folder that is deleted whole are not scheduled twice.
     if (!settings_.keep_old_artifacts) plan = plan_superseded(fresh, ids, busy_);
     if (settings_.cleanup.mode == "intermediates") plan = merge_plans_non_overlapping(std::move(plan), plan_intermediates(fresh, ids, busy_));
@@ -810,14 +810,18 @@ void App::close_details() {
 
 void App::go(Page page) {
   if (page == page_) return;
+  const Page page_before_ = page_;
   if (page_ == Page::details && page == previous_page_) { close_details(); return; }
   if (page_ != Page::details) previous_page_ = page_;
   page_ = page;
   if (page == Page::settings) reload_viewer_settings();
+  if (page == Page::settings && page_before_ == Page::storage) settings_focus_storage_ = true;   // Back from the cleanup page: focus returns to "Review usage and clean up"
+  if (page != Page::settings && page != Page::storage) settings_scan_asked_ = false;
   nav_reset_ = true;
   editing_title_ = false;
   if (page == Page::storage) {
     storage_return_ = previous_page_ == Page::settings ? Page::settings : Page::library;  // Back returns to the area Storage was opened from
+    if (storage_return_ == Page::settings) settings_tab_ = 2;                              // ... which is the Storage & Data group
     request_scan();
   }
 }
@@ -1692,7 +1696,7 @@ void App::run_script() {
   } else if (cmd == "view") {
     settings_.view = arg == "list" ? "list" : "grid";
   } else if (cmd == "settings_tab") {
-    settings_tab_ = std::atoi(arg.c_str());
+    settings_tab_ = std::clamp(std::atoi(arg.c_str()), 0, 3);
     go(Page::settings);
   } else if (cmd == "pad" && script_joy_ != nullptr) {
     const std::string name = arg.substr(0, arg.find(' '));
@@ -1757,6 +1761,12 @@ void App::run_script() {
     else if (key == "hints") actual = gamepad_is_last_input() && modal_.kind == Modal::Kind::none && !picker_.open ? "1" : "0";
     else if (key == "want_text") actual = ImGui::GetIO().WantTextInput ? "1" : "0";
     else if (key == "settings_tab") actual = std::to_string(settings_tab_);
+    else if (key == "effective_paths") {   // SEG-150-T007: where the three locations come from, e.g. cache=env,library=default,home=default
+      const EffectivePaths ep = effective_paths(layout_);
+      actual = std::string("cache=") + (ep.cache_overridden ? "env" : "default") + ",library=" + (ep.library_overridden ? "env" : "default") + ",home=" + (ep.home_overridden ? "env" : "default");
+    }
+    else if (key == "cleanup_policy") actual = settings_.cleanup.mode + ":" + std::to_string(settings_.cleanup.keep_last_n) + ":" + std::to_string(settings_.cleanup.soft_limit_mb);   // the loaded policy, e.g. keep_last_n:7:4096
+    else if (key == "settings_focus_return") actual = settings_focus_storage_ ? "pending" : "none";
     else if (key == "widescreen") actual = viewer_settings_.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS ? "extended_backgrounds" : (viewer_settings_.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? "enhanced_gameplay" : "original");
     else if (key == "ws_width") actual = std::to_string(viewer_settings_.video.widescreen_width);
     else if (key == "side_style") actual = viewer_settings_.video.widescreen_side_style == SV_SIDE_BORDERS ? "borders" : (viewer_settings_.video.widescreen_side_style == SV_SIDE_RAW ? "raw" : "comfort");
@@ -1913,7 +1923,7 @@ int App::run() {
     if (const auto vis = visible_entries(); shot_page_ == "storage-modal" || SDL_getenv("SEGARECOMP_SHOT_SELECT")) for (std::size_t i = 0; i < vis.size() && i < 2; ++i) storage_selected_.insert(vis[i]->id());
   }
   else if (shot_page_ == "import") go(Page::import_page);
-  else if (shot_page_.rfind("settings", 0) == 0) { settings_tab_ = shot_page_.size() > 8 ? std::atoi(shot_page_.c_str() + 8) : 0; go(Page::settings); }
+  else if (shot_page_.rfind("settings", 0) == 0) { settings_tab_ = shot_page_.size() > 8 ? std::clamp(std::atoi(shot_page_.c_str() + 8), 0, 3) : 0; go(Page::settings); }
   else if (shot_page_.rfind("details:", 0) == 0) {
     const std::size_t index = static_cast<std::size_t>(std::atoi(shot_page_.c_str() + 8));
     const auto visible = visible_entries();

@@ -334,9 +334,12 @@ void App::draw_sidebar(float x, float y, float w, float h) {
       left_pending_ = false;
     } else if (free_to_hop && in_settings_body) {
       const bool stuck_left = left_pending_ && g.NavId == left_pending_id_;
-      const ui::ZoneEntry &tab = settings_tab_entry_[std::clamp(settings_tab_, 0, 5)];
+      const ui::ZoneEntry &tab = settings_tab_entry_[std::clamp(settings_tab_, 0, 3)];
       bool hopped = false;
-      if (settings_narrow_ && up && g.NavId == settings_body_entry_.id && tab.id != 0) { focus_item(tab.id, tab.window, tab.rect); hopped = true; }   // Up from the body's first control: the drop-down
+      // Up from the body's first row (a row can hold several controls: Grid / List): the drop-down. ImGui alone would leave the page for the sidebar.
+      const ImRect now = g.NavWindow != nullptr ? ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[g.NavLayer]) : ImRect();
+      const bool first_row = g.NavId == settings_body_entry_.id || (settings_body_entry_.id != 0 && g.NavWindow == settings_body_window_ && std::abs(now.Min.y - settings_body_entry_.rect.Min.y) < ctx_.u(6.0F));
+      if (settings_narrow_ && up && first_row && tab.id != 0) { focus_item(tab.id, tab.window, tab.rect); hopped = true; }
       else if (stuck_left && tab.id != 0) { focus_item(tab.id, tab.window, tab.rect); hopped = true; }
       left_pending_ = !hopped && (settings_narrow_ ? up : left);
       left_pending_id_ = g.NavId;
@@ -870,6 +873,7 @@ void App::draw_modal(float w, float h) {
     subtitle = modal_.plan.entry_ids.empty() ? "This will permanently delete the selected files to free up disk space."
                                               : "This will permanently delete the selected files for " + std::to_string(modal_.plan.entry_ids.size()) + " game(s) to free up disk space.";
     keeps = modal_.plan.remains;
+    if (modal_.plan.kind != PlanKind::remove_from_library) keeps.push_back("Saves, save states, input recordings, your ROMs and mod approvals (never a cleanup target)");   // SEG-150-T007
     notes = modal_.plan.notes;
     for (const auto &e : modal_.plan.excluded) notes.push_back("Excluded: " + e);
     notes.push_back("This cannot be undone. Original ROM files are never touched.");
@@ -889,7 +893,7 @@ void App::draw_modal(float w, float h) {
   } else if (modal_.kind == Modal::Kind::first_run_intermediates) {
     subtitle = "While building, Segarecomp creates intermediate files: generated C, object files and logs. They help with debugging but take disk space. Removing them after a successful build keeps the playable game and its essential metadata and diagnostics.";
     keeps = {"Your ROM files (never touched)", "The playable game and its metadata after each build"};
-    notes = {"You can change this any time in Settings > Build & Runtime.", "Press Esc (or B on a controller) to decide later."};
+    notes = {"You can change this any time in Settings > General > Preparation.", "Press Esc (or B on a controller) to decide later."};
     if (!modal_.lines.empty()) for (const auto &l : modal_.lines) notes.push_back(l);
     body.clear();
   } else if (modal_.kind == Modal::Kind::restore_defaults) {

@@ -157,6 +157,14 @@ struct SaveOutcome {
 // Per-user persistent data: the library catalog, covers, viewer settings and screenshots. It lives beside, never inside, the disposable
 // build folders (`games/`, `zig-cache/`) that cache maintenance is allowed to touch. SEGARECOMP_LIBRARY_DIR overrides it.
 [[nodiscard]] std::filesystem::path library_root();
+// SEG-150-T007: where the launcher's three locations come from, for the read-only Settings > Storage & Data explanation. `*_overridden` is true when the
+// matching environment variable (SEGARECOMP_CACHE_DIR / SEGARECOMP_LIBRARY_DIR / SEGARECOMP_HOME) is set, which is exactly when cache_root() /
+// library_root() / locate_layout() take it instead of the default. The paths are the effective ones (what the launcher really uses).
+struct EffectivePaths {
+  std::filesystem::path cache, library, home;
+  bool cache_overridden = false, library_overridden = false, home_overridden = false;
+};
+[[nodiscard]] EffectivePaths effective_paths(const Layout &layout);
 [[nodiscard]] RomView inspect_rom_file(const std::filesystem::path &path, const Layout &layout);
 // SEG-122-T009: the Genesis cartridge declaration a finished build recorded in its metadata ("" = standard, also for a build older than the record).
 [[nodiscard]] std::string recorded_cartridge_mapper(const std::filesystem::path &entry);

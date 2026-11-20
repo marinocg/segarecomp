@@ -1598,10 +1598,10 @@ float App::draw_display_audio_card(const LibraryEntry &entry, float w) {
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
     y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, body) + ctx_.u(6.0F);
   };
-  block("Display", "Widescreen mode, side presentation and width are the game's own Video & Display settings (the pause menu while it runs, Esc); the defaults for games without their own setting are under Settings > Video & Controls. "
+  block("Display", "Widescreen mode, side presentation and width are the game's own Video & Display settings (the pause menu while it runs, Esc); the defaults for games without their own setting are under Settings > Appearance & Controls. "
                    "Support depends on the platform and the game, and an unsupported mode shows the original picture.");
-  block("Audio", entry.platform_id == "sega-cd" ? "Volume and mute are shared by every game (Settings > Video & Controls). The program's audio is described under Console audio above."
-                                                : "Volume and mute are shared by every game (Settings > Video & Controls). The audio implementation of this game's prepared version is listed under Advanced.");
+  block("Audio", entry.platform_id == "sega-cd" ? "Volume and mute are shared by every game (Settings > Appearance & Controls). The program's audio is described under Console audio above."
+                                                : "Volume and mute are shared by every game (Settings > Appearance & Controls). The audio implementation of this game's prepared version is listed under Advanced.");
   const float h = close_card(ctx_, dl, a, w, y, "DISPLAY AND AUDIO - SHARED SETTINGS", col::info);
   note_layout("display", a, ImVec2(a.x + w, a.y + h));
   return h;

@@ -83,9 +83,9 @@ def main():
                                          "expect page=settings", "key Escape", "frames 6", "expect page=library", "key Tab", "frames 2", "key Down", "frames 2", "key Down", "frames 2",
                                          "expect focus=Add game", "key Down", "frames 2", "expect focus=Add game", "key Return", "frames 6", "expect page=import", "key Escape", "frames 6",
                                          "expect page=library", "quit"], 9)
-        # Storage is reached from Settings (the explicit Storage action) and Back / Escape return to Settings, not to the library
+        # Storage is reached from Settings (its Storage & Data group) and Back / Escape return to that group, not to the library
         assertions += check("storage under settings", ["page settings", "frames 6", "expect page=settings", "page storage", "frames 6", "expect page=storage", "key Escape", "frames 6",
-                                                       "expect page=settings", "key Escape", "frames 6", "expect page=library", "quit"], 4)
+                                                       "expect page=settings", "expect settings_tab=2", "key Escape", "frames 6", "expect page=library", "quit"], 5)
         # gamepad: a virtual SDL gamepad (hot-plugged after start) does the same with the D-pad, South and East
         pad = ["expect page=library", "pad_attach", "frames 20"]
         pad += ["pad dpad_down down", "pad dpad_down up", "frames 3"]
@@ -114,7 +114,7 @@ def main():
         assertions += check("context menu", state, 3)
         # Responsive screen smoke: render the actual widgets, including the nested settings
         # scroller and confirmation sheet, at both supported sizes. No builds or guest runs.
-        pages = ["library", "list", "details:0", "details:1", "import", "storage", "storage-modal"] + [f"settings{i}" for i in range(6)]
+        pages = ["library", "list", "details:0", "details:1", "import", "storage", "storage-modal"] + [f"settings{i}" for i in range(4)]
         for size in ("1080x740", "720x520"):
             for page in pages:
                 shot = tmp / "responsive.bmp"

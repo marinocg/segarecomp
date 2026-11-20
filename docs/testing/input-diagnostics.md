@@ -5,7 +5,7 @@ Controller did not work with the first SEG-058 launcher/viewer and nothing in th
 
 ## What the diagnostics are
 
-One detection engine, `libs/viewer/src/sv_input_diag.c` (SDL3, no window, no ROM), is shared by the launcher (**Settings > Input Diagnostics**) and by
+One detection engine, `libs/viewer/src/sv_input_diag.c` (SDL3, no window, no ROM), is shared by the launcher (**Settings > Appearance & Controls > Input diagnostics**) and by
 every game (**pause menu > Controls > Controller status & test**, also **System**). It records:
 
 * the SDL version, the result of `SDL_Init` for video and for the gamepad subsystem (a failure is **logged and shown**, no longer a silent fall-back to
@@ -41,7 +41,7 @@ A controller is **never reported as working because it was enumerated**. The cla
 
 ## Switch 2 verdicts (what the diagnostics say instead of a bare "B")
 
-A Switch 2 controller (vendor 057E, products 2066-2073) gets its own plain-language block on the launcher's Input Diagnostics page (also in the copyable
+A Switch 2 controller (vendor 057E, products 2066-2073) gets its own plain-language block on the launcher's Input diagnostics section (also in the copyable
 report, the start-up log and the in-game **Controller status** page). It names the **first broken link** of the native chain and states the connection only
 when SDL or the OS scan actually reported it. Pure logic: `sv_switch2_assess` / `sv_switch2_message` (`libs/viewer/src/sv_input_state.c`); facts: `sv_diag_switch2_message`.
 
@@ -204,7 +204,7 @@ never published as a release). Extract it into an empty folder you can write to 
 1. **Exit Steam completely** (tray icon > Exit; no `steam.exe`/`steamwebhelper.exe` in Task Manager). Disabling Steam Input for the controller was not enough: a running Steam holds the controller's WinUSB interface and libusb fails with ACCESS.
 2. Connect the Switch 2 Pro Controller with a USB-C cable. Do not use Bluetooth for this test.
 3. Start `Segarecomp.exe` normally (double-click), not through Steam.
-4. Open **Settings > Input Diagnostics**. In the **SDL** block expect `Switch 2 USB driver: declared by this SDL build` and `libusb-1.0: found at startup`. Click **Scan OS devices**.
+4. Open **Settings > Appearance & Controls > Input diagnostics**. In the **SDL** block expect `Switch 2 USB driver: declared by this SDL build` and `libusb-1.0: found at startup`. Click **Scan OS devices**.
 5. Read the **Nintendo Switch 2 controller** block, press buttons and move both sticks, then click **Copy report** and keep the text. Expected on success: a gamepad (not "raw joystick"),
    state OK, "Gamepad initialization: succeeded", Nintendo labels (South = B, East = A), live stick values. Any other verdict names the first broken link (see the table above).
 6. Use the **Menu test** and navigate the launcher with the controller (D-pad/stick to move, South/B to activate).
@@ -223,7 +223,7 @@ Nothing is uploaded automatically. Review/redact the copied report and verbose l
 
 1. Note the OS and version, whether the controller is connected by **USB cable** or **Bluetooth**, and the release you run.
 2. Linux only: `lsusb | grep 057e` (expect `057e:2069` for the Switch 2 Pro) and `ls -l /dev/bus/usb/*/*` for the matching node; `ldconfig -p | grep libusb-1.0`.
-3. Start the launcher. Open **Settings > Input Diagnostics** *before* connecting, then connect the controller (press a button to wake it).
+3. Start the launcher. Open **Settings > Appearance & Controls > Input diagnostics** *before* connecting, then connect the controller (press a button to wake it).
 4. Click **Scan OS devices**. Record whether `057e:2069` appears, the bus (USB/Bluetooth) and whether it says "SDL exposes a joystick for it".
 5. Press every button and move both sticks. Record the state letter, the pressed-button chips (SDL position and "prints X"), and the stick values.
 6. Use **Menu test** (South, Nintendo B, or Enter) and note "activated Nx, last via gamepad".

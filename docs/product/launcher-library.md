@@ -6,7 +6,7 @@ This is the user-facing description of what ships in the consumer launcher (`Seg
 ## What the launcher is
 
 A resizable window (default 1080x740, minimum about 720x520, HiDPI aware, compact mode) whose primary navigation is two destinations, **Library**
-and **Settings** (including **Storage** and **Input Diagnostics**), plus the primary **Add game** button. A game's **Details** page is contextual, not a sidebar entry: a card, a
+and **Settings** (four groups: **General**, **Appearance & Controls** with Input diagnostics, **Storage & Data** and **Advanced**), plus the primary **Add game** button. A game's **Details** page is contextual, not a sidebar entry: a card, a
 list row's Details button or the game's context menu (right click, the Menu key or the gamepad's North button) opens it, and **Back** (the button, Esc or the
 gamepad's East button) returns to exactly the library state it came from: search text, platform/status filters, sort, grid/list view, scroll position and the
 focused card. The repository's sunset artwork forms the header banner and the dimmed scenery behind the window. Everything it shows is read from the library
@@ -152,13 +152,13 @@ game's Storage rail list them apart ("Saves & recordings"), outside every total 
 are built from the generated build folders only, and the deletion backend refuses any other path under a game's folder, even in a forged plan. Rebuilding,
 replacing the program, *Keep metadata only*, *Clean failed / abandoned builds*, the automatic keep-newest-N / soft-limit policies and *Remove from library* never delete or reset a save; a
 removed game's save is found again when the same BIOS and disc are added again. The removal sheet says what is removed and what is kept. Cleanup is
-refused while a build or game runs (one busy guard). Settings > Build & Runtime offers an **automatic policy** after a successful build: never,
+refused while a build or game runs (one busy guard). Settings > General > Preparation offers an **automatic policy** after a successful build: never,
 remove intermediates, keep the newest N playable games (older ones are reduced to metadata only; favorites, running games and the game being built
 are excluded) or a soft limit that only reminds you. The default is *never*.
 
 **First run.** A genuinely new profile (no settings, library or viewer-settings file yet) is asked once, in a modal that is operable by keyboard and gamepad
 (focus starts on the first choice, Esc/East decides later), whether to **Keep intermediates** (policy *never*) or **Remove after builds** (policy *remove
-intermediates*). The choice writes the same cleanup policy Settings > Build & Runtime edits, together with a one-time `intermediates_choice_made` marker in
+intermediates*). The choice writes the same cleanup policy Settings > General > Preparation edits, together with a one-time `intermediates_choice_made` marker in
 `launcher-settings.json`; the marker is written only when the file was saved (a failed save keeps the question open). Existing profiles, including a
 settings file written before the marker existed, are never asked and keep their policy; restoring launcher defaults never re-asks. Scripted windows
 (GUI scripts, screenshots, autoplay) skip the question unless `SEGARECOMP_GUI_ONBOARDING=1` (new profiles) or `=always` (test seam) is set.
@@ -201,7 +201,7 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
   **Return to Launcher** (or Quit outside the launcher), with a confirmation.
 * Scaling: *Fit* or *Integer* (whole-number multiples, falling back to fit below 1x); aspect *Original* (square pixels) or *4:3 corrected*; windowed
   or borderless fullscreen (never a display-mode change, so there is nothing to revert); HiDPI aware; the Master System's 192/224-line picture keeps its aspect.
-* **Widescreen Mode** (Quick Settings and Video & Display, next to scaling and aspect; also in the launcher's Settings > Video & Controls): *Original* (default),
+* **Widescreen Mode** (Quick Settings and Video & Display, next to scaling and aspect; also in the launcher's Settings > Appearance & Controls): *Original* (default),
   *Extended Backgrounds (Level 2)* or *Enhanced Widescreen (Level 3)*. It is a presentation preference shared by the launcher and every viewer (Genesis, Master System
   and Sega CD) through the one `video.widescreen` key of `viewer-settings.cfg`; the pause menu applies a change to the next frame without a restart, reset or any
   change to the guest, and shows the description of the selected mode plus an honest support line. **Extended Backgrounds (Level 2) is implemented for Genesis (SEG-118), Sega CD (SEG-119; always reported as Partial, see `platforms/sega-cd/README.md`) and Master System (SEG-120; always Partial: the 256-pixel Mode 4 name table wraps, so the extra columns repeat scenery already on screen and reveal no more of the game world, see `platforms/master-system/README.md`);** a platform that does not
@@ -222,7 +222,7 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
 * Hotkeys: F5 quick save, F8 quick load and F7 rewind (Genesis, Master System and Sega CD; reserved, never bindable to a game button; the Sega CD frame step is F9), F11 / Alt+Enter fullscreen, F12 screenshot (the game picture only, PNG, in `Pictures/Segarecomp` or `SEGARECOMP_SCREENSHOT_DIR`).
 * Capability matrix: Genesis is a three-button pad (A/B/C/Start; no X/Y/Z/Mode), two ports, no Reset. Master System has two buttons, the console's
   **Pause** button (an NMI edge, distinct from the host menu) and Reset in the System page. Audio device selection follows the OS default.
-* Settings persist in `viewer-settings.cfg` (`SEGARECOMP_VIEWER_SETTINGS`); the launcher's Settings > Video & Controls edits the same file (it re-reads the file when a game exits and when Settings is opened, so a change made in the game's menu is never overwritten by a stale launcher copy).
+* Settings persist in `viewer-settings.cfg` (`SEGARECOMP_VIEWER_SETTINGS`); the launcher's Settings > Appearance & Controls edits the same file (it re-reads the file when a game exits and when Settings is opened, so a change made in the game's menu is never overwritten by a stale launcher copy).
 * When a guest stops with a typed error the window shows why instead of closing silently (not for the automatic Optimized -> Compatibility restart).
 
 Environment variables the launcher sets for the game: `SEGARECOMP_LAUNCHED`, `SEGARECOMP_VIEWER_SETTINGS`, `SEGARECOMP_ROM_SHA256` (the digest of the image the program was

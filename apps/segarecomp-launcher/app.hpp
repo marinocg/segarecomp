@@ -322,7 +322,7 @@ private:
   // SEG-069-T004: D-pad hops between the sidebar and the page (see ui::ZoneEntry).
   ui::ZoneEntry content_entry_;                  // where Right from the sidebar lands (the first game card on the library page, else the page's first control)
   ui::ZoneEntry card_entry_;                     // first game card/row submitted this frame
-  ui::ZoneEntry settings_tab_entry_[6];          // the Settings tab column (Right enters the body, Left from the body returns to the current tab)
+  ui::ZoneEntry settings_tab_entry_[4];          // the Settings tab column (Right enters the body, Left from the body returns to the current tab)
   ui::ZoneEntry settings_body_entry_;
   ui::ZoneEntry storage_header_, storage_first_row_, storage_last_row_, storage_after_;  // Storage: header checkbox, first/last row checkbox, first action button
   ImGuiWindow *settings_body_window_ = nullptr;
@@ -411,7 +411,9 @@ private:
   float details_scroll_now_ = 0.0F;                            // the content scroll as last drawn (script `expect details_scroll=`)
   std::string details_tabs_text_;                              // the tabs drawn this frame, comma separated (script `expect details_tabs=`)
   float details_scroll_pending_ = -1.0F;                       // applied once on the next frame after a tab switch
-  int settings_tab_ = 0;
+  int settings_tab_ = 0;            // SEG-150-T007: the Settings group: 0 General, 1 Appearance & Controls, 2 Storage & Data, 3 Advanced (ordinary view state, ids tab#N)
+  bool settings_scan_asked_ = false;   // the Storage & Data group asked for one measurement for this visit to Settings
+  bool settings_focus_storage_ = false; // Back from the cleanup page lands on the button that opened it
   bool focus_search_ = false;
   char title_edit_[200] = "";
   bool editing_title_ = false;

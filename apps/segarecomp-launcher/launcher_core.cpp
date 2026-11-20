@@ -146,6 +146,17 @@ fs::path library_root() {
   return cache_root() / "library";
 }
 
+EffectivePaths effective_paths(const Layout &layout) {
+  EffectivePaths out;
+  out.cache = cache_root();
+  out.library = library_root();
+  out.home = layout.root;
+  out.cache_overridden = SDL_getenv("SEGARECOMP_CACHE_DIR") != nullptr;
+  out.library_overridden = SDL_getenv("SEGARECOMP_LIBRARY_DIR") != nullptr;
+  out.home_overridden = SDL_getenv("SEGARECOMP_HOME") != nullptr;
+  return out;
+}
+
 std::string clean_title(const std::string &raw) {
   // Header titles are fixed-width, space padded and may carry control bytes or non-ASCII garbage: keep printable ASCII only
   // (anything else acts as a separator), collapse every whitespace run to one space and trim.

@@ -404,7 +404,7 @@ int main(int argc, char **argv) {
       if (fresh) { fs::remove_all(cache); fs::create_directories(cache); fs::remove(dir / (std::string(cache_name) + "-builds.txt")); }
       set_env("SEGARECOMP_CACHE_DIR", cache.string());
       // SEG-067: a recompile deletes the game's older builds by default. These scenarios exercise cache REUSE across policies, so they opt in to
-      // "Keep old build artifacts" (Settings > Build & Runtime); the G9 scenario below runs with the default instead.
+      // "Keep old build artifacts" (Settings > General > Preparation); the G9 scenario below runs with the default instead.
       const bool keep_default = env_overrides.erase("__default_settings") != 0;
       fs::create_directories(cache / "library");
       if (keep_default) fs::remove(cache / "library" / "launcher-settings.json");

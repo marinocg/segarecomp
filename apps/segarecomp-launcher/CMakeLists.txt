@@ -150,13 +150,22 @@ if(BUILD_TESTING)
   set_property(TEST launcher_audio_gui_test PROPERTY TIMEOUT 600)
 endif()
 
-# SEG-117: the Widescreen Mode selector of Settings -> Video & Controls (shared viewer settings, relaunch, game-return reload).
+# SEG-117: the Widescreen Mode selector of Settings -> Appearance & Controls (shared viewer settings, relaunch, game-return reload).
 if(BUILD_TESTING)
   add_test(NAME launcher_widescreen_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_widescreen_gui_test.py
     $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
   set_property(TEST launcher_widescreen_gui_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_widescreen_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_widescreen_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150-T007: Settings groups (General, Appearance & Controls, Storage & Data, Advanced): old-profile upgrade, keyboard/gamepad reach, effective paths.
+if(BUILD_TESTING)
+  add_test(NAME launcher_settings_groups_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_settings_groups_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_settings_groups_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_settings_groups_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_settings_groups_gui_test PROPERTY TIMEOUT 600)
 endif()
 
 # SEG-069-T003: the one-time first-run question about build intermediates (real window, virtual gamepad).
@@ -306,7 +315,7 @@ endif()
 # SEG-069-T004: the launcher's ordinary journeys with a virtual gamepad only (no mouse event), at 1080x740 and 720x520, on the real window.
 if(BUILD_TESTING)
   # One test per journey and window size: they are independent, slow on some hosts, and `ctest -j` runs them side by side.
-  foreach(journey first_run import library build older_build settings storage hotplug)
+  foreach(journey first_run import library build older_build settings settings_groups storage hotplug)
     foreach(size wide:1080x740 narrow:720x520)
       string(REPLACE ":" ";" size_parts ${size})
       list(GET size_parts 0 size_name)
