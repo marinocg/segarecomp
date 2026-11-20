@@ -70,7 +70,8 @@ Journal files sit beside the bootstrap: `<bootstrap>.journal` (id, phase, source
 | 1 | - | manifest (sizes) then journal `copy` written; destination created if absent; ownership marker `.segarecomp-migration-<id>` written (proves the journal owns the destination: it was verified absent or empty) |
 | 2 | `copy` | per file: hash source, `copy_file`, preserve mtime; source size must still match the plan |
 | 3 | `copy` | rebase: in the COPY of the catalog only, a reference to a migrated managed file (e.g. `library/roms/x`) is rewritten to the new root; an imported Sega CD program that lived in a regenerable build folder is cleared (rebuild); every external reference and the BIOS profile store stay byte-identical |
-| 4 | `verify` | each destination file re-read and compared to the source digest and size; the source size is rechecked; the rebased catalog is re-read (same games, rebased references exist); the destination holds exactly the planned file set (counts, no extras) |
+| 4 | `verify` | each destination file re-read and compared to the source digest and size; the source size is rechecked; the rebased catalog is re-read (same games, rebased references exist); the destination holds exactly the planned file set (counts, no extras). The copy of the catalog is hashed against its source digest BEFORE it is rebased |
+| 4b | `verify` | **final source re-verification (round A)**: every planned source file is hashed again and must equal the digest taken before it was copied (a same-length rewrite is caught; the catalog's source is compared with what was copied and rebased, never with the rebased bytes); the source's durable file set is scanned again and must be exactly the planned one (a file added, removed or replaced is `source_changed`); a live instance marker of another process is re-checked. Any difference rolls back |
 | 5 | `commit` | manifest rewritten with digests; cancel is last honoured here; journal `commit`; **atomic bootstrap write** (the commit point) |
 | 6 | `done` | journal `done` (kept as the completion record), marker removed |
 
@@ -79,7 +80,7 @@ examined), `bootstrap_unusable`, `saved_location_unavailable` (a valid saved loc
 `source_unsafe_name`, `source_too_large` (more than 100000 files), `destination_not_absolute`, `destination_unsafe` (`.`/`..`, a filesystem root, inside a protected path
 such as the installation), `destination_same` (another spelling, case or alias of the source, decided with `equivalent()`), `destination_inside_source`,
 `source_inside_destination`, `destination_symlink` (any existing component that is a link), `destination_not_directory`, `destination_not_empty` (foreign content),
-`destination_not_writable`, `insufficient_space`. Failures after the start: `copy_failed`, `source_changed`, `rebase_failed`, `verify_failed`,
+`destination_not_writable`, `insufficient_space`, `other_instance_running` (see "Multi-process coordination"). Failures after the start: `copy_failed`, `source_changed`, `rebase_failed`, `verify_failed`,
 `journal_write_failed`, `bootstrap_write_failed`, plus `cancelled`; each rolls the destination back and leaves the old root authoritative.
 
 ### 4. Recovery at startup
@@ -100,14 +101,20 @@ A rollback that cannot finish keeps the journal and is retried at the next start
 ### 5. Old-root cleanup (separate and explicit)
 
 Never part of the migration. `plan_old_root_cleanup` / `run_old_root_cleanup` are eligible only for a completed migration whose destination the bootstrap still names, and
-refuse when the old root is still the effective root (`old_root_active`, e.g. forced by the environment) or maintenance is blocked. By default only regenerable items with
+refuse when the old root is still the effective root or maintenance is blocked. The environment is checked in the core, in the plan and again by the run (canonical paths: symlink aliases, `..`, trailing separators): `SEGARECOMP_CACHE_DIR` equal to or inside the old root is `old_root_active`, `SEGARECOMP_LIBRARY_DIR` equal to or inside it is `library_active` (an active library is never deleted through the cleanup core, whatever the UI says), `SEGARECOMP_HOME` inside it is `home_active`; another live Segarecomp process is `other_instance_running`. By default only regenerable items with
 the shapes `storage.cpp` already recognizes are listed (`games/<32 hex>[.partial|.failed]`, `zig-cache`, `sega-cd-objects`, `cover-downloads`, a Sega CD game's build folders);
 a folder containing a link is kept. With `include_migrated_copies`, durable files are also listed, but only those that are still bit-identical to the digest verified at
-migration time and whose copy exists at the new root; everything else (changed files, unknown files, the catalog backup) is kept and reported. Every item is re-validated
+migration time and whose copy exists at the new root; everything else (changed files, unknown files, the catalog backup) is kept and reported. The catalog is the one file the move rewrites, so it is not compared byte for byte: the old catalog is offered only when the destination catalog loads through the existing `Catalog` loader (on a temporary copy, so the check never renames or restores anything at the destination) as `loaded` with every record readable, and every managed reference it names under the new library (ROMs, Sega CD BIOS/disc/program, covers, installed patch packages) exists; an updated catalog (new games, favorites) is accepted. Any doubt (not JSON, JSON that is not a catalog, unreadable, a missing managed file) keeps the original with a note, the check is repeated immediately before the original is removed, and a file the new catalog still references at the old root is kept. Every item is re-validated
 lexically and physically inside the old root and is never a link; only empty parents are removed afterwards. Saves, recordings, ROMs and approvals are never targets of
 build cleanup (storage.cpp) and are listed here only as verified duplicates on explicit request. The record is cleared when everything migrated was removed;
 `dismiss_completed_migration` forgets it (the old root is then never offered again). A second migration is refused (`previous_migration_pending_cleanup`) until the first is
 cleaned up or dismissed, so an old root is never silently orphaned.
+
+### 6. Multi-process coordination (corrective round A)
+
+`InstanceMarker` registers `<bootstrap>.instances/<pid>` for every process that resolves the data roots (the window and the headless `--import`, `--build` and `--sega-cd` commands all do, through the first `cache_root()` resolution) and removes it at exit; a forked child never removes its parent's marker. A move (`other_instance_running` refusal in the plan, again right before the commit) and the old-root cleanup (plan and run) refuse while a marker of ANOTHER process whose pid is alive exists; markers of dead pids are ignored and deleted. The refusal text is "Close the other Segarecomp window, then try again".
+
+Guarantee: processes that follow the protocol never start a move or a cleanup while another one runs, and the final source digest re-check turns a source change made during the move by anyone into `source_changed` plus rollback. Limits (stated, not hidden): an instance started after the last check, a third-party program that writes into the data folder, and a changed file after the last digest re-check are not prevented; a pid the OS reused for an unrelated program makes a stale marker look alive (the refusal detail names the marker file to delete); a launcher that cannot create the marker is simply invisible. The re-check narrows the window, it does not eliminate it.
 
 ## Consequences
 
