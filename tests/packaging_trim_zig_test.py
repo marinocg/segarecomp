@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Hermetic test of packaging/trim-zig.sh (SEG-032-T007, ADR 0074).
 
-A fake Zig lib tree is trimmed for each host family. The libc++/libc++abi HEADERS must survive (the vendored YM2612 core is
-compiled with `zig c++`); everything else under lib/libcxx and lib/libcxxabi must be removed, as must libunwind.
+A fake Zig lib tree is trimmed for each host family. libc++, libc++abi and libunwind must survive WHOLE, sources included: a game with a mod links C++ with exceptions and RTTI,
+and Zig builds those libraries from their sources at link time (SEG-146: "sub-compilation of libunwind failed ... FileNotFound" when the trim removed them). Documentation is still removed.
 
 usage: packaging_trim_zig_test.py <project-source-dir>
 """
@@ -40,16 +40,12 @@ def main():
                 failures.append("%s: exit %d: %s" % (family, run.returncode, run.stderr))
                 continue
             lib = zig / "lib"
-            for kept in ("std/std.zig", "libcxx/include/cassert", "libcxx/include/__config", "libcxxabi/include/cxxabi.h"):
+            for kept in ("std/std.zig", "libcxx/include/cassert", "libcxx/include/__config", "libcxx/src/iostream.cpp", "libcxxabi/include/cxxabi.h", "libcxxabi/src/abort.cpp", "libunwind/src/u.c"):
                 if not (lib / kept).is_file():
                     failures.append("%s: %s must survive" % (family, kept))
-            for gone in ("libcxx/src", "libcxx/test", "libcxx/modules", "libcxxabi/src", "libunwind", "docs"):
+            for gone in ("docs",):
                 if (lib / gone).exists():
                     failures.append("%s: %s must be removed" % (family, gone))
-            for d in ("libcxx", "libcxxabi"):
-                extra = sorted(p.name for p in (lib / d).iterdir() if p.name != "include")
-                if extra:
-                    failures.append("%s: %s has extra entries %s" % (family, d, extra))
     for f in failures:
         print("FAIL:", f)
     print("packaging_trim_zig_test:", "FAIL" if failures else "PASS")

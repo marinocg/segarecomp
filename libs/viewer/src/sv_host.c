@@ -1918,6 +1918,12 @@ void sv_host_set_state_provider(SvHost *h, const SvStateProvider *provider) {
   else { memset(&h->state, 0, sizeof h->state); h->has_state = 0; }
 }
 
+void sv_host_set_session_control(SvHost *h, const SvSessionControl *control) {
+  if (h == NULL) return;
+  if (control != NULL) { h->session = *control; h->has_session = 1; }
+  else { memset(&h->session, 0, sizeof h->session); h->has_session = 0; }
+}
+
 static void slot_label(int slot, char *out, size_t cap) {
   if (slot == 0) snprintf(out, cap, "Quick Slot");
   else snprintf(out, cap, "Slot %d", slot);

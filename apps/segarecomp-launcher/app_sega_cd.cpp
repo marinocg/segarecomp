@@ -63,6 +63,21 @@ std::vector<fs::path> App::scd_recordings(const LibraryEntry &entry) const {
   return out;
 }
 
+// SEG-146-T006: a Genesis game's recordings live beside its Sega CD siblings, one folder per image (the first 16 hex digits of its digest).
+fs::path App::session_dir(const LibraryEntry &entry) const { return library_dir_ / "sessions" / "genesis" / entry.sha256.substr(0, 16); }
+
+std::vector<fs::path> App::session_recordings(const LibraryEntry &entry) const {
+  std::vector<fs::path> out;
+  std::error_code ec;
+  for (fs::directory_iterator it(session_dir(entry), ec), end; !ec && it != end && out.size() < 4096; it.increment(ec)) {
+    std::error_code sec;
+    if (it->is_regular_file(sec) && !it->is_symlink(sec) && it->path().extension() == ".rec") out.push_back(it->path());
+  }
+  std::sort(out.begin(), out.end(), [](const fs::path &a, const fs::path &b) { return a.filename() > b.filename(); });
+  if (out.size() > 6) out.resize(6);
+  return out;
+}
+
 // ---------------------------------------------------------------- jobs
 
 void App::scd_start_import(const std::string &target_id, const fs::path &bios, const fs::path &cue, const fs::path &program) {

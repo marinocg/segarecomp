@@ -25,8 +25,9 @@ install(TARGETS segarecomp-luau-compile RUNTIME DESTINATION ${_res}/bin)   # SEG
 # mirrors the repository because the runtime headers include their contract headers by relative path.
 set(_src ${PROJECT_SOURCE_DIR})
 set(_rt ${_res}/runtime)
-install(DIRECTORY ${_src}/platforms/genesis/runtime/ DESTINATION ${_rt}/platforms/genesis/runtime FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
-install(DIRECTORY ${_src}/platforms/genesis/viewer/ DESTINATION ${_rt}/platforms/genesis/viewer FILES_MATCHING PATTERN "*.c" PATTERN "*.cpp" PATTERN "*.h")
+install(DIRECTORY ${_src}/platforms/genesis/runtime/ DESTINATION ${_rt}/platforms/genesis/runtime FILES_MATCHING PATTERN "*.c" PATTERN "*.h" PATTERN "*.inc")   # *.inc: gems_driver_catalog.inc, #included by gems_native.c
+install(DIRECTORY ${_src}/platforms/genesis/viewer/ DESTINATION ${_rt}/platforms/genesis/viewer FILES_MATCHING PATTERN "*.c" PATTERN "*.cpp" PATTERN "*.h" PATTERN "*.hpp")   # *.hpp: luau_hud_pack.hpp, #included by mod_capture.cpp (a mod build)
+install(DIRECTORY ${_src}/platforms/sdk/ DESTINATION ${_rt}/platforms/sdk FILES_MATCHING PATTERN "*.h")   # segarecomp_mod.h: #included by the Genesis mod SDK header every mod build (native or Luau) compiles against
 install(DIRECTORY ${_src}/platforms/genesis/sdk/ DESTINATION ${_rt}/platforms/genesis/sdk FILES_MATCHING PATTERN "*.h")   # the public native patch SDK (ADR 0267): the only headers a package provider is compiled against
 # SEG-129: the SDK a native-patch author needs, installed beside the header: the two format documents, a complete synthetic sample provider and a short guide.
 # Documentation and a synthetic sample only; no game-specific provider or package is ever staged.
@@ -63,8 +64,8 @@ install(DIRECTORY ${_src}/third_party/luau/Bytecode/ DESTINATION ${_rt}/third_pa
 install(DIRECTORY ${_src}/third_party/luau/Ast/include/ DESTINATION ${_rt}/third_party/luau/Ast/include FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY ${_src}/third_party/luau/Compiler/include/ DESTINATION ${_rt}/third_party/luau/Compiler/include FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/luau_host/include/ DESTINATION ${_rt}/libs/luau_host/include FILES_MATCHING PATTERN "*.hpp")
-install(FILES ${_src}/libs/luau_host/src/luau_vm.cpp ${_src}/libs/luau_host/src/luau_api.cpp ${_src}/libs/luau_host/src/luau_stored.cpp ${_src}/libs/luau_host/src/luau_internal.hpp DESTINATION ${_rt}/libs/luau_host/src)
-install(FILES ${_src}/libs/media/src/sha256.cpp DESTINATION ${_rt}/libs/media/src)
+install(FILES ${_src}/libs/luau_host/src/luau_vm.cpp ${_src}/libs/luau_host/src/luau_api.cpp ${_src}/libs/luau_host/src/luau_stored.cpp ${_src}/libs/luau_host/src/luau_phase_provider.cpp ${_src}/libs/luau_host/src/luau_internal.hpp DESTINATION ${_rt}/libs/luau_host/src)   # luau_phase_provider.cpp: the scheduled Luau mod of a played / headless program
+install(FILES ${_src}/libs/media/src/sha256.cpp ${_src}/libs/media/src/mod_adapter.cpp DESTINATION ${_rt}/libs/media/src)   # mod_adapter.cpp: the capability catalogue the Luau phase adapter consults
 install(DIRECTORY ${_src}/libs/media/include/ DESTINATION ${_rt}/libs/media/include FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY ${_src}/libs/core/include/ DESTINATION ${_rt}/libs/core/include FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 

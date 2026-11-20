@@ -29,7 +29,7 @@ guessed: by compiling, linking and running this project's own generated C (inclu
 `-O0` and `-O2`) against the trimmed tree -- on Linux (215 MB -> 53 MB) and macOS (209 MB -> 41 MB) directly; the
 same script's Windows behavior is verified by the release workflow's own Windows package smoke test (no local
 Windows/Wine environment available). `lib/std` is deliberately never removed: Zig uses it to locate its own
-installation directory and fails outright without it, even for a plain C compile.
+installation directory and fails outright without it, even for a plain C compile. `lib/libcxx`, `lib/libcxxabi` and `lib/libunwind` are kept whole too: a game with a mod links C++ with exceptions and RTTI, and Zig builds those libraries from their sources at link time (`packaging/smoke_test.py` links and runs such a program).
 
 The pinned `zig` executable itself (Zig's self-hosted compiler with LLVM statically linked in, ~180-190 MB
 uncompressed) dominates both the installed footprint and the compressed archive size, and is not something this

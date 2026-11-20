@@ -483,6 +483,22 @@ static void add_state_rows(SvHost *h, SvPage *p) {
   }
 }
 
+/* SEG-146-T006: the developer entry of the pause menu. Present only when the adapter registered a session control; usable only while a recording is in progress. */
+static void add_session_rows(SvHost *h, SvPage *p) {
+  char text[96] = "";
+  SvItem *item;
+  int mode;
+  if (!h->has_session || h->session.status == NULL) return;
+  mode = h->session.status(h->session.ctx, text, sizeof text);
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_SESSION_STOP, "Stop recording");
+  if (item == NULL) return;
+  sv_item_set_icon(item, "storage");
+  if (mode == 1 && h->session.stop != NULL) sv_item_set_hint(item, "Ends the recording at this moment and saves the session file. Quitting the game does the same.");
+  else if (mode == 2) sv_item_disable(item, "A recorded session is being replayed: nothing is being recorded.");
+  else if (mode == 3) sv_item_disable(item, "The recording is ending at the next frame.");
+  else sv_item_disable(item, "No recording is in progress. A recording starts at power-on (start the game with --record <file>).");
+}
+
 static void build_slots(SvHost *h, SvPage *p, int saving) {
   int slot;
   for (slot = 0; slot < SV_STATE_SLOTS; ++slot) {
@@ -527,6 +543,7 @@ void sv_pages_rebuild(SvHost *h) {
       sv_item_set_icon(item, "play");
       sv_item_set_hint(item, "Esc or a gamepad's Back/Select (Nintendo -) opens this menu. Start is a game button.");
       add_state_rows(h, p);
+      add_session_rows(h, p);
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_QUICK, "Quick Settings"), "settings");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_VIDEO, "Video & Display"), "video");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_CONTROLS, "Controls"), "controller");
@@ -709,6 +726,17 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
       case I_RESUME: sv_pages_close(h); return;
       case I_STATE_SAVE: sv_pages_state_refresh(h); open_page(h, PAGE_STATE_SAVE, "SAVE STATE"); return;
       case I_STATE_LOAD: sv_pages_state_refresh(h); open_page(h, PAGE_STATE_LOAD, "LOAD STATE"); return;
+      case I_SESSION_STOP: {
+        char message[200] = "";
+        if (h->has_session && h->session.stop != NULL) {
+          const int rc = h->session.stop(h->session.ctx, message, sizeof message);
+          char toast[240];
+          snprintf(toast, sizeof toast, rc == 0 ? "Recording stopped - %s" : "Recording problem: %s", message);
+          sv_host_toast(h, toast);
+        }
+        sv_pages_rebuild(h);
+        return;
+      }
       case I_REWIND: sv_pages_close(h); h->want_rewind = 1; return;   /* the rewind surface opens when the pause menu has closed (sv_host.c) */
       case I_GO_QUICK: open_page(h, PAGE_QUICK, "QUICK SETTINGS"); return;
       case I_GO_VIDEO: open_page(h, PAGE_VIDEO, "VIDEO & DISPLAY"); return;

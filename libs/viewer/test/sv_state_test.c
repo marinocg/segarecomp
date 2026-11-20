@@ -152,6 +152,47 @@ static int toast_has(SvHost *host, const char *needle) {
   return 0;
 }
 
+/* ---- SEG-146-T006: the developer-menu entry "Stop recording" (a session control test double; the pause menu through the real SDL host) ---- */
+typedef struct FakeSession { int mode; int stops; int fail; } FakeSession;
+static int fake_session_status(void *ctx, char *text, size_t cap) { FakeSession *f = (FakeSession *)ctx; snprintf(text, cap, "fake"); return f->mode; }
+static int fake_session_stop(void *ctx, char *message, size_t cap) {
+  FakeSession *f = (FakeSession *)ctx;
+  ++f->stops;
+  if (f->fail) { snprintf(message, cap, "the file could not be written"); return -1; }
+  f->mode = 0;
+  snprintf(message, cap, "recording saved");
+  return 0;
+}
+static int c_session_absent(SvHost *host, void *ctx) { (void)ctx; CHECK(find_item(host, I_SESSION_STOP) == NULL, "without a session control there is no recording row"); return 0; }
+static int c_session_idle(SvHost *host, void *ctx) {
+  const SvItem *stop = find_item(host, I_SESSION_STOP);
+  (void)ctx;
+  CHECK(stop != NULL && !stop->enabled && strstr(stop->hint, "No recording is in progress") != NULL, "idle: Stop recording is listed, disabled, with the reason");
+  return 0;
+}
+static int c_session_replaying(SvHost *host, void *ctx) {
+  const SvItem *stop = find_item(host, I_SESSION_STOP);
+  (void)ctx;
+  CHECK(stop != NULL && !stop->enabled && strstr(stop->hint, "being replayed") != NULL, "replaying: nothing to stop, and it says why");
+  return 0;
+}
+static int c_session_recording(SvHost *host, void *ctx) {
+  const SvItem *stop = find_item(host, I_SESSION_STOP);
+  (void)ctx;
+  CHECK(stop != NULL && stop->enabled, "recording: Stop recording is enabled");
+  sv_page_restore_focus(sv_menu_top(&host->menu), I_SESSION_STOP);
+  CHECK(focused_id(host) == I_SESSION_STOP, "and can be focused");
+  return 0;
+}
+static int c_session_stopped(SvHost *host, void *ctx) {
+  FakeSession *f = (FakeSession *)ctx;
+  const SvItem *stop = find_item(host, I_SESSION_STOP);
+  CHECK(f->stops == 1 && f->mode == 0, "activating the row stops the recording once");
+  CHECK(toast_has(host, "Recording stopped - recording saved"), "success is announced");
+  CHECK(stop != NULL && !stop->enabled, "the row is disabled once nothing is being recorded");
+  return 0;
+}
+
 /* ---- scenario 1: no provider ---- */
 static int c_no_provider(SvHost *host, void *ctx) {
   const SvItem *save = find_item(host, I_STATE_SAVE), *load = find_item(host, I_STATE_LOAD), *rewind = find_item(host, I_REWIND);
@@ -507,6 +548,28 @@ int main(void) {
     run_menu(host, steps, 2, NULL);
     sv_host_service(host, &smp);
     CHECK(sv_host_quick_save(host) == 0 && toast_has(host, "not available for this system"), "F5 without a provider reports it instead of pretending");
+  }
+
+  /* 1b. SEG-146-T006: the session control row. Absent without a control; present, usable only while recording. */
+  {
+    FakeSession fs;
+    SvSessionControl control;
+    memset(&fs, 0, sizeof fs);
+    memset(&control, 0, sizeof control);
+    control.ctx = &fs; control.status = fake_session_status; control.stop = fake_session_stop;
+    {
+      static const Step none_steps[] = {{0, c_session_absent}, {SV_KEY_ESCAPE, NULL}};
+      run_menu(host, none_steps, 2, NULL);
+      sv_host_service(host, &smp);
+    }
+    sv_host_set_session_control(host, &control);
+    { const Step steps[] = {{0, c_session_idle}, {SV_KEY_ESCAPE, NULL}}; run_menu(host, steps, 2, &fs); sv_host_service(host, &smp); }
+    fs.mode = 2;
+    { const Step steps[] = {{0, c_session_replaying}, {SV_KEY_ESCAPE, NULL}}; run_menu(host, steps, 2, &fs); sv_host_service(host, &smp); }
+    fs.mode = 1;
+    { const Step steps[] = {{0, c_session_recording}, {SV_KEY_RETURN, NULL}, {0, c_session_stopped}, {SV_KEY_ESCAPE, NULL}}; run_menu(host, steps, 4, &fs); sv_host_service(host, &smp); }
+    sv_host_set_session_control(host, NULL);
+    CHECK(!host->has_session, "unregistering removes the entry");
   }
 
   /* 2. save pages: Esc, Down -> Save State, Return, Down x2 -> Slot 2, Return (saves), Return (occupied: confirm), Return (No), Return (confirm again), Down? (Yes) Return */

@@ -1003,6 +1003,9 @@ typedef struct GenesisRuntime {
   GenesisLiveFrameObserver *live_frame_observer;
   /* SEG-138-T001: optional host-owned frame-phase hooks of the mod scheduler (NULL = absent = exactly today's behaviour). Non-semantic when absent; never serialized. */
   const GenesisFrameHooks *frame_hooks;
+  /* SEG-146-T006: host-owned request, set by a frame hook (the session recorder) to end the current genesis_runtime_run slice right after the dispatch that is executing, so a replay can stop
+     on its exact end boundary however the host slices execution. Cleared by the runner when honoured. Zero (the default) changes nothing; never serialized. */
+  uint8_t host_yield_request;
   /* SEG-138-T004: optional host-owned static function-hook callbacks and frame stack (NULL = absent). Never serialized. */
   GenesisFunctionHooks *function_hooks;
   /* SEG-055: optional host-owned scanline capture for the observer above (NULL == the observer's own `producer` renders

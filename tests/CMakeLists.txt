@@ -242,11 +242,25 @@ set_tests_properties(genesis_mod_state_tests PROPERTIES TIMEOUT 300)
 # SEG-021-T031: headless bounded live-frame capture core (host tool; not linked by runtime_genesis).
 add_executable(genesis_frame_capture_tests genesis_frame_capture_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)
-target_include_directories(genesis_frame_capture_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
+target_include_directories(genesis_frame_capture_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
 target_link_libraries(genesis_frame_capture_tests PRIVATE segarecomp::runtime_genesis)
 target_compile_features(genesis_frame_capture_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_frame_capture_tests)
 add_test(NAME genesis_frame_capture_tests COMMAND genesis_frame_capture_tests)
+# SEG-146-T006: the Genesis adapter of the shared session recorder (header-only; synthetic machine).
+add_executable(genesis_session_tests genesis_session_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)
+target_include_directories(genesis_session_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+target_link_libraries(genesis_session_tests PRIVATE segarecomp::runtime_genesis)
+target_compile_features(genesis_session_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_session_tests)
+add_test(NAME genesis_session_tests COMMAND genesis_session_tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+# SEG-146-T006: the whole-machine checkpoint digest (snapshot container) and the adapter around a real input-intercepting mod scheduler.
+add_executable(genesis_session_machine_tests genesis_session_machine_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c)
+target_include_directories(genesis_session_machine_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+target_link_libraries(genesis_session_machine_tests PRIVATE segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+target_compile_features(genesis_session_machine_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_session_machine_tests)
+add_test(NAME genesis_session_machine_tests COMMAND genesis_session_machine_tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 # SEG-026-T001: execution-PC coverage observer + frame-bounded coverage run; reachability challenger fixtures.
 add_executable(genesis_execution_coverage_tests genesis_execution_coverage_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/execution_coverage.c)
@@ -1951,6 +1965,10 @@ set_property(TEST packaging_sdl_check_test APPEND PROPERTY LABELS full fast)
 add_test(NAME packaging_windows_sdl_recipe_test COMMAND ${Python3_EXECUTABLE} -I
   ${CMAKE_CURRENT_SOURCE_DIR}/packaging_windows_sdl_recipe_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST packaging_windows_sdl_recipe_test APPEND PROPERTY LABELS full fast)
+# A game built from the PACKAGE compiles runtime/ sources; every header they include (a mod build's segarecomp_mod.h, luau_hud_pack.hpp, ...) must be installed by packaging/install.cmake.
+add_test(NAME packaging_runtime_closure_test COMMAND ${Python3_EXECUTABLE} -I
+  ${CMAKE_CURRENT_SOURCE_DIR}/packaging_runtime_closure_test.py ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER})
+set_property(TEST packaging_runtime_closure_test APPEND PROPERTY LABELS full fast)
 set_property(TEST z80_live_guard_test z80_live_alternatives_test z80_live_operand_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
   genesis_ym2612_device_test genesis_audio_ym_test APPEND PROPERTY LABELS full)
 set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test

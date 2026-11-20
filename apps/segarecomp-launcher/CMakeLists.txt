@@ -132,6 +132,15 @@ if(BUILD_TESTING)
   set_property(TEST launcher_default_mode_test PROPERTY TIMEOUT 600)
 endif()
 
+# SEG-146-T006: the launcher exposes the shared session recorder (--record / --replay / --allow-variant) for Genesis games.
+if(BUILD_TESTING)
+  add_test(NAME launcher_session_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_session_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_session_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_session_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_session_test PROPERTY TIMEOUT 600)
+endif()
+
 # ADR 0291: the Audio implementation row of Build provenance (native GEMS replacement / original AOT Z80 / degraded / not recorded / unknown).
 if(BUILD_TESTING)
   add_test(NAME launcher_audio_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_audio_gui_test.py

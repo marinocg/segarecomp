@@ -134,11 +134,23 @@ jobs:
             echo "LIBUSB_DIR=" >> "$GITHUB_ENV"
           fi
 
+      - name: Windows LLVM 22 (MSVC STL 14.52 needs Clang >= 22)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # Same correction as ci.yml. Image 20261111+ ships MSVC STL 14.52, whose STL1000 static assertion requires Clang >= 22, while the image's own LLVM is 20.1.8 and no older
+          # MSVC toolset is installed any more. Keep the existing Clang route and provision a pinned, compatible LLVM (the check is not silenced). It goes first on PATH, after the MSVC environment.
+          choco upgrade llvm --version=22.1.8 -y --no-progress
+          echo 'C:\Program Files\LLVM\bin' >> "$GITHUB_PATH"
+          "/c/Program Files/LLVM/bin/clang.exe" --version | head -1
+
       - name: Configure
         run: |
           extra=""
           if [ "$RUNNER_OS" = "Windows" ]; then
             export CC=clang CXX=clang++
+            clang --version | head -1   # logged: the pinned LLVM 22.1.8 must be the one CMake picks up (first on PATH)
+            clang --version | grep -q "clang version 22\." || { echo "the Windows release build must use Clang >= 22 (MSVC STL 14.52)"; exit 1; }
             # Static CRT: no Visual C++ redistributable on a clean machine.
             extra="-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
           fi

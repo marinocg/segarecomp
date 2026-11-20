@@ -1072,6 +1072,48 @@ float App::draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, 
 }
 
 
+// ---------------------------------------------------------------- Genesis: session recording (SEG-146-T006)
+
+float App::draw_session_recordings(LibraryEntry &entry, const StatusInfo &info, float w) {
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 a = ImGui::GetCursorScreenPos();
+  const float pad = ctx_.u(16.0F), inner = w - 2 * pad;
+  dl->ChannelsSplit(2);
+  dl->ChannelsSetCurrent(1);
+  const bool can = info.runnable() && !game_ && !maintenance_running_;
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, a.y + ctx_.u(38.0F)));
+  checkbox(ctx_, "session_record", "Record my next play session from power-on when I press Play", &session_record_);
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));
+  paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner,
+            "A recording is a small text file of your button presses at exact frame boundaries, tied to this exact game image and version. It holds no game data. "
+            "While a session is recorded or replayed, saves, save states and rewind are off. End it from the pause menu (Esc > Stop recording) or just quit.");
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));
+  checkbox(ctx_, "session_variant", "Replay even if the game version differs from the recording (checkpoints are then not enforced)", &session_allow_variant_);
+  const auto recordings = session_recordings(entry);
+  if (recordings.empty()) {
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, "No recordings yet.");
+  }
+  for (std::size_t i = 0; i < recordings.size(); ++i) {
+    ImGui::PushID(static_cast<int>(i));
+    std::error_code ec;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const std::string name = u8s(recordings[i].filename());
+    draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text, ImVec2(a.x + pad, p.y + ctx_.u(8.0F)), (name + "  (" + format_bytes(fs::file_size(recordings[i], ec)) + ")").c_str());
+    ImGui::SetCursorScreenPos(ImVec2(a.x + w - pad - ctx_.u(130.0F), p.y));
+    if (button(ctx_, "session_replay", "Replay", ImVec2(ctx_.u(120.0F), ctx_.u(28.0F)), Style::secondary, can)) { session_replay_ = recordings[i]; launch(entry.id(), false); }
+    ImGui::PopID();
+  }
+  const float h = ImGui::GetCursorScreenPos().y - a.y + ctx_.u(14.0F);
+  dl->ChannelsSetCurrent(0);
+  section_card(ctx_, dl, a, ImVec2(a.x + w, a.y + h), "INPUT RECORDING");
+  note_layout("recording", a, ImVec2(a.x + w, a.y + h));
+  dl->ChannelsMerge();
+  ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + h));
+  ImGui::Dummy(ImVec2(w, 0.0F));
+  return h;
+}
+
 // ---------------------------------------------------------------- Sega CD: input recording (the one section a native game does not have)
 
 float App::draw_scd_recordings(LibraryEntry &entry, const StatusInfo &info, float w) {
@@ -1226,6 +1268,9 @@ void App::draw_details(float w, float h) {
   if (sega_cd) {   // the one section only a Sega CD game has: its input recordings and replays (SEG-078), in the same section-card presentation
     ImGui::Dummy(ImVec2(1, ctx_.u(12.0F)));
     draw_scd_recordings(*entry, info, main_w);
+  } else if (entry->platform_id == "genesis") {   // SEG-146-T006: the same section for a Genesis game (the shared session recorder; Master System is not wired yet)
+    ImGui::Dummy(ImVec2(1, ctx_.u(12.0F)));
+    draw_session_recordings(*entry, info, main_w);
   }
   const float bottom = std::max(rail_bottom, ImGui::GetCursorScreenPos().y);
   ImGui::SetCursorScreenPos(ImVec2(top.x, bottom));

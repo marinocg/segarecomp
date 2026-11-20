@@ -128,6 +128,14 @@ void sv_host_stop_screen(SvHost *host, const char *title, const char *detail);
 /* SEG-131 (ADR 0278): registers the adapter's whole-machine save-state / rewind capabilities (copied; NULL unregisters). Without a provider the pause menu shows
  * accurate disabled Save State / Load State / Rewind rows. The provider is called only from sv_host_service (the adapter's snapshot barrier). */
 void sv_host_set_state_provider(SvHost *host, const SvStateProvider *provider);
+/* SEG-146-T006: the adapter's session recorder (sv_session.h) as a pause-menu entry. `status` fills a short text and returns 0 idle, 1 recording, 2 replaying, 3 recording-is-ending; `stop` asks the adapter to end the recording at its next guest-frame boundary (0 = accepted, nonzero = failed; `message` says what happened). The host calls both only from sv_host_service (the frame barrier).
+ * Registering shows the "Stop recording" row (disabled with a reason unless a recording is in progress); NULL unregisters (no row). */
+typedef struct SvSessionControl {
+  void *ctx;
+  int (*status)(void *ctx, char *text, size_t cap);
+  int (*stop)(void *ctx, char *message, size_t cap);
+} SvSessionControl;
+void sv_host_set_session_control(SvHost *host, const SvSessionControl *control);
 /* Test/automation seams: run quick save / quick load / the rewind surface as the F5 / F8 / F7 keys do. Return 0 when the action ran (success or a reported failure). */
 /* SEG-131: opens the visual rewind surface (the F7 key, the pause-menu row and the two-trigger shortcut all call this). The guest is frozen while it is open; it
  * returns 1 when the player confirmed a moment and the adapter restored it (the game then continues from it), 0 when it was cancelled, unavailable or failed. */

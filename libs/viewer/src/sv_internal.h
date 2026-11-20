@@ -160,6 +160,8 @@ struct SvHost {
   /* SEG-131: whole-machine states. The slot cache (including copies of the thumbnails) is refreshed when a slot page opens and after a save. */
   SvStateProvider state;
   int has_state;
+  SvSessionControl session;    /* SEG-146-T006: the adapter's record/replay control (the "Stop recording" row) */
+  int has_session;
   SvStateSlotInfo slot_info[SV_STATE_SLOTS];
   uint8_t slot_thumb[SV_STATE_SLOTS][SV_STATE_THUMB_MAX_W * SV_STATE_THUMB_MAX_H * 2];
   int pending_slot;            /* the slot a confirmation page is about */
@@ -185,7 +187,7 @@ enum {
   I_SHOT, I_RESET, I_INFO,
   I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,
   I_YES, I_NO,
-  I_STATE_SAVE, I_STATE_LOAD, I_REWIND,
+  I_STATE_SAVE, I_STATE_LOAD, I_REWIND, I_SESSION_STOP,
   I_SLOT = 300, /* + slot index (0 = quick) */
   I_BIND = 100 /* + action (one row per action: keyboard and gamepad columns) */
 };
