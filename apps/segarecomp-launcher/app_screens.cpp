@@ -166,6 +166,7 @@ void App::draw() {
     case Page::import_page: draw_import(inner_w, ch); break;
     case Page::storage: draw_storage(inner_w, ch); break;
     case Page::settings: draw_settings(inner_w, ch); break;
+    case Page::data_location: draw_data_location(inner_w, ch); break;
   }
   ImGui::EndChild();
   ui::zone_capture = false;
@@ -182,6 +183,7 @@ void App::draw() {
   if (!sheet_was_open && modal_.kind == Modal::Kind::none && !picker_.open && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
     if (page_ == Page::details) close_details();
     else if (page_ == Page::storage) go(storage_return_);
+    else if (page_ == Page::data_location) data_move_back();
     else if (page_ != Page::library) go(Page::library);
   }
   if (!ImGui::GetIO().WantTextInput && modal_.kind == Modal::Kind::none && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) { if (page_ == Page::details) close_details(); go(Page::library); focus_search_ = true; }
@@ -223,7 +225,7 @@ void App::draw_sidebar(float x, float y, float w, float h) {
   constexpr int kNav = 3;
   const Nav items[kNav] = {{Page::library, "Library", "library", false}, {Page::settings, "Settings", "settings", false}, {Page::import_page, "Add game", "import", true}};
   const Page origin = page_ == Page::details ? (previous_page_ == Page::details ? Page::library : previous_page_) : page_;
-  const Page highlighted = origin == Page::storage ? Page::settings : origin;
+  const Page highlighted = origin == Page::storage || origin == Page::data_location ? Page::settings : origin;
   ImGuiID nav_ids[kNav]{};
   ImRect nav_rects[kNav];
   int nav_target = -1;

@@ -592,9 +592,32 @@ void test_double_migration_chain() {
   expect(c.find("genesis", sha64('a'))->rom_paths[0] == pstr(w.ext / "game.md"), "external reference survives a chain of moves");
   fs::remove_all(w.base);
 }
+
+// SEG-150-T009: every typed reason has plain text AND a next step (the screens show both); no code falls through to the generic fallback.
+void test_plain_text_for_every_reason() {
+  std::set<std::string> seen;
+  for (int i = static_cast<int>(MigrationRefusal::env_override_cache); i <= static_cast<int>(MigrationRefusal::insufficient_space); ++i) {
+    const auto code = static_cast<MigrationRefusal>(i);
+    const PlainText t = refusal_text(code);
+    expect(!t.what.empty() && !t.next.empty(), std::string("refusal text for ") + refusal_name(code));
+    expect(t.what != "The move was refused.", std::string("refusal has a specific text: ") + refusal_name(code));
+    expect(seen.insert(t.what).second, std::string("refusal text is distinct: ") + refusal_name(code));
+    expect(failure_text(refusal_name(code)).what == t.what, std::string("a refusal name maps through failure_text: ") + refusal_name(code));
+  }
+  expect(refusal_text(MigrationRefusal::env_override_cache).what.find("SEGARECOMP_CACHE_DIR") != std::string::npos, "the cache override text names the variable");
+  for (const char *reason : {"busy", "cancelled", "interrupted", "copy_failed", "source_changed", "rebase_failed", "verify_failed", "journal_write_failed", "bootstrap_write_failed"}) {
+    const PlainText t = failure_text(reason);
+    expect(!t.what.empty() && !t.next.empty() && t.what != "The move did not complete.", std::string("failure text for ") + reason);
+  }
+  for (const char *reason : {"not_completed", "bootstrap_mismatch", "old_root_active", "old_root_missing", "busy", "restart_needed"}) {
+    const PlainText t = cleanup_refusal_text(reason);
+    expect(!t.what.empty() && !t.next.empty() && t.what != "The cleanup was refused.", std::string("cleanup refusal text for ") + reason);
+  }
+}
 } // namespace
 
 int main() {
+  test_plain_text_for_every_reason();
   test_bootstrap_and_resolution();
   test_upgrade_noop_and_plan();
   test_env_override_refusal();

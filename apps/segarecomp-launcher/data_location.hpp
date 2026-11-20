@@ -54,6 +54,11 @@ enum class MigrationRefusal {
   source_inside_destination, destination_symlink, destination_not_directory, destination_not_empty, destination_not_writable, insufficient_space
 };
 [[nodiscard]] const char *refusal_name(MigrationRefusal refusal);   // the stable lower-case code
+// SEG-150-T009: the plain-language explanation of a typed reason and what the user can do next (the Settings screens show both; every code has one, a test enumerates them).
+struct PlainText { std::string what, next; };
+[[nodiscard]] PlainText refusal_text(MigrationRefusal refusal);
+[[nodiscard]] PlainText failure_text(const std::string &reason);          // a MigrationResult::reason: busy, cancelled, copy_failed, source_changed, ... (a refusal name maps to refusal_text)
+[[nodiscard]] PlainText cleanup_refusal_text(const std::string &reason);   // a CleanupPlan::reason / CleanupResult::reason
 
 struct Refused { MigrationRefusal code; std::string detail; };
 
@@ -129,6 +134,7 @@ struct MigrationResult {
 
 // ---- recovery at startup ----
 enum class RecoveryAction { none, rolled_back, completed, kept_completed, owner_alive, journal_invalid, rollback_incomplete };
+[[nodiscard]] const char *recovery_action_name(RecoveryAction action);   // stable lower-case code
 struct RecoveryResult {
   RecoveryAction action = RecoveryAction::none;
   std::string detail;

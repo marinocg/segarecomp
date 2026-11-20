@@ -140,6 +140,7 @@ void dialog_trampoline(void *userdata, const char *const *files, int) {
 App::App() : catalog_(fs::path{}) {
   layout_ = locate_layout();
   cache_dir_ = cache_root();
+  recovery_ = startup_recovery();   // SEG-150-T009: what the start-up recovery of an interrupted data move did (resolved with the roots, before any of them is used)
   library_dir_ = library_root();
   covers_dir_ = library_dir_ / "covers";
   catalog_file_ = library_dir_ / "library.json";
@@ -301,6 +302,15 @@ void App::shutdown() {
   if (status_job_.valid()) status_job_.wait();
   if (import_job_.valid()) import_job_.wait();
   if (maint_job_.valid()) maint_job_.wait();
+  // SEG-150-T009: closing during a data move cancels it (honoured until the final switch: the partial copy is rolled back and the current location stays in use; a move already
+  // past the switch finishes) and waits for the worker, like every other job. An interrupted process is recovered at the next start by the T008 journal.
+  move_.cancel = true;
+  move_.plan_cancel = true;
+  if (move_.run_job.valid()) move_.run_job.wait();
+  if (move_.cleanup_job.valid()) move_.cleanup_job.wait();
+  if (move_.plan_job.valid()) move_.plan_job.wait();
+  if (move_.cleanup_plan_job.valid()) move_.cleanup_plan_job.wait();
+  if (inventory_job_.valid()) inventory_job_.wait();
   if (sms_probe_.valid()) sms_probe_.wait();
   if (hid_job_.valid()) hid_job_.wait();
   cover_cancel_ = true;
@@ -438,7 +448,7 @@ void App::poll_scan() {
 // Sequential post-build maintenance, one step per call: (1) the finished games' cleanup, (2) the keep-last-N policy on a fresh scan. Each step waits
 // (its flag stays set) until the maintenance guard is available; nothing is dropped, and nothing blocks gameplay or starts another worker.
 void App::pump_cleanup() {
-  if (maintenance_running_ || busy_.any_activity()) return;
+  if (maintenance_active() || busy_.any_activity()) return;
   if (!pending_cleanup_ids_.empty()) {
     const std::vector<std::string> ids(pending_cleanup_ids_.begin(), pending_cleanup_ids_.end());
     pending_cleanup_ids_.clear();
@@ -528,6 +538,12 @@ void App::scd_browse(const std::string &purpose, const std::string &id) {
   static const SDL_DialogFileFilter program_filters[] = {{"Programs and all files", "*"}};
   const bool bios = purpose == "scd_review_bios" || purpose == "scd_locate_bios", cue = purpose == "scd_locate_cue";
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, purpose, id}, window_, bios ? bios_filters : (cue ? cue_filters : program_filters), bios || cue ? 2 : 1, nullptr, false);
+}
+
+void App::data_move_choose_folder() {
+  if (data_move_running()) return;
+  if (use_builtin_picker()) { open_picker("data_folder", ""); return; }
+  SDL_ShowOpenFolderDialog(dialog_trampoline, new DialogCtx{this, "data_folder", ""}, window_, nullptr, false);
 }
 
 void App::browse_cover(const std::string &id) {
@@ -816,13 +832,18 @@ void App::go(Page page) {
   page_ = page;
   if (page == Page::settings) reload_viewer_settings();
   if (page == Page::settings && page_before_ == Page::storage) settings_focus_storage_ = true;   // Back from the cleanup page: focus returns to "Review usage and clean up"
-  if (page != Page::settings && page != Page::storage) settings_scan_asked_ = false;
+  if (page == Page::settings && page_before_ == Page::data_location) settings_focus_move_ = true;   // Back from the data-location page: focus returns to "Change data location"
+  if (page != Page::settings && page != Page::storage && page != Page::data_location) { settings_scan_asked_ = false; inventory_asked_ = false; }
   nav_reset_ = true;
   editing_title_ = false;
   if (page == Page::storage) {
     storage_return_ = previous_page_ == Page::settings ? Page::settings : Page::library;  // Back returns to the area Storage was opened from
     if (storage_return_ == Page::settings) settings_tab_ = 2;                              // ... which is the Storage & Data group
     request_scan();
+  }
+  if (page == Page::data_location) {
+    settings_tab_ = 2;   // Back returns to the Storage & Data group
+    data_move_enter();
   }
 }
 
@@ -1013,7 +1034,7 @@ void App::run_main_action(const std::string &id) {
 void App::request_build(const std::string &id) {
   if (is_building(id) || is_queued(id)) return;
   if (first_run_gate({id})) return;
-  if (build_running() || !build_queue_.empty() || maintenance_running_ || scd_import_job_.valid()) {
+  if (build_running() || !build_queue_.empty() || maintenance_active() || scd_import_job_.valid()) {
     build_queue_.push(id);
     if (const LibraryEntry *e = catalog_.find_id(id)) toast("Queued: " + e->title() + " (build " + std::to_string(build_count()) + ").");
     return;
@@ -1248,11 +1269,12 @@ void App::update_jobs() {
     for (auto &e : events) {
       if (!e.error.empty() && e.paths.empty()) {
         // No native chooser is available (no portal under WSL, a minimal desktop): the built-in picker does the same job.
-        if (e.purpose == "import" || e.purpose == "locate" || e.purpose == "cover" || e.purpose == "patch" || e.purpose.rfind("scd_", 0) == 0) { toast("The system file chooser is not available; using the built-in picker."); open_picker(e.purpose, e.key); continue; }
+        if (e.purpose == "import" || e.purpose == "locate" || e.purpose == "cover" || e.purpose == "patch" || e.purpose == "data_folder" || e.purpose.rfind("scd_", 0) == 0) { toast("The system file chooser is not available; using the built-in picker."); open_picker(e.purpose, e.key); continue; }
         show_message("The file picker could not be opened", {"SDL: " + e.error, "On Linux this usually means no file-chooser service (XDG Desktop Portal) is available - common under WSL/WSLg.", "Drop the file onto this window instead."});
         continue;
       }
       if (e.purpose == "import") start_import(e.paths);
+      else if (e.purpose == "data_folder" && !e.paths.empty()) data_move_set_destination(from_u8(e.paths[0]));
       else if (e.purpose == "patch" && !e.paths.empty()) patch_chosen(e.key, e.paths[0]);
       else if (e.purpose.rfind("scd_", 0) == 0) scd_dialog_result(e.purpose, e.key, e.paths);
       else if (e.purpose == "locate" && !e.paths.empty()) {
@@ -1284,6 +1306,7 @@ void App::update_jobs() {
   poll_scd_inspect();
   scd_poll();
   poll_maintenance();
+  poll_data_move();
   poll_cover_download();
   if (!cover_job_.valid() && !auto_cover_pending_.empty()) {
     std::vector<std::string> ids;
@@ -1298,12 +1321,12 @@ void App::update_jobs() {
   if (job_ && job_->finished()) finish_build();
   if (game_ && game_->poll()) finish_run();
   pump_cleanup();
-  if (!build_running() && !scd_import_job_.valid() && !build_queue_.empty() && !maintenance_running_ && modal_.kind == Modal::Kind::none) {
+  if (!build_running() && !scd_import_job_.valid() && !build_queue_.empty() && !maintenance_active() && modal_.kind == Modal::Kind::none) {
     const std::string next = build_queue_.pop_front();
     start_build(next);
   }
   // Automation: press Play once the selected game is ready (building first when there is no matching build); quit when the run is over.
-  if (autoplay_ && !status_pending_ && !detail_id_.empty() && !job_ && !game_ && !maintenance_running_ && !restart_pending_) {
+  if (autoplay_ && !status_pending_ && !detail_id_.empty() && !job_ && !game_ && !maintenance_active() && !restart_pending_) {
     const StatusInfo &info = status_of(detail_id_);
     const LibraryEntry *entry = catalog_.find_id(detail_id_);
     if (autoplay_pending_) {
@@ -1341,6 +1364,7 @@ const char *App::page_name() const {
     case Page::import_page: return "import";
     case Page::storage: return "storage";
     case Page::settings: return "settings";
+    case Page::data_location: return "data_location";
   }
   return "?";
 }
@@ -1616,7 +1640,7 @@ void App::run_script() {
   } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
     if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
   } else if (cmd == "wait_idle") {  // hold the script until no build is running or queued
-    if (build_running() || scd_import_job_.valid() || !build_queue_.empty() || status_pending_ || maintenance_running_) { --script_at_; script_wait_ = 2; }
+    if (build_running() || scd_import_job_.valid() || !build_queue_.empty() || status_pending_ || maintenance_active()) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "wait_file") {  // hold the script until a file exists (at most ~20 s of frames)
     std::error_code ec;
     if (!fs::exists(fs::path(arg), ec) && ++script_wait_file_frames_ < 1200) { --script_at_; script_wait_ = 1; }
@@ -1695,6 +1719,41 @@ void App::run_script() {
     platform_filter_ = std::atoi(arg.c_str());
   } else if (cmd == "view") {
     settings_.view = arg == "list" ? "list" : "grid";
+  } else if (cmd == "dm_open") {        // SEG-150-T009: the Change data location page, as the Settings button opens it
+    go(Page::data_location);
+  } else if (cmd == "dm_choose") {      // the Choose folder button (opens the native or the built-in folder picker)
+    data_move_choose_folder();
+  } else if (cmd == "dm_destination") { // the folder the chooser would return: `dm_destination <absolute path>`
+    data_move_set_destination(from_u8(arg));
+  } else if (cmd == "dm_use_sub") {     // "Use a new folder inside it" (a refused, non-empty destination)
+    data_move_use_subfolder();
+  } else if (cmd == "dm_confirm") {     // the Move my data button of the plan screen
+    data_move_confirm();
+  } else if (cmd == "dm_cancel") {      // the Cancel move button of the progress screen
+    data_move_request_cancel();
+  } else if (cmd == "dm_back") {        // Back / Esc / B on the data-location page
+    data_move_back();
+  } else if (cmd == "dm_wait") {        // hold the script until no plan, move or cleanup is running
+    if (move_.plan_job.valid() || data_move_running() || move_.cleanup_plan_job.valid() || move_.stage == MoveStage::planning || move_.stage == MoveStage::cleanup_planning) { --script_at_; script_wait_ = 2; }
+  } else if (cmd == "dm_wait_phase") {  // hold the script until the move reports this phase (or has ended): `dm_wait_phase copy`
+    std::lock_guard<std::mutex> lock(move_.mutex);
+    if (move_.run_job.valid() && move_.progress.phase != arg && script_wait_file_frames_++ < 1500) { --script_at_; script_wait_ = 1; }
+    else script_wait_file_frames_ = 0;
+  } else if (cmd == "dm_cleanup_open") {    // the Clean up the previous location button
+    data_cleanup_open();
+  } else if (cmd == "dm_cleanup_copies") {  // the include-migrated-copies option: `dm_cleanup_copies 0|1`
+    move_.include_copies = arg == "1";
+    data_cleanup_replan();
+  } else if (cmd == "dm_cleanup_confirm") {
+    data_cleanup_confirm();
+  } else if (cmd == "dm_dismiss") {         // Keep it (forget the previous location)
+    data_dismiss_previous();
+  } else if (cmd == "dm_notice_dismiss") {
+    recovery_dismissed_ = true;
+  } else if (cmd == "dm_change") {          // the Change data location button of Storage & Data (disabled under an environment override)
+    const EffectivePaths ep = effective_paths(layout_);
+    if (ep.cache_overridden || ep.library_overridden) trace("data_move=control_disabled");
+    else go(Page::data_location);
   } else if (cmd == "settings_tab") {
     settings_tab_ = std::clamp(std::atoi(arg.c_str()), 0, 3);
     go(Page::settings);
@@ -1766,6 +1825,33 @@ void App::run_script() {
       actual = std::string("cache=") + (ep.cache_overridden ? "env" : "default") + ",library=" + (ep.library_overridden ? "env" : "default") + ",home=" + (ep.home_overridden ? "env" : "default");
     }
     else if (key == "cleanup_policy") actual = settings_.cleanup.mode + ":" + std::to_string(settings_.cleanup.keep_last_n) + ":" + std::to_string(settings_.cleanup.soft_limit_mb);   // the loaded policy, e.g. keep_last_n:7:4096
+    else if (key == "data_move") actual = move_stage_name();
+    else if (key == "data_notice") { const std::string n = effective_paths(layout_).data_location_notice; actual = n.empty() ? "-" : n.substr(0, 23); }   // the start of the saved-location notice
+    else if (key == "data_root") actual = u8s(cache_dir_);   // the data folder this process resolved at start
+    else if (key == "data_library") actual = u8s(library_dir_);
+    else if (key == "dm_plan") {   // the plan screen's verdict: ok, or refused:<typed codes>
+      actual = move_.stage == MoveStage::plan || move_.stage == MoveStage::running || move_.stage == MoveStage::finished ? (move_.plan.ok() ? "ok" : "refused") : "-";
+      if (actual == "refused") { actual += ":"; for (const auto &r : move_.plan.refusals) actual += refusal_name(r.code) + std::string(r.code == move_.plan.refusals.back().code ? "" : ","); }
+    }
+    else if (key == "dm_plan_files") actual = move_.stage == MoveStage::choose || move_.stage == MoveStage::planning ? "-" : std::to_string(move_.plan.items.size());
+    else if (key == "dm_plan_bytes") actual = move_.stage == MoveStage::choose || move_.stage == MoveStage::planning ? "-" : std::to_string(move_.plan.durable_bytes);
+    else if (key == "dm_outcome") {
+      actual = move_.stage == MoveStage::finished ? [&] {
+        const char *names[] = {"completed", "refused", "busy", "cancelled", "failed", "interrupted"};
+        return std::string(names[static_cast<int>(move_.result.outcome)]) + ":" + move_.result.reason;
+      }() : "-";
+    }
+    else if (key == "dm_phase") { std::lock_guard<std::mutex> lock(move_.mutex); actual = move_.progress.phase.empty() ? "-" : move_.progress.phase; }
+    else if (key == "dm_restart") actual = restart_needed_for_move() ? "1" : "0";
+    else if (key == "dm_change") actual = dm_change_state_;
+    else if (key == "dm_previous") actual = completed_move_.present ? "present" : "-";
+    else if (key == "dm_cleanup") {
+      actual = "-";
+      if (move_.stage == MoveStage::cleanup || move_.stage == MoveStage::cleanup_planning)
+        actual = move_.cleanup_plan.eligible ? "eligible:" + std::to_string(move_.cleanup_plan.items.size()) + ":" + std::to_string(move_.cleanup_plan.bytes) : "refused:" + (move_.cleanup_refusal.empty() ? move_.cleanup_plan.reason : move_.cleanup_refusal);
+    }
+    else if (key == "dm_cleanup_result") actual = move_.stage == MoveStage::cleaned ? (move_.cleanup_result.refused ? "refused:" + move_.cleanup_result.reason : "removed:" + std::to_string(move_.cleanup_result.bytes_freed) + ":problems=" + std::to_string(move_.cleanup_result.problems.size())) : "-";
+    else if (key == "dm_notice") actual = recovery_.action == RecoveryAction::none || recovery_.action == RecoveryAction::kept_completed || recovery_dismissed_ ? "-" : recovery_action_name(recovery_.action);
     else if (key == "settings_focus_return") actual = settings_focus_storage_ ? "pending" : "none";
     else if (key == "widescreen") actual = viewer_settings_.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS ? "extended_backgrounds" : (viewer_settings_.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? "enhanced_gameplay" : "original");
     else if (key == "ws_width") actual = std::to_string(viewer_settings_.video.widescreen_width);
@@ -1947,6 +2033,11 @@ int App::run() {
     if (const auto vis = visible_entries(); !vis.empty()) { focus_card_request_ = vis.front()->id(); menu_on_focus_ = true; }
   if (SDL_getenv("SEGARECOMP_SHOT_SELECT")) { select_mode_ = true; for (const auto *e : visible_entries()) { selected_.insert(e->id()); if (selected_.size() >= 2) break; } }
   bool running = true;
+  refresh_completed_move();
+  if (recovery_.action != RecoveryAction::none && recovery_.action != RecoveryAction::kept_completed) {   // SEG-150-T009: once, non-blocking; the full text is in Settings > Storage & Data
+    trace(std::string("data_move=recovery action=") + recovery_action_name(recovery_.action));
+    toast(recovery_.action == RecoveryAction::owner_alive ? "Another Segarecomp window is moving your data. Details: Settings > Storage & Data." : "An interrupted data move was dealt with when Segarecomp started. Details: Settings > Storage & Data.");
+  }
   trace("startup=ready");
   while (running) {
     ++frame_;

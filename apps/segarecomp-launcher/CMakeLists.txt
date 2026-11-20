@@ -47,7 +47,7 @@ target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 segarecomp_enable_warnings(segarecomp_launcher_ui_support)
 
-add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_sega_cd.cpp app_variants.cpp app_picker.cpp app_screens.cpp app_pages.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
+add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_sega_cd.cpp app_variants.cpp app_picker.cpp app_screens.cpp app_pages.cpp app_data_location.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
 if(WIN32)
   # The executable's own icon (Explorer, taskbar, shortcuts): a resource script embedding packaging/windows/Segarecomp.ico, when a resource compiler exists.
   include(CheckLanguage)
@@ -166,6 +166,16 @@ if(BUILD_TESTING)
   set_property(TEST launcher_settings_groups_gui_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_settings_groups_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_settings_groups_gui_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-150-T009 (ADR 0317): Settings > Storage & Data > Change data location drives the T008 core: plan, migration with phases and cancel, restart, previous-location cleanup,
+# recovery notice, environment override, busy guard and a controller-only run. Synthetic profiles only (private bootstrap file and data root).
+if(BUILD_TESTING)
+  add_test(NAME launcher_data_location_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_data_location_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_data_location_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_data_location_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_data_location_gui_test PROPERTY TIMEOUT 900)
 endif()
 
 # SEG-069-T003: the one-time first-run question about build intermediates (real window, virtual gamepad).

@@ -46,4 +46,8 @@ inline constexpr std::size_t picker_max_entries = 4000;
 // Re-checks, at the moment of choosing, that `path` is an existing plain file of an allowed extension inside `root` (a symlink is refused).
 [[nodiscard]] bool picker_accept(const std::filesystem::path &root, const std::filesystem::path &path, const std::vector<std::string> &extensions, std::string *reason = nullptr);
 
+// SEG-150-T009: choosing a FOLDER (the data location): the same containment rule, and the folder must be an existing plain directory (a link is refused). A picker with no
+// extensions lists folders only.
+[[nodiscard]] bool picker_accept_folder(const std::filesystem::path &root, const std::filesystem::path &path, std::string *reason = nullptr);
+
 } // namespace launcher

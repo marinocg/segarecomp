@@ -150,7 +150,7 @@ void App::draw_import_body(float w, float h) {
 
 void App::draw_storage(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool maintenance = maintenance_running_ || busy_.any_activity();
+  const bool maintenance = maintenance_active() || busy_.any_activity();
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     page_header(ctx_, w, "STORAGE & DATA", "Review disk usage and clean up generated files. ROMs, saves, recordings and mod approvals are never removed.");
@@ -343,7 +343,7 @@ void App::draw_storage(float w, float h) {
   ImGui::SetCursorScreenPos(ImVec2(ao.x, ao.y + static_cast<float>(arows) * (ah + ctx_.u(10.0F)) + ctx_.u(4.0F)));
   ImGui::Dummy(ImVec2(w, 1));
   checkbox(ctx_, "keep_logs", "When cleaning failed builds, keep build.log and status.json", &keep_failed_logs_);
-  if (maintenance) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, w, maintenance_running_ ? "A cleanup is running..." : "Cleanup is unavailable while a build or game is running.");
+  if (maintenance) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, w, move_.run_job.valid() || move_.cleanup_job.valid() ? "A data location change is running..." : (maintenance_running_ ? "A cleanup is running..." : "Cleanup is unavailable while a build or game is running."));
   paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Cleanup only touches the Segarecomp cache. Your ROM files, covers, screenshots and the library itself are never deleted. Playing never cleans anything. Cache: " + u8s(cache_dir_));
   paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "ROMs extracted from ZIP archives are stored separately from generated builds, in the library's roms folder. Clearing build caches or keeping only metadata does not remove those ROM copies.");
 }
@@ -636,6 +636,7 @@ void App::draw_settings(float full_w, float h) {
   } else if (settings_tab_ == 2) {
     // ---------------------------------------------------------------- Storage & Data
     if (!settings_scan_asked_) { settings_scan_asked_ = true; request_scan(); }   // one bounded read-only measurement per visit
+    if (!inventory_asked_) { inventory_asked_ = true; refresh_completed_move(); request_inventory(); }   // SEG-150-T009: the size of the data by class, measured once per visit (read-only)
     const EffectivePaths ep = effective_paths(layout_);
     const float vw = w - lw;
     section("DISK USAGE");
@@ -658,15 +659,66 @@ void App::draw_settings(float full_w, float h) {
       fg.NavHighlightItemUnderNav = true;
     }
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    section("WHERE THINGS LIVE");
-    // SEG-150-T008 / T009: moving the library or cache to another folder attaches here (a control only once it exists; none is shown before then).
-    label_value(ctx_, lw, vw, "Cache (disposable)", u8s(ep.cache) + (ep.cache_overridden ? "  - set by SEGARECOMP_CACHE_DIR" : "  - default location") + ";  games/ and zig-cache/ only");
-    label_value(ctx_, lw, vw, "Library (kept)", u8s(ep.library) + (ep.library_overridden ? "  - set by SEGARECOMP_LIBRARY_DIR" : "  - default location, in a library folder inside the cache folder") + ";  library.json, covers, settings, saves, ROMs extracted from ZIPs");
+    section("DATA LOCATION");
+    // SEG-150-T009 (ADR 0317): where the data lives, how much of it is kept versus rebuildable, and the control that moves it (disabled, with the reason, under an environment override).
+    const bool env_governed = ep.cache_overridden || ep.library_overridden;
+    const bool move_active = data_move_running();
+    if (recovery_.action != RecoveryAction::none && recovery_.action != RecoveryAction::kept_completed && !recovery_dismissed_) {   // shown once, never blocking
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), recovery_.action == RecoveryAction::completed ? col::ok : col::warn, w, recovery_message_text(recovery_.action));
+      if (button(ctx_, "dm_notice_ok", "OK", ImVec2(ctx_.u(90.0F), ctx_.u(28.0F)), Style::secondary)) recovery_dismissed_ = true;
+      if (recovery_.action == RecoveryAction::journal_invalid) {
+        ImGui::SameLine(0.0F, ctx_.u(8.0F));
+        if (button(ctx_, "dm_notice_forget", "Forget this record", ImVec2(ctx_.u(190.0F), ctx_.u(28.0F)), Style::secondary, !move_active)) {
+          if (dismiss_completed_migration(ep.bootstrap_file)) { recovery_ = RecoveryResult{}; toast("The unreadable record was forgotten. Your data was not touched."); }
+          else toast("The record could not be removed.", true);
+        }
+      }
+      ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    }
+    if (!ep.data_location_notice.empty())   // a saved location that is not in use: unavailable drive, damaged or newer file, shadowed by the environment
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, ep.data_location_notice);
+    if (restart_needed_for_move())
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, "Restart required: your data was moved to " + u8s(read_bootstrap(ep.bootstrap_file).root) + " and that location is used from the next start. Until then this window keeps using the previous location.");
+    label_value(ctx_, lw, vw, "Data folder", u8s(ep.cache) + (ep.cache_overridden ? "  - set by SEGARECOMP_CACHE_DIR" : ep.relocated ? "  - a location you chose" : "  - default location"));
+    label_value(ctx_, lw, vw, "Library (kept)", u8s(ep.library) + (ep.library_overridden ? "  - set by SEGARECOMP_LIBRARY_DIR" : "  - library folder inside the data folder"));
+    if (inventory_valid_ && !env_governed && inventory_.areas.size() > 0) {
+      std::size_t kept_files = inventory_.items.size();
+      label_value(ctx_, lw, vw, "Your data", std::to_string(kept_files) + (kept_files == 1 ? " file, " : " files, ") + format_bytes(inventory_.durable_bytes) + "  - catalog, settings, covers, mods, saves, recordings, ROMs unpacked from ZIPs; this is what a move copies");
+      label_value(ctx_, lw, vw, "Rebuildable", format_bytes(inventory_.regenerable_bytes) + "  - prepared games, compiler cache and downloads; a move does not copy them");
+    } else if (!env_governed) {
+      label_value(ctx_, lw, vw, "Your data", inventory_job_.valid() ? "measuring..." : "not measured", col::dim);
+    }
     label_value(ctx_, lw, vw, "Installation", u8s(ep.home) + (ep.home_overridden ? "  - set by SEGARECOMP_HOME" : "  - where this program runs from") + (layout_.problem.empty() ? "" : "  (incomplete)"), layout_.problem.empty() ? col::text : col::err);
     if (!layout_.problem.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::err, w, layout_.problem);
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "These locations are read when the launcher starts and are shown read-only. A variable named above, when set in the environment that starts the launcher, takes precedence over the default. Moving existing data to another folder is not offered in this version.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
+    dm_change_state_ = move_active ? "progress" : (env_governed ? "disabled" : "enabled");
+    if (env_governed) {
+      const PlainText t = refusal_text(ep.cache_overridden ? MigrationRefusal::env_override_cache : MigrationRefusal::env_override_library);
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, t.what);
+      paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w, t.next);
+    } else {
+      paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w, "Move your library, saves, mods and settings to another folder or drive. You see exactly what moves and what it needs first, your current data is kept, and nothing is deleted automatically.");
+    }
+    if (button(ctx_, "dm_change", move_active ? "Show progress" : "Change data location...", ImVec2(ctx_.u(250.0F), ctx_.u(32.0F)), Style::secondary, env_governed ? false : true, ctx_.icon("folder"))) go(Page::data_location);
+    if (settings_focus_move_) {   // Back from the data-location page lands here again
+      settings_focus_move_ = false;
+      ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+      ImGuiContext &fg = *ImGui::GetCurrentContext();
+      fg.NavCursorVisible = true;
+      fg.NavHighlightItemUnderNav = true;
+    }
+    if (completed_move_.present) {
+      ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+      paragraph(ctx_, ctx_.bold, ctx_.u(12.5F), col::text, w, "Previous location");
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, completed_move_.source.empty() ? "A record of an earlier data move cannot be used." : "Your data was moved. The old folder " + u8s(completed_move_.source) + " still holds the previous copy. Segarecomp never removes it by itself.");
+      if (button(ctx_, "dm_prev_clean", "Clean up the previous location...", ImVec2(ctx_.u(300.0F), ctx_.u(30.0F)), Style::secondary, !completed_move_.source.empty() && !move_active)) { go(Page::data_location); data_cleanup_open(); }
+      ImGui::SameLine(0.0F, ctx_.u(8.0F));
+      if (button(ctx_, "dm_prev_keep", "Keep it", ImVec2(ctx_.u(110.0F), ctx_.u(30.0F)), Style::ghost, !move_active)) data_dismiss_previous();
+    }
+    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "A change takes effect the next time Segarecomp starts. SEGARECOMP_CACHE_DIR and SEGARECOMP_LIBRARY_DIR, when set in the environment that starts the launcher, always take precedence over any chosen location.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    if (button(ctx_, "open_cache", "Open cache folder", ImVec2(ctx_.u(190.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) SDL_OpenURL(("file://" + u8s(ep.cache)).c_str());
+    if (button(ctx_, "open_cache", "Open data folder", ImVec2(ctx_.u(190.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) SDL_OpenURL(("file://" + u8s(ep.cache)).c_str());
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (button(ctx_, "open_lib", "Open library folder", ImVec2(ctx_.u(200.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) { std::error_code ec; fs::create_directories(ep.library, ec); SDL_OpenURL(("file://" + u8s(ep.library)).c_str()); }
   } else {

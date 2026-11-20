@@ -151,7 +151,7 @@ fs::path data_bootstrap_file() {
   return root.parent_path() / "Segarecomp-data-location.json";
 }
 
-static DataEnvironment data_environment() {
+DataEnvironment data_environment() {
   DataEnvironment env;
   if (const char *cache = SDL_getenv("SEGARECOMP_CACHE_DIR")) env.cache_dir = cache;
   if (const char *library = SDL_getenv("SEGARECOMP_LIBRARY_DIR")) env.library_dir = library;
@@ -160,15 +160,24 @@ static DataEnvironment data_environment() {
 
 namespace {
 // Read once per process: a root change takes effect at the next start, never mid-run. A migration interrupted by a crash is recovered here, before any root is used.
-const Bootstrap &startup_bootstrap() {
-  static const Bootstrap bootstrap = [] {
+struct Startup { Bootstrap bootstrap; RecoveryResult recovery; };
+const Startup &startup_state() {
+  static const Startup state = [] {
+    Startup s;
     const fs::path file = data_bootstrap_file();
-    (void)recover_pending_migration(file);
-    return read_bootstrap(file);
+    s.recovery = recover_pending_migration(file);
+    s.bootstrap = read_bootstrap(file);
+    return s;
   }();
-  return bootstrap;
+  return state;
 }
+const Bootstrap &startup_bootstrap() { return startup_state().bootstrap; }
 } // namespace
+
+RecoveryResult startup_recovery() {
+  if (SDL_getenv("SEGARECOMP_CACHE_DIR") != nullptr) return {};
+  return startup_state().recovery;
+}
 
 fs::path cache_root() {
   if (const char *override_dir = SDL_getenv("SEGARECOMP_CACHE_DIR")) return path_from_utf8(override_dir);
@@ -193,7 +202,7 @@ EffectivePaths effective_paths(const Layout &layout) {
   out.home_overridden = SDL_getenv("SEGARECOMP_HOME") != nullptr;
   out.bootstrap_file = data_bootstrap_file();
   const ResolvedRoots roots = resolve_roots(data_environment(), out.cache_overridden ? out.cache : default_cache_root(), out.bootstrap_file);
-  out.relocated = roots.cache_source == RootSource::bootstrap;
+  out.relocated = roots.cache_source == RootSource::bootstrap && roots.cache == out.cache;   // the saved root is the one this process resolved at start (a move made in this session is only used from the next start)
   out.data_location_notice = roots.notice;
   return out;
 }

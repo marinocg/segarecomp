@@ -40,7 +40,7 @@ ModStatus App::mod_status_of(const LibraryEntry &entry, const StatusInfo &info, 
 
 std::string App::mod_switch_block(const LibraryEntry &entry) const {
   if (catalog_.read_only()) return "This library was written by a newer Segarecomp, so mods cannot be changed here.";
-  if (is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_running_) return "Wait for the running preparation or game to finish before switching version or removing a mod.";
+  if (is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_active()) return "Wait for the running preparation or game to finish before switching version or removing a mod.";
   return {};
 }
 

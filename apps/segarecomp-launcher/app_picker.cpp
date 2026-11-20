@@ -46,6 +46,7 @@ void App::open_picker(const std::string &purpose, const std::string &key) {
   else if (purpose == "patch") { picker_.title = "Choose a widescreen patch package"; picker_.extensions = {"segapatch"}; }
   else if (purpose == "scd_review_bios" || purpose == "scd_locate_bios") { picker_.title = "Choose your Sega CD BIOS image"; picker_.extensions = {"bin", "md", "rom"}; }
   else if (purpose == "scd_locate_cue") { picker_.title = "Choose the disc's CUE file"; picker_.extensions = {"cue"}; }
+  else if (purpose == "data_folder") { picker_.title = "Choose the folder for your data"; picker_.extensions = {}; }   // folders only (SEG-150-T009)
   else if (purpose == "scd_attach") { picker_.title = "Choose the verified viewer program"; picker_.extensions = {"", "exe"}; }
   else { picker_.title = "Choose a cover image"; picker_.extensions = {"png", "jpg", "jpeg"}; }
   const char *extra = SDL_getenv("SEGARECOMP_PICKER_ROOT");
@@ -67,7 +68,14 @@ void App::picker_set_dir(const fs::path &root, const fs::path &dir) {
 }
 
 void App::picker_finish(bool accept) {
-  if (accept && !picker_.chosen.empty()) {
+  if (accept && picker_.purpose == "data_folder" && !picker_.root.empty()) {   // a FOLDER: the one currently shown
+    std::string why;
+    if (picker_accept_folder(picker_.root, picker_.dir, &why)) {
+      trace("picker=chosen count=1");
+      std::lock_guard<std::mutex> lock(dialog_mutex_);
+      dialog_events_.push_back(DialogEvent{picker_.purpose, picker_.key, {path_text(picker_.dir)}, {}});
+    } else toast(why, true);
+  } else if (accept && !picker_.chosen.empty()) {
     DialogEvent event;
     event.purpose = picker_.purpose;
     event.key = picker_.key;
@@ -177,7 +185,7 @@ void App::draw_file_picker(float w, float h) {
     y += row_h + ctx_.u(3.0F);
   }
   if (rows.empty() || (!at_roots && rows.size() == 1U)) {
-    draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text2, ImVec2(lx, y + ctx_.u(4.0F)), at_roots ? "No locations are available." : "Nothing here that can be used. Go up to another folder.");
+    draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text2, ImVec2(lx, y + ctx_.u(4.0F)), at_roots ? "No locations are available." : picker_.purpose == "data_folder" ? "No folders here. Use this folder, or go up to another one." : "Nothing here that can be used. Go up to another folder.");
   }
   if (!picker_.message.empty()) draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::warn, ImVec2(lx, b.y - footer_h + ctx_.u(2.0F)), picker_.message.c_str());
   else if (picker_.listing.truncated) draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::warn, ImVec2(lx, b.y - footer_h + ctx_.u(2.0F)), "This folder has more files than are shown.");
@@ -192,9 +200,10 @@ void App::draw_file_picker(float w, float h) {
   ImGui::SetCursorScreenPos(ImVec2(lx + 2.0F * (bw + ctx_.u(6.0F)), by));
   const bool cancel_button = button(ctx_, "pk_cancel", "Cancel", ImVec2(bw, bh), Style::secondary);
   ImGui::SetCursorScreenPos(ImVec2(lx + 3.0F * (bw + ctx_.u(6.0F)), by));
-  const std::string ok_label = picker_.multi ? "Import (" + std::to_string(picker_.chosen.size()) + ")" : "Select";
-  const bool ok_button = button(ctx_, "pk_ok", ok_label.c_str(), ImVec2(bw, bh), Style::primary, !picker_.chosen.empty());
-  draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::dim, ImVec2(lx, b.y - ctx_.u(8.0F) - ctx_.u(11.0F)), "A: open / tick     B: up / back     LB / RB: page");
+  const bool folder_pick = picker_.purpose == "data_folder";
+  const std::string ok_label = folder_pick ? "Use this folder" : (picker_.multi ? "Import (" + std::to_string(picker_.chosen.size()) + ")" : "Select");
+  const bool ok_button = button(ctx_, "pk_ok", ok_label.c_str(), ImVec2(bw, bh), Style::primary, folder_pick ? !at_roots : !picker_.chosen.empty());
+  draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::dim, ImVec2(lx, b.y - ctx_.u(8.0F) - ctx_.u(11.0F)), picker_.purpose == "data_folder" ? "A: open a folder     B: up / back     LB / RB: page" : "A: open / tick     B: up / back     LB / RB: page");
   const bool back = ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
   if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) && picker_.page > 0) { --picker_.page; picker_.focus_first = true; }
   if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) && picker_.page + 1 < pages) { ++picker_.page; picker_.focus_first = true; }

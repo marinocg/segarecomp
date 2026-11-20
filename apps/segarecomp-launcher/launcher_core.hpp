@@ -17,6 +17,9 @@
 
 namespace launcher {
 
+struct DataEnvironment;   // data_location.hpp (not included here: that header includes library_catalog.hpp, which needs this one)
+struct RecoveryResult;
+
 struct Layout {
   std::filesystem::path root;         // directory holding bin/, toolchain/, runtime/, sdl3/
   std::filesystem::path cli;          // segarecomp build driver
@@ -156,6 +159,10 @@ struct SaveOutcome {
 [[nodiscard]] std::filesystem::path cache_root();   // SEGARECOMP_CACHE_DIR, else the data root named by the saved data-location file (data_location.hpp), else default_cache_root()
 [[nodiscard]] std::filesystem::path default_cache_root();
 [[nodiscard]] std::filesystem::path data_bootstrap_file();
+// SEG-150-T009: the environment overrides as the data-location core wants them, and what the startup recovery of a pending move did (RecoveryAction::none when
+// nothing was pending, or when SEGARECOMP_CACHE_DIR governs the cache so that no recovery runs). Both are read from the same once-per-process state cache_root() uses.
+[[nodiscard]] DataEnvironment data_environment();
+[[nodiscard]] RecoveryResult startup_recovery();
 // Per-user persistent data: the library catalog, covers, viewer settings and screenshots. It lives beside, never inside, the disposable
 // build folders (`games/`, `zig-cache/`) that cache maintenance is allowed to touch. SEGARECOMP_LIBRARY_DIR overrides it.
 [[nodiscard]] std::filesystem::path library_root();

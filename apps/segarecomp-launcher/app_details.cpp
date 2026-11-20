@@ -107,8 +107,8 @@ bool App::can_build(const LibraryEntry &entry, const StatusInfo &info) const {
 }
 
 bool App::can_play(const StatusInfo &info) const {
-  if (info.sega_cd) return info.scd.state == scd::State::ready && !game_ && !maintenance_running_ && !scd_launch_job_.valid() && !scd_import_job_.valid() && !(scd_build_ && scd_build_key_ == info.key);
-  return info.runnable() && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
+  if (info.sega_cd) return info.scd.state == scd::State::ready && !game_ && !maintenance_active() && !scd_launch_job_.valid() && !scd_import_job_.valid() && !(scd_build_ && scd_build_key_ == info.key);
+  return info.runnable() && !game_ && !maintenance_active() && !(job_ && job_key_ == info.key); }
 
 void App::play(const std::string &id) {
   if (const LibraryEntry *e = catalog_.find_id(id); e != nullptr && e->platform_id == "sega-cd") { trace("play=requested title=" + e->title()); scd_play(id, 0); return; }
@@ -400,7 +400,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       }
       if (split) {
         ImGui::SameLine(0.0F, ctx_.u(2.0F));
-        const bool open = button(ctx_, "play_variants", "", ImVec2(chev_w, bh), runnable_now ? Style::primary : Style::secondary, !game_ && !is_building && !maintenance_running_) || std::exchange(script_open_play_menu_, false);
+        const bool open = button(ctx_, "play_variants", "", ImVec2(chev_w, bh), runnable_now ? Style::primary : Style::secondary, !game_ && !is_building && !maintenance_active()) || std::exchange(script_open_play_menu_, false);
         const ImVec2 ra = ImGui::GetItemRectMin(), rb = ImGui::GetItemRectMax(), c((ra.x + rb.x) * 0.5F, (ra.y + rb.y) * 0.5F);
         const float k = ctx_.u(4.5F);
         dl->AddTriangleFilled(ImVec2(c.x - k, c.y - k * 0.5F), ImVec2(c.x + k, c.y - k * 0.5F), ImVec2(c.x, c.y + k * 0.6F), IM_COL32_WHITE);   // chevron
@@ -458,7 +458,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
 void App::draw_play_variants_menu(const char *popup_id, LibraryEntry &entry, const StatusInfo &info) {
   if (!begin_menu(ctx_, popup_id)) return;
   const float mw = ctx_.u(270.0F);
-  const bool idle = !game_ && !maintenance_running_ && !is_building(entry.id()) && !is_queued(entry.id());
+  const bool idle = !game_ && !maintenance_active() && !is_building(entry.id()) && !is_queued(entry.id());
   const std::string vsub = entry.selected_variant.empty() ? "selected" : "";
   if (menu_item(ctx_, "pv_vanilla", "Play Vanilla", info.vanilla_ready ? vsub.c_str() : "not built", ctx_.icon("play"), mw, idle && info.vanilla_ready)) { select_variant(entry.id(), std::string()); play(entry.id()); }
   for (std::size_t i = 0; i < entry.patches.size(); ++i) {
@@ -519,7 +519,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetCursorScreenPos();
   const bool scd_game = entry.platform_id == "sega-cd";
-  const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_running_ ||
+  const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_active() ||
                         (scd_game && (scd_import_job_.valid() || scd_launch_job_.valid()));  // other games' builds never lock this game's options
   const bool sms = entry.platform_id == "master-system";
   const RomView probe = scd_game ? RomView{} : view_for(entry);
@@ -864,7 +864,7 @@ float App::draw_variants(LibraryEntry &entry, const StatusInfo &info, float w) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetCursorScreenPos();
   const float pad = ctx_.u(16.0F), inner = w - 2 * pad;
-  const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_running_;
+  const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_active();
   const std::string unavailable = mods_unavailable_reason(entry.platform_id);
   dl->ChannelsSplit(2);
   dl->ChannelsSetCurrent(1);
@@ -902,7 +902,7 @@ float App::draw_variants(LibraryEntry &entry, const StatusInfo &info, float w) {
       ImGui::SameLine(0.0F, ctx_.u(8.0F));
       const bool preparing = is_building(entry.id());
       const char *prep_label = preparing ? "Preparing..." : (info.status == GameStatus::failed ? "Retry preparing" : (needs_prep ? "Prepare selected mod" : "Prepare again"));
-      if (button(ctx_, "mods_prepare", prep_label, ImVec2(ctx_.u(190.0F), bh), needs_prep && !preparing ? Style::primary : Style::secondary, selectable_mod && can_build(entry, info) && !maintenance_running_, ctx_.icon("reset"))) { notices_.erase(entry.id()); request_build(entry.id()); }
+      if (button(ctx_, "mods_prepare", prep_label, ImVec2(ctx_.u(190.0F), bh), needs_prep && !preparing ? Style::primary : Style::secondary, selectable_mod && can_build(entry, info) && !maintenance_active(), ctx_.icon("reset"))) { notices_.erase(entry.id()); request_build(entry.id()); }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) tooltip(ctx_, selectable_mod ? "Prepare the selected mod as its own program on this computer. The original game's program is not touched." : "This mod cannot be prepared until the problem shown on its row is resolved.");
       ImGui::SameLine(0.0F, ctx_.u(8.0F));
       if (button(ctx_, "mods_play", "Play modded game", ImVec2(ctx_.u(170.0F), bh), needs_prep || !selectable_mod ? Style::secondary : Style::primary, can_play(info) && !needs_prep && selectable_mod, ctx_.icon("play"))) play(entry.id());
@@ -1237,7 +1237,7 @@ float App::draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, 
   for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), archived ? col::info : col::dim, ImVec2(a.x + pad, y), l.c_str()); y += ctx_.u(14.5F); }
   y += ctx_.u(10.0F);
   ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-  const bool can_clean = u != nullptr && u->intermediates > 0 && report_valid_ && !maintenance_running_ && !busy_.any_activity();
+  const bool can_clean = u != nullptr && u->intermediates > 0 && report_valid_ && !maintenance_active() && !busy_.any_activity();
   if (button(ctx_, "clean_inter", "Clean intermediates...", ImVec2(w - 2 * pad, ctx_.u(32.0F)), Style::secondary, can_clean, ctx_.icon("trash"))) {
     modal_ = Modal{};
     modal_.kind = Modal::Kind::plan;
@@ -1259,7 +1259,7 @@ float App::draw_session_recordings(LibraryEntry &entry, const StatusInfo &info, 
   const float pad = ctx_.u(16.0F), inner = w - 2 * pad;
   dl->ChannelsSplit(2);
   dl->ChannelsSetCurrent(1);
-  const bool can = info.runnable() && !game_ && !maintenance_running_;
+  const bool can = info.runnable() && !game_ && !maintenance_active();
   ImGui::SetCursorScreenPos(ImVec2(a.x + pad, a.y + ctx_.u(38.0F)));
   checkbox(ctx_, "session_record", "Record my next play session from power-on when I press Play", &session_record_);
   ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));

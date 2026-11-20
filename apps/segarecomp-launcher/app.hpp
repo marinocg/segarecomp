@@ -3,6 +3,7 @@
 // The launcher window: library, import, game details, storage and settings. Thin orchestration over launcher_core, library_catalog,
 // storage and covers; it owns no recompilation logic and never deletes anything except through storage.hpp's validated plans.
 
+#include "data_location.hpp"
 #include "file_picker.hpp"
 #include "launcher_core.hpp"
 #include "launcher_settings.hpp"
@@ -37,9 +38,12 @@ extern "C" {
 
 namespace launcher {
 
+// SEG-150-T009: the notice text for what the start-up recovery of an interrupted data move did ("" when nothing needs saying).
+[[nodiscard]] const char *recovery_message_text(RecoveryAction action);
+
 // `playable_older`: the current identity has no build, but an executable built by an earlier release is verifiably playable (older_build.hpp).
 enum class GameStatus { not_built, ready, metadata_only, stale, failed, playable_older };
-enum class Page { library, details, import_page, storage, settings };
+enum class Page { library, details, import_page, storage, settings, data_location };
 // The Game page's tabs (ordinary view state: nothing about them is stored). Mods exists only for a game that has real content there (Genesis patches).
 enum class DetailsTab { overview = 0, mods = 1, settings = 2, advanced = 3 };
 
@@ -414,6 +418,63 @@ private:
   int settings_tab_ = 0;            // SEG-150-T007: the Settings group: 0 General, 1 Appearance & Controls, 2 Storage & Data, 3 Advanced (ordinary view state, ids tab#N)
   bool settings_scan_asked_ = false;   // the Storage & Data group asked for one measurement for this visit to Settings
   bool settings_focus_storage_ = false; // Back from the cleanup page lands on the button that opened it
+  bool settings_focus_move_ = false;    // SEG-150-T009: Back from the data-location page lands on the button that opened it
+
+  // ---- SEG-150-T009 (ADR 0317): Settings > Storage & Data > Change data location. The T008 core runs on worker threads; this is only its screen. ----
+  enum class MoveStage { choose, planning, plan, running, finished, cleanup_planning, cleanup, cleaning, cleaned };
+  struct DataMove {
+    MoveStage stage = MoveStage::choose;
+    std::filesystem::path destination, pending_destination, prev_source, prev_destination;
+    std::future<MigrationPlan> plan_job;
+    std::atomic<bool> plan_cancel{false};
+    MigrationPlan plan;
+    std::future<MigrationResult> run_job;
+    std::atomic<bool> cancel{false};
+    bool cancel_requested = false;
+    std::mutex mutex;
+    MigrationProgress progress;               // guarded by `mutex`: written by the worker's callback, read by the screen
+    MigrationResult result;
+    bool include_copies = false;
+    std::future<CleanupPlan> cleanup_plan_job;
+    CleanupPlan cleanup_plan;
+    std::future<CleanupResult> cleanup_job;
+    CleanupResult cleanup_result;
+    std::string cleanup_refusal;              // an app-level reason ("restart_needed") that makes the cleanup unavailable
+    bool focus_pending = false;               // a stage change moves keyboard / gamepad focus to that stage's safe default button
+  };
+  DataMove move_;
+  std::future<MigrationPlan> inventory_job_;   // the measured size of the data by class (a plan without a destination), one per visit to Storage & Data
+  MigrationPlan inventory_;
+  bool inventory_valid_ = false, inventory_asked_ = false;
+  CompletedMigration completed_move_;          // the completion record of a finished move whose previous folder has not been cleaned up or dismissed
+  RecoveryResult recovery_;                    // what the start-up recovery of a pending move did (shown once, in Storage & Data)
+  bool recovery_dismissed_ = false;
+  std::string dm_change_state_ = "-";           // test seam: the state of the Change data location button: enabled | disabled | progress
+  bool restart_needed_ = false;                // refresh_completed_move(): the saved location is not the one this process started with
+  bool move_done_this_session_ = false;        // a move committed in this process: the new location is used from the next start
+  void draw_data_location(float w, float h);
+  void data_move_enter();
+  void data_move_back();
+  void data_move_choose_folder();   // the native folder dialog, or the built-in picker (always for a controller)
+  void data_move_set_destination(const std::filesystem::path &destination);
+  void data_move_start_plan(const std::filesystem::path &destination);
+  void data_move_confirm();
+  void data_move_use_subfolder();
+  void data_move_request_cancel();
+  void data_move_reset();
+  void data_cleanup_open();
+  void data_cleanup_replan();
+  void data_cleanup_confirm();
+  void data_dismiss_previous();
+  void poll_data_move();
+  void refresh_completed_move();
+  void request_inventory();
+  [[nodiscard]] MigrationOptions data_move_options(const std::filesystem::path &destination) const;
+  [[nodiscard]] bool data_move_running() const { return move_.run_job.valid() || move_.cleanup_job.valid(); }
+  [[nodiscard]] bool maintenance_active() const { return maintenance_running_ || data_move_running(); }
+  [[nodiscard]] bool restart_needed_for_move() const;   // the saved location differs from the one this process resolved at start
+  [[nodiscard]] const char *move_stage_name() const;
+  void note_move_focus_default();                       // applies a pending default focus to the last drawn item
   bool focus_search_ = false;
   char title_edit_[200] = "";
   bool editing_title_ = false;

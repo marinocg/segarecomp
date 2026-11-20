@@ -506,6 +506,70 @@ const char *refusal_name(MigrationRefusal r) {
   return "unknown";
 }
 
+const char *recovery_action_name(RecoveryAction a) {
+  switch (a) {
+    case RecoveryAction::none: return "none";
+    case RecoveryAction::rolled_back: return "rolled_back";
+    case RecoveryAction::completed: return "completed";
+    case RecoveryAction::kept_completed: return "kept_completed";
+    case RecoveryAction::owner_alive: return "owner_alive";
+    case RecoveryAction::journal_invalid: return "journal_invalid";
+    case RecoveryAction::rollback_incomplete: return "rollback_incomplete";
+  }
+  return "unknown";
+}
+
+PlainText refusal_text(MigrationRefusal r) {
+  switch (r) {
+    case MigrationRefusal::env_override_cache: return {"The data folder is set by the SEGARECOMP_CACHE_DIR environment variable, so it cannot be moved from here.", "Remove that variable from the environment that starts Segarecomp, restart, and choose a location here."};
+    case MigrationRefusal::env_override_library: return {"The library folder is set by the SEGARECOMP_LIBRARY_DIR environment variable, so it cannot be moved from here.", "Remove that variable from the environment that starts Segarecomp, restart, and choose a location here."};
+    case MigrationRefusal::bootstrap_unusable: return {"The saved data location file cannot be used (it is damaged or was written by a newer version).", "Keep using the current location. To choose another one, fix or remove the file named in the details, then restart."};
+    case MigrationRefusal::journal_present: return {"An earlier move did not finish.", "Restart Segarecomp: the unfinished move is rolled back or completed when it starts. Then try again."};
+    case MigrationRefusal::previous_migration_pending_cleanup: return {"A previous move is complete and its old folder has not been dealt with yet.", "Under Storage & Data, clean up the previous location or choose Keep it, then try again."};
+    case MigrationRefusal::source_missing: return {"The current data folder was not found.", "Check that its drive is connected, then try again."};
+    case MigrationRefusal::source_symlink: return {"The current data folder is a link, which cannot be moved safely.", "Point Segarecomp at the real folder, or keep using this location."};
+    case MigrationRefusal::source_unsupported_entry: return {"The data folder holds something that is not an ordinary file or folder (a link or a device).", "Remove or move that item out of the data folder, then try again."};
+    case MigrationRefusal::source_unsafe_name: return {"A file name in the data folder cannot be copied safely.", "Rename or remove the file named in the details, then try again."};
+    case MigrationRefusal::source_too_large: return {"The data folder holds too many files to move in one step (more than 100,000).", "Remove files you do not need (see Review usage and clean up), then try again."};
+    case MigrationRefusal::destination_not_absolute: return {"The new location is not a complete folder path.", "Choose the folder again."};
+    case MigrationRefusal::destination_unsafe: return {"That folder is not allowed as a data location (a drive root, a system folder or the folder Segarecomp is installed in).", "Choose another folder."};
+    case MigrationRefusal::destination_same: return {"That is the folder Segarecomp already uses.", "Choose a different folder."};
+    case MigrationRefusal::destination_inside_source: return {"The new folder is inside the current data folder.", "Choose a folder outside it."};
+    case MigrationRefusal::source_inside_destination: return {"The current data folder is inside the folder you chose.", "Choose a folder that does not contain it."};
+    case MigrationRefusal::destination_symlink: return {"The chosen folder, or a folder above it, is a link.", "Choose a real folder."};
+    case MigrationRefusal::destination_not_directory: return {"The chosen location is a file, not a folder.", "Choose a folder."};
+    case MigrationRefusal::destination_not_empty: return {"The chosen folder already contains files, and Segarecomp never mixes its data into other files.", "Choose an empty folder, or a new folder inside it."};
+    case MigrationRefusal::destination_not_writable: return {"Segarecomp cannot write to the chosen folder.", "Choose a folder you can write to."};
+    case MigrationRefusal::insufficient_space: return {"There is not enough free space at the chosen location.", "Free up space there or choose another drive."};
+  }
+  return {"The move was refused.", "Nothing was changed. Choose another location."};
+}
+
+PlainText failure_text(const std::string &reason) {
+  for (int i = static_cast<int>(MigrationRefusal::env_override_cache); i <= static_cast<int>(MigrationRefusal::insufficient_space); ++i)
+    if (reason == refusal_name(static_cast<MigrationRefusal>(i))) return refusal_text(static_cast<MigrationRefusal>(i));
+  if (reason == "busy") return {"A game, a preparation, an import or a cleanup is running.", "Wait for it to finish (or cancel it), then try again."};
+  if (reason == "cancelled") return {"The move was cancelled.", "Nothing was changed; the current location stays in use. Start again whenever you like."};
+  if (reason == "interrupted") return {"The move was interrupted.", "Restart Segarecomp: the unfinished move is rolled back when it starts."};
+  if (reason == "copy_failed") return {"A file could not be copied to the new location.", "Check that the destination has room and is writable, then try again. The current location is unchanged."};
+  if (reason == "source_changed") return {"A file in your data changed while it was being moved.", "Try again when nothing else is using Segarecomp. The current location is unchanged."};
+  if (reason == "rebase_failed") return {"The copied library could not be updated for the new location.", "Try again. The current location is unchanged."};
+  if (reason == "verify_failed") return {"The copy did not match the original, so it was not used.", "Try again, or choose another drive. The current location is unchanged."};
+  if (reason == "journal_write_failed") return {"Segarecomp could not write its move record next to the data location file.", "Check that the folder holding that file is writable, then try again. The current location is unchanged."};
+  if (reason == "bootstrap_write_failed") return {"Segarecomp could not save the new location, so it did not switch.", "Check that the folder holding the data location file is writable, then try again. The current location is unchanged."};
+  return {"The move did not complete.", "The current location is unchanged. Try again."};
+}
+
+PlainText cleanup_refusal_text(const std::string &reason) {
+  if (reason == "not_completed") return {"There is no completed move to clean up.", "Nothing to do."};
+  if (reason == "bootstrap_mismatch") return {"The data location has changed since the move, so the old folder is no longer offered for cleanup.", "Nothing was removed. Choose Keep it to forget the previous location."};
+  if (reason == "old_root_active") return {"The previous folder is still the one in use (an environment variable names it).", "Remove SEGARECOMP_CACHE_DIR, restart, and try again."};
+  if (reason == "old_root_missing") return {"The previous folder is no longer there (or is a link).", "Nothing to remove. Choose Keep it to forget it."};
+  if (reason == "busy") return {"A game, a preparation, an import or another cleanup is running.", "Wait for it to finish, then try again."};
+  if (reason == "restart_needed") return {"Segarecomp is still using the previous location until it is restarted.", "Restart Segarecomp first; the previous location can be cleaned up afterwards."};
+  return {"The cleanup was refused.", "Nothing was removed."};
+}
+
 // ------------------------------------------------------------------------------------------------ plan
 
 MigrationPlan build_migration_plan(const MigrationOptions &o, const std::atomic<bool> *cancel) {
