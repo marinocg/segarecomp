@@ -104,7 +104,7 @@ def main():
         check("genesis_audio=supported" in done.stdout or "genesis_audio" not in done.stdout, "the build result does not claim a degraded sound CPU")
 
         # a failure of the second pass is the build's failure: typed, propagated, no third build, no stale executable, no successful record
-        for mode in ("compile", "link"):
+        for mode in (("compile", "link") if sys.platform != "win32" else ()):   # a POSIX shell-script compiler wrapper (as in genesis_z80_build_pipeline_test)
             out = tmp / ("alt_fail_" + mode)
             done, status = build(smc, out, compiler=alternatives_failing_compiler(tmp, mode))
             log = (out / "build.log").read_text() if (out / "build.log").exists() else ""
