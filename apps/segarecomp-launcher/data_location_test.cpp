@@ -1051,6 +1051,125 @@ void test_cleanup_refuses_destination_links() {
 }
 #endif
 
+// F30 final pass: every migrated original is re-verified (content, copy, catalog references) immediately before it is deleted; the plan is only a preview.
+bool problem_mentions(const CleanupResult &r, const std::string &needle) {
+  for (const auto &p : r.problems) if (p.find(needle) != std::string::npos) return true;
+  return false;
+}
+
+void test_cleanup_final_revalidation() {
+  DataEnvironment none;
+  const fs::path cat = fs::path("library") / "library.json";
+  const auto save_rel = [] { return fs::path("library") / "saves" / "genesis" / sha64('a') / "save.srm"; };
+  {   // A: the original changes (same size) after the plan
+    const World w = make_world("f30_a");
+    BusyGuard busy;
+    expect(run_migration(options_for(w), busy).ok(), "A: migration");
+    const std::string dest_before = slurp(w.D / save_rel());
+    CleanupHooks hooks;
+    hooks.before_remove = [&](const fs::path &next) { if (next == w.S / save_rel()) spit(w.S / save_rel(), std::string(64, 'X')); };
+    const CleanupResult r = run_old_root_cleanup(w.bootstrap, none, true, busy, nullptr, &hooks);
+    expect(slurp(w.S / save_rel()) == std::string(64, 'X'), "A: the changed original is preserved");
+    expect(slurp(w.D / save_rel()) == dest_before, "A: the destination is untouched");
+    expect(problem_mentions(r, "the original changed since it was verified"), "A: a specific reason is reported");
+    expect(!r.ok() && fs::exists(fs::path(w.bootstrap).concat(".journal")), "A: the record is retained because an item remains");
+    fs::remove_all(w.base);
+  }
+  {   // B: the destination copy changes (same size)
+    const World w = make_world("f30_b");
+    BusyGuard busy;
+    expect(run_migration(options_for(w), busy).ok(), "B: migration");
+    const std::string old_before = slurp(w.S / save_rel());
+    CleanupHooks hooks;
+    hooks.before_remove = [&](const fs::path &next) { if (next == w.S / save_rel()) spit(w.D / save_rel(), std::string(64, 'Y')); };
+    const CleanupResult r = run_old_root_cleanup(w.bootstrap, none, true, busy, nullptr, &hooks);
+    expect(slurp(w.S / save_rel()) == old_before, "B: the original is preserved");
+    expect(problem_mentions(r, "the new copy differs"), "B: a specific reason is reported");
+    expect(fs::exists(fs::path(w.bootstrap).concat(".journal")), "B: the record is retained");
+    fs::remove_all(w.base);
+  }
+  const fs::path rom_rel = fs::path("library") / "roms" / "extracted.md";
+  const auto edit_catalog = [&](const World &w, const std::function<void(Catalog &)> &f) {
+    Catalog c(w.D / cat);
+    expect(c.load() == CatalogLoad::loaded, "catalog loads");
+    f(c);
+    std::string e;
+    expect(c.save(&e), "catalog saved");
+  };
+  {   // C: the new catalog starts referring to an old managed ROM / another old managed file
+    for (int variant = 0; variant < 2; ++variant) {
+      const World w = make_world("f30_c");
+      BusyGuard busy;
+      expect(run_migration(options_for(w), busy).ok(), "C: migration");
+      const fs::path target = variant == 0 ? rom_rel : fs::path("library") / "covers" / "a.png";
+      expect(plan_old_root_cleanup(w.bootstrap, none, true).eligible, "C: eligible initially");
+      CleanupHooks hooks;
+      bool done = false;
+      hooks.before_remove = [&](const fs::path &) {
+        if (done) return;
+        done = true;
+        edit_catalog(w, [&](Catalog &c) { c.entries()[1].rom_paths = {pstr(w.S / target)}; });
+      };
+      const CleanupResult r = run_old_root_cleanup(w.bootstrap, none, true, busy, nullptr, &hooks);
+      expect(fs::is_regular_file(w.S / target), "C: the file the new catalog now refers to is kept (variant " + std::to_string(variant) + ")");
+      expect(problem_mentions(r, "the new catalog now refers to it"), "C: reason reported");
+      expect(fs::exists(fs::path(w.bootstrap).concat(".journal")), "C: the record is retained");
+      fs::remove_all(w.base);
+    }
+  }
+  {   // D: corrupted catalog while deleting another managed file => everything managed is kept
+    const World w = make_world("f30_d");
+    BusyGuard busy;
+    expect(run_migration(options_for(w), busy).ok(), "D: migration");
+    CleanupHooks hooks;
+    bool done = false;
+    hooks.before_remove = [&](const fs::path &) { if (!done) { done = true; spit(w.D / cat, "{\"schema\":3,\"games\":[ broken"); } };
+    const CleanupResult r = run_old_root_cleanup(w.bootstrap, none, true, busy, nullptr, &hooks);
+    expect(fs::is_regular_file(w.S / cat) && fs::is_regular_file(w.S / save_rel()) && fs::is_regular_file(w.S / rom_rel), "D: managed originals survive an unreadable new catalog");
+    expect(problem_mentions(r, "the new catalog cannot be read"), "D: reason reported");
+    expect(fs::exists(fs::path(w.bootstrap).concat(".journal")), "D: the record is retained");
+    fs::remove_all(w.base);
+  }
+  {   // E: nothing changes => the usual cleanup succeeds and clears the record
+    const World w = make_world("f30_e");
+    BusyGuard busy;
+    expect(run_migration(options_for(w), busy).ok(), "E: migration");
+    const CleanupResult r = run_old_root_cleanup(w.bootstrap, none, true, busy);
+    expect(r.ok() && !fs::exists(w.S / save_rel()) && !fs::exists(w.S / cat), "E: verified originals removed");
+    expect(!fs::exists(fs::path(w.bootstrap).concat(".journal")) || !r.problems.empty(), "E: record cleared when nothing remains");
+    fs::remove_all(w.base);
+  }
+}
+
+#if !defined(_WIN32)
+void test_instance_marker_names_are_parsed_safely() {
+  const World w = make_world("f30_pid");
+  const fs::path dir = fs::path(w.bootstrap).concat(".instances");
+  const pid_t dead = fork();
+  if (dead == 0) _exit(0);
+  int status = 0;
+  waitpid(dead, &status, 0);
+  const std::vector<std::string> odd = {std::string(200, '9'), std::string(30, '7'), "0", "00", "-5", "1e3", "12 34", " 77", "99999999999", "4294967296"};
+  for (const auto &n : odd) spit(dir / n, "x");
+  fs::create_directories(dir / "424242424242424242");   // a directory named with digits
+  fs::create_directories(dir / "123");
+  spit(dir / std::to_string(dead), "stale");
+  spit(dir / std::to_string(getpid()), "own");
+  bool threw = false, running = true;
+  try { running = foreign_instance_running(w.bootstrap); } catch (...) { threw = true; }
+  expect(!threw, "marker names never throw");
+  expect(!running, "no live foreign instance among malformed names");
+  expect(!fs::exists(dir / std::to_string(dead)), "the dead pid is swept");
+  for (const auto &n : odd) expect(fs::exists(dir / n), "uninterpretable marker kept: " + n.substr(0, 12));
+  expect(fs::is_directory(dir / "424242424242424242") && fs::is_directory(dir / "123"), "directories are not touched");
+  expect(fs::exists(dir / std::to_string(getpid())), "the own marker is ignored");
+  Child live = spawn_instance(w.bootstrap);
+  expect(live.pid > 0 && foreign_instance_running(w.bootstrap), "a live child still blocks");
+  end_instance(live);
+  fs::remove_all(w.base);
+}
+#endif
+
 int main() {
   test_plain_text_for_every_reason();
   test_bootstrap_and_resolution();
@@ -1068,10 +1187,12 @@ int main() {
   test_cleanup_validates_destination_catalog();
   test_cleanup_revalidates_before_delete();
   test_cleanup_refuses_active_environment();
+  test_cleanup_final_revalidation();
 #if !defined(_WIN32)
   test_cleanup_refuses_destination_links();
   test_other_instance_blocks_move_and_cleanup();
   test_instance_started_during_move();
+  test_instance_marker_names_are_parsed_safely();
 #endif
   if (failures != 0) { std::cerr << failures << " failure(s)\n"; return 1; }
   std::cout << "data_location_test: all checks passed\n";

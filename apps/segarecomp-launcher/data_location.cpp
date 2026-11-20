@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <charconv>
+#include <cstdint>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -463,6 +465,15 @@ InstanceMarker::~InstanceMarker() {
   if (!created_parent_.empty()) fs::remove(created_parent_, ec);
 }
 
+// Non-throwing, bounded: 1..2147483647 in at most 10 plain digits, otherwise 0 (ignored).
+static long long parse_marker_pid(const std::string &name) {
+  if (name.empty() || name.size() > 10 || !all_digits(name)) return 0;
+  std::uint32_t v = 0;
+  const auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), v);
+  if (ec != std::errc() || ptr != name.data() + name.size() || v == 0 || v > 2147483647U) return 0;
+  return static_cast<long long>(v);
+}
+
 bool foreign_instance_running(const fs::path &bootstrap_file, std::string *who) {
   std::error_code ec;
   const fs::path dir = instances_dir(bootstrap_file);
@@ -472,7 +483,8 @@ bool foreign_instance_running(const fs::path &bootstrap_file, std::string *who) 
   for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
     const std::string name = u8(it->path().filename());
     if (!all_digits(name) || !it->is_regular_file(ec)) continue;
-    const long long pid = std::stoll(name);
+    const long long pid = parse_marker_pid(name);
+    if (pid <= 0) continue;   // a name that cannot be read safely as a process id is neither trusted nor deleted
     if (pid == own_pid()) continue;
     if (process_alive(pid)) {
       if (!found && who) *who = "another Segarecomp process (id " + name + ") is running; its marker is " + u8(it->path());
@@ -1014,7 +1026,7 @@ bool place_in_or_same(const fs::path &p, const fs::path &root) {
 
 // The destination catalog must be a catalog the regular loader reads unchanged. Loading happens on a temporary COPY (Catalog::load() renames a damaged file aside and may restore the
 // backup; the destination must not be touched by a check). Anything but CatalogLoad::loaded, a record the loader would drop, or a managed reference without its file is a "no".
-struct CatalogCheck { bool ok = false; std::string why; std::set<fs::path> old_refs; };
+struct CatalogCheck { bool ok = false; bool parsed = false; std::string why; std::set<fs::path> old_refs; };   // parsed: old_refs is complete even when ok is false
 
 CatalogCheck check_destination_catalog(const fs::path &dest_root, const fs::path &old_root) {
   CatalogCheck r;
@@ -1037,6 +1049,7 @@ CatalogCheck check_destination_catalog(const fs::path &dest_root, const fs::path
   const auto raw = json::parse(text);
   const json::Value *games = raw ? raw->get("games") : nullptr;
   if (games == nullptr || !games->is_array() || games->items.size() != catalog.entries().size()) { r.why = "the new catalog has records that cannot be read"; return r; }
+  r.parsed = true;
   const fs::path lib = dest_root / "library";
   const auto classify = [&](const std::string &text_path, std::string &problem) {
     const fs::path p = from_u8(text_path);
@@ -1158,15 +1171,16 @@ CleanupResult run_old_root_cleanup(const fs::path &bootstrap_file, const DataEnv
   std::error_code ec;
   std::set<fs::path> parents;
   const fs::path catalog_file = S / "library" / "library.json";
+  std::map<fs::path, ManifestEntry> manifest;   // read once; the plan is a preview, every file is verified again against it right before its removal
+  if (include_copies) {
+    std::vector<ManifestEntry> entries;
+    if (read_manifest(bootstrap_file, j.id, entries)) for (const auto &e : entries) manifest[e.rel] = e;
+  }
   for (const auto &item : plan.items) {
     if (cancel != nullptr && cancel->load()) { res.problems.push_back("cancelled; the remaining items were not removed"); break; }
     const std::string shown = u8(item.path);
     if (hooks != nullptr && hooks->before_remove) hooks->before_remove(item.path);
     if (const std::string active = active_environment_reason(env, S); !active.empty()) { res.refused = true; res.reason = active; break; }   // re-checked at the moment of deletion
-    if (item.kind == CleanupKind::migrated_copy && item.path == catalog_file) {   // the destination catalog is validated again right before the original is removed
-      const CatalogCheck again = check_destination_catalog(j.dest, S);
-      if (!again.ok) { res.problems.push_back("kept the original catalog: " + again.why); continue; }
-    }
     if (!is_within(S, item.path) || !physically_inside(S, item.path) || path_is_link(item.path)) { res.problems.push_back("outside the old folder or a link, skipped: " + shown); continue; }
     if (item.directory) {
       if (!fs::is_directory(item.path, ec) || measure_tree(item.path).has_symlink) { res.problems.push_back("changed or contains a link, skipped: " + shown); continue; }
@@ -1176,7 +1190,24 @@ CleanupResult run_old_root_cleanup(const fs::path &bootstrap_file, const DataEnv
     } else {
       if (!fs::is_regular_file(item.path, ec)) { res.problems.push_back("changed, skipped: " + shown); continue; }
       if (item.kind == CleanupKind::migrated_copy) {   // re-checked at the moment of deletion: the original is removed only while a separate verified copy stands
-        if (const std::string doubt = new_copy_doubt(S, j.dest, item.path.lexically_relative(S), item.path); !doubt.empty()) { res.problems.push_back("kept " + shown + ": " + doubt); continue; }
+        const fs::path rel = item.path.lexically_relative(S);
+        const bool is_catalog = item.path == catalog_file;
+        if (const std::string doubt = new_copy_doubt(S, j.dest, rel, item.path); !doubt.empty()) { res.problems.push_back("kept " + shown + ": " + doubt); continue; }
+        const auto entry = manifest.find(rel);
+        if (entry == manifest.end() || entry->second.sha == "-") { res.problems.push_back("kept " + shown + ": it is not in the verified migration record"); continue; }
+        const scd::Digest od = scd::hash_file(item.path, hash_limit);
+        if (!od.ok || od.size != entry->second.size || od.sha256 != entry->second.sha) { res.problems.push_back("kept " + shown + ": the original changed since it was verified"); continue; }
+        const fs::path new_file = j.dest / rel;
+        if (!is_catalog) {   // the catalog is the one file the move rewrites by design: structural validation below instead of byte identity
+          const scd::Digest nd = scd::hash_file(new_file, hash_limit);
+          if (!nd.ok || nd.size != entry->second.size || nd.sha256 != entry->second.sha) { res.problems.push_back("kept " + shown + ": the new copy differs from what was verified at the move"); continue; }
+        }
+        // The destination catalog as it is NOW: it must still be readable (otherwise nothing managed is deleted) and must not refer to this file.
+        const CatalogCheck now = check_destination_catalog(j.dest, S);
+        if (is_catalog && !now.ok) { res.problems.push_back("kept the original catalog: " + now.why); continue; }
+        if (!now.parsed) { res.problems.push_back("kept " + shown + ": the new catalog cannot be read (" + now.why + ")"); continue; }
+        std::error_code rec;
+        if (now.old_refs.count(fs::weakly_canonical(item.path, rec)) != 0 || rec) { res.problems.push_back("kept " + shown + ": the new catalog now refers to it"); continue; }
       }
       if (!fs::remove(item.path, ec) || ec) { res.problems.push_back("could not remove " + shown); continue; }
       ++res.removed;
