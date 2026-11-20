@@ -4,6 +4,8 @@
 #include "data_location.hpp"
 
 #include <fstream>
+#include <functional>
+#include <vector>
 #include <iostream>
 #include <atomic>
 #include <map>
@@ -11,6 +13,7 @@
 #include <string>
 
 #if !defined(_WIN32)
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -596,7 +599,7 @@ void test_double_migration_chain() {
 // SEG-150-T009: every typed reason has plain text AND a next step (the screens show both); no code falls through to the generic fallback.
 void test_plain_text_for_every_reason() {
   std::set<std::string> seen;
-  for (int i = static_cast<int>(MigrationRefusal::env_override_cache); i <= static_cast<int>(MigrationRefusal::insufficient_space); ++i) {
+  for (int i = static_cast<int>(MigrationRefusal::env_override_cache); i <= static_cast<int>(MigrationRefusal::other_instance_running); ++i) {
     const auto code = static_cast<MigrationRefusal>(i);
     const PlainText t = refusal_text(code);
     expect(!t.what.empty() && !t.next.empty(), std::string("refusal text for ") + refusal_name(code));
@@ -609,7 +612,7 @@ void test_plain_text_for_every_reason() {
     const PlainText t = failure_text(reason);
     expect(!t.what.empty() && !t.next.empty() && t.what != "The move did not complete.", std::string("failure text for ") + reason);
   }
-  for (const char *reason : {"not_completed", "bootstrap_mismatch", "old_root_active", "old_root_missing", "busy", "restart_needed"}) {
+  for (const char *reason : {"not_completed", "bootstrap_mismatch", "old_root_active", "library_active", "home_active", "other_instance_running", "old_root_missing", "busy", "restart_needed"}) {
     const PlainText t = cleanup_refusal_text(reason);
     expect(!t.what.empty() && !t.next.empty() && t.what != "The cleanup was refused.", std::string("cleanup refusal text for ") + reason);
   }
@@ -673,6 +676,316 @@ void test_cleanup_verifies_new_copy_and_rollback_links() {
     fs::remove_all(w.base);
   }
 }
+
+// ---- Corrective round A ----
+// P1-1: the source is re-verified by DIGEST (not only size) right before the commit. The after_copy hook plays the writer that changes the source after it was copied.
+void expect_rolled_back_source_changed(const World &w, const MigrationResult &r, const Snapshot &dest_before, const std::string &what) {
+  expect(r.outcome == MigrationOutcome::failed && r.reason == "source_changed", what + ": fails closed with source_changed (" + r.reason + " " + r.detail + ")");
+  expect(!fs::exists(w.bootstrap) && read_bootstrap(w.bootstrap).state == BootstrapState::absent, what + ": the bootstrap was never written");
+  expect(resolve_roots({}, w.S, w.bootstrap).cache == w.S, what + ": the old root stays authoritative");
+  expect(snapshot(w.D) == dest_before, what + ": the destination is rolled back");
+  expect(!fs::exists(fs::path(w.bootstrap).concat(".journal")) && !fs::exists(fs::path(w.bootstrap).concat(".manifest")), what + ": no journal or manifest left");
+}
+
+void test_source_changed_same_size_is_detected() {
+  const fs::path save = fs::path("library") / "saves" / "genesis" / sha64('a') / "save.srm";
+  {
+    const World w = make_world("p11_save");
+    const Snapshot dest_before = snapshot(w.D);
+    MigrationHooks hooks;
+    bool changed = false;
+    hooks.after_copy = [&](const fs::path &copied) {
+      if (copied.filename() != "save.srm" || changed) return;
+      changed = true;
+      spit(w.S / save, std::string(64, 'X'));   // identical length (64), different bytes
+    };
+    BusyGuard busy;
+    const MigrationResult r = run_migration(options_for(w), busy, nullptr, {}, &hooks);
+    expect(changed, "the hook ran");
+    expect(slurp(w.S / save) == std::string(64, 'X'), "the writer's new save is intact in the old root");
+    expect_rolled_back_source_changed(w, r, dest_before, "same-size save change");
+    fs::remove_all(w.base);
+  }
+  for (const bool same_length : {true, false}) {
+    const World w = make_world(same_length ? "p11_catalog_same" : "p11_catalog_longer");
+    const Snapshot dest_before = snapshot(w.D);
+    MigrationHooks hooks;
+    hooks.after_copy = [&](const fs::path &copied) {
+      if (copied.filename() != "library.json") return;
+      std::string text = slurp(w.S / "library" / "library.json");
+      const auto at = text.find("Synthetic A");
+      if (at == std::string::npos) { expect(false, "fixture catalog names Synthetic A"); return; }
+      if (same_length) text[at + 10] = 'Z'; else text.insert(at + 10, "ZZ");
+      spit(w.S / "library" / "library.json", text);
+    };
+    BusyGuard busy;
+    const MigrationResult r = run_migration(options_for(w), busy, nullptr, {}, &hooks);
+    expect_rolled_back_source_changed(w, r, dest_before, same_length ? "same-size catalog change" : "different-size catalog change");
+    fs::remove_all(w.base);
+  }
+  {
+    // a file added to a durable area / removed since the plan is also a source change
+    const World w = make_world("p11_added");
+    const Snapshot dest_before = snapshot(w.D);
+    MigrationHooks hooks;
+    bool done = false;
+    hooks.after_copy = [&](const fs::path &) { if (!done) { done = true; spit(w.S / "library" / "saves" / "genesis" / sha64('a') / "new.srm", "late"); } };
+    BusyGuard busy;
+    expect_rolled_back_source_changed(w, run_migration(options_for(w), busy, nullptr, {}, &hooks), dest_before, "file added during the move");
+    fs::remove_all(w.base);
+  }
+  {
+    // control: an untouched source still migrates, and the catalog is rebased (the digest check does not compare source and rebased copy)
+    const World w = make_world("p11_control");
+    BusyGuard busy;
+    const MigrationResult r = run_migration(options_for(w), busy);
+    expect(r.ok() && r.rebased_paths == 2, "an unchanged source migrates and the catalog is rebased");
+    fs::remove_all(w.base);
+  }
+}
+
+// P1-2: the old catalog is offered only when the destination catalog loads through the real Catalog loader and its managed references exist.
+bool offers_old_catalog(const CleanupPlan &plan, const World &w) {
+  for (const auto &item : plan.items) if (item.path == w.S / "library" / "library.json") return true;
+  return false;
+}
+bool kept_mentions_catalog(const CleanupPlan &plan) {
+  for (const auto &k : plan.kept) if (k.find("library/library.json") != std::string::npos) return true;
+  return false;
+}
+
+void test_cleanup_validates_destination_catalog() {
+  DataEnvironment none;
+  const fs::path cat = fs::path("library") / "library.json";
+  struct Case { const char *name; std::function<void(const World &)> damage; };
+  const std::vector<Case> cases = {
+    {"invalid JSON", [&](const World &w) { spit(w.D / cat, "{\"schema\":3,\"games\":[ not json"); }},
+    {"empty", [&](const World &w) { spit(w.D / cat, ""); }},
+    {"valid JSON that is not a catalog", [&](const World &w) { spit(w.D / cat, "{\"hello\":\"world\"}"); }},
+    {"JSON array", [&](const World &w) { spit(w.D / cat, "[1,2,3]"); }},
+    {"managed ROM reference missing", [&](const World &w) { fs::remove(w.D / "library" / "roms" / "extracted.md"); }},
+    {"cover reference missing", [&](const World &w) {
+       Catalog c(w.D / cat); c.load(); c.entries()[0].cover = "missing.png"; std::string e; expect(c.save(&e), "fixture save"); }},
+    {"unreadable (a directory)", [&](const World &w) { fs::remove(w.D / cat); fs::remove(w.D / (cat.string() + ".bak")); fs::create_directories(w.D / cat); }},
+  };
+  for (const Case &c : cases) {
+    const World w = make_world("p12");
+    BusyGuard busy;
+    expect(run_migration(options_for(w), busy).ok(), std::string(c.name) + ": migration");
+    c.damage(w);
+    const Snapshot dest = snapshot(w.D);
+    const CleanupPlan plan = plan_old_root_cleanup(w.bootstrap, none, true);
+    expect(plan.eligible && !offers_old_catalog(plan, w) && kept_mentions_catalog(plan), std::string(c.name) + ": the original catalog is kept with a note");
+    const CleanupResult run = run_old_root_cleanup(w.bootstrap, none, true, busy);
+    expect(fs::is_regular_file(w.S / cat), std::string(c.name) + ": run keeps the original catalog");
+    expect(snapshot(w.D) == dest, std::string(c.name) + ": validation never changes the destination (no .corrupt, no restore)");
+    (void)run;
+    fs::remove_all(w.base);
+  }
+  {
+    // a legitimately updated catalog (new entry, favorite, a game removed) is accepted: no byte identity with the original is required
+    const World w = make_world("p12_updated");
+    BusyGuard busy;
+    expect(run_migration(options_for(w), busy).ok(), "migration");
+    Catalog c(w.D / cat);
+    expect(c.load() == CatalogLoad::loaded, "destination catalog loads");
+    c.entries()[0].favorite = true;
+    LibraryEntry extra; extra.platform_id = "genesis"; extra.sha256 = sha64('d'); extra.detected_title = "Added later"; extra.rom_paths = {pstr(w.ext / "game.md")};
+    c.entries().push_back(extra);
+    c.entries().erase(c.entries().begin() + 1);
+    std::string e;
+    expect(c.save(&e), "update saved");
+    const CleanupPlan plan = plan_old_root_cleanup(w.bootstrap, none, true);
+    expect(plan.eligible && offers_old_catalog(plan, w), "an updated destination catalog still lets the old catalog be offered");
+    expect(run_old_root_cleanup(w.bootstrap, none, true, busy).ok() && !fs::exists(w.S / cat), "and removed");
+    fs::remove_all(w.base);
+  }
+  {
+    // a catalog entry that still references a managed file under the OLD root: that file is never offered
+    const World w = make_world("p12_oldref");
+    BusyGuard busy;
+    expect(run_migration(options_for(w), busy).ok(), "migration");
+    Catalog c(w.D / cat);
+    expect(c.load() == CatalogLoad::loaded, "loads");
+    c.entries()[1].rom_paths = {pstr(w.S / "library" / "roms" / "extracted.md")};
+    std::string e;
+    expect(c.save(&e), "saved");
+    const CleanupPlan plan = plan_old_root_cleanup(w.bootstrap, none, true);
+    bool offered_rom = false;
+    for (const auto &item : plan.items) offered_rom |= item.path.filename() == "extracted.md";
+    expect(!offered_rom, "a file the new catalog still references at the old root is kept");
+    fs::remove_all(w.base);
+  }
+}
+
+// P1-2 (TOCTOU): the catalog is corrupted between the run's own plan and the moment its original is removed.
+void test_cleanup_revalidates_before_delete() {
+  const World w = make_world("p12_toctou");
+  BusyGuard busy;
+  DataEnvironment none;
+  expect(run_migration(options_for(w), busy).ok(), "migration");
+  expect(offers_old_catalog(plan_old_root_cleanup(w.bootstrap, none, true), w), "the plan offers the catalog while the destination one is valid");
+  CleanupHooks hooks;
+  hooks.before_remove = [&](const fs::path &next) { if (next == w.S / "library" / "library.json") spit(w.D / "library" / "library.json", "{\"schema\":3,\"games\":[ truncated"); };
+  const CleanupResult r = run_old_root_cleanup(w.bootstrap, none, true, busy, nullptr, &hooks);
+  expect(fs::is_regular_file(w.S / "library" / "library.json"), "the original catalog survives a destination catalog corrupted after the plan");
+  expect(!r.ok() && !r.problems.empty(), "the run reports why it kept it");
+  expect(fs::exists(fs::path(w.bootstrap).concat(".journal")), "the record stays because something was kept");
+  fs::remove_all(w.base);
+}
+
+// P2: an environment override that lands in the old root blocks the cleanup in the core (plan and run), whatever the spelling.
+void test_cleanup_refuses_active_environment() {
+  const World w = make_world("p2_env");
+  BusyGuard busy;
+  expect(run_migration(options_for(w), busy).ok(), "migration");
+  const Snapshot old_before = snapshot(w.S);
+  const fs::path link = w.base / "alias";
+  std::error_code ec;
+  fs::create_directory_symlink(w.S, link, ec);
+  struct Case { const char *name; DataEnvironment env; const char *reason; };
+  std::vector<Case> cases;
+  const auto env = [&](const char *cache, const char *lib, const char *home) {
+    DataEnvironment e;
+    if (cache) e.cache_dir = cache;
+    if (lib) e.library_dir = lib;
+    if (home) e.home_dir = home;
+    return e;
+  };
+  const std::string lib = pstr(w.S / "library"), root = pstr(w.S), sub = pstr(w.S / "library" / "covers");
+  const std::string dotdot = pstr(w.S / "library" / ".." / "library"), slash = lib + "/", alias = pstr(link / "library"), other = pstr(w.base / "elsewhere");
+  cases.push_back({"library only", env(nullptr, lib.c_str(), nullptr), "library_active"});
+  cases.push_back({"library only, trailing slash", env(nullptr, slash.c_str(), nullptr), "library_active"});
+  cases.push_back({"library only, .. spelling", env(nullptr, dotdot.c_str(), nullptr), "library_active"});
+  cases.push_back({"library only, subfolder", env(nullptr, sub.c_str(), nullptr), "library_active"});
+  cases.push_back({"cache only", env(root.c_str(), nullptr, nullptr), "old_root_active"});
+  cases.push_back({"cache only, inside", env(lib.c_str(), nullptr, nullptr), "old_root_active"});
+  cases.push_back({"both", env(root.c_str(), lib.c_str(), nullptr), "old_root_active"});
+  cases.push_back({"home inside", env(nullptr, nullptr, lib.c_str()), "home_active"});
+  if (!ec) {
+    cases.push_back({"library via symlink alias", env(nullptr, alias.c_str(), nullptr), "library_active"});
+    cases.push_back({"cache via symlink alias", env(pstr(link).c_str(), nullptr, nullptr), "old_root_active"});
+  }
+  for (const Case &c : cases) {
+    const CleanupPlan plan = plan_old_root_cleanup(w.bootstrap, c.env, true);
+    expect(!plan.eligible && plan.reason == c.reason, std::string("plan refuses (") + c.name + "): " + plan.reason);
+    const CleanupResult r = run_old_root_cleanup(w.bootstrap, c.env, true, busy);
+    expect(r.refused && r.reason == c.reason && r.removed == 0 && snapshot(w.S) == old_before, std::string("run refuses and removes nothing (") + c.name + ")");
+    const PlainText t = cleanup_refusal_text(c.reason);
+    expect(!t.what.empty() && !t.next.empty() && t.what != "The cleanup was refused.", std::string("plain text for ") + c.reason);
+  }
+  expect(cleanup_refusal_text("library_active").what.find("SEGARECOMP_LIBRARY_DIR") != std::string::npos, "the library text names the variable");
+  {
+    // an unrelated override (the new root, or somewhere else entirely) does not block
+    const std::string dest_lib = pstr(w.D / "library");
+    for (const DataEnvironment &e : {env(nullptr, other.c_str(), nullptr), env(nullptr, dest_lib.c_str(), nullptr), env(other.c_str(), other.c_str(), other.c_str())})
+      expect(plan_old_root_cleanup(w.bootstrap, e, false).eligible, "an unrelated environment override does not block the cleanup");
+  }
+  {
+    // the override appears between the plan and the deletion: the run's own re-plan sees it and nothing is removed
+    DataEnvironment e = env(nullptr, lib.c_str(), nullptr);
+    CleanupHooks hooks;
+    hooks.before_remove = [](const fs::path &) {};
+    expect(run_old_root_cleanup(w.bootstrap, e, false, busy, nullptr, &hooks).refused && snapshot(w.S) == old_before, "run re-checks the environment itself");
+  }
+  fs::remove_all(w.base);
+}
+
+#if !defined(_WIN32)
+// Multi-process coordination: a REAL second process (fork) holds the marker. Child protocol: register, tell the parent, wait until the parent closes the pipe, exit.
+struct Child { pid_t pid = -1; int release_fd = -1; };
+Child spawn_instance(const fs::path &bootstrap) {
+  int ready[2], release[2];
+  if (pipe(ready) != 0 || pipe(release) != 0) return {};
+  const pid_t pid = fork();
+  if (pid == 0) {
+    close(ready[0]); close(release[1]);
+    {
+      InstanceMarker marker(bootstrap);
+      const char c = marker.registered() ? 'y' : 'n';
+      if (write(ready[1], &c, 1) != 1) _exit(3);
+      char sink;
+      while (read(release[0], &sink, 1) > 0) {}
+    }   // the marker is removed here
+    _exit(0);
+  }
+  close(ready[1]); close(release[0]);
+  char c = 'n';
+  if (pid < 0 || read(ready[0], &c, 1) != 1 || c != 'y') { close(ready[0]); close(release[1]); return {}; }
+  close(ready[0]);
+  return {pid, release[1]};
+}
+void end_instance(Child &c) {
+  if (c.pid < 0) return;
+  close(c.release_fd);
+  int status = 0;
+  waitpid(c.pid, &status, 0);
+  c = {};
+}
+
+void test_other_instance_blocks_move_and_cleanup() {
+  const World w = make_world("p11_instance");
+  const Snapshot old_before = snapshot(w.S), dest_before = snapshot(w.D);
+  BusyGuard busy;
+  {
+    // our own marker never blocks us
+    InstanceMarker own(w.bootstrap);
+    expect(own.registered() && !foreign_instance_running(w.bootstrap), "a process does not see its own marker");
+  }
+  expect(!fs::exists(fs::path(w.bootstrap).concat(".instances")), "the marker (and its folder) is removed on exit");
+  Child other = spawn_instance(w.bootstrap);
+  expect(other.pid > 0, "a second process registered");
+  std::string who;
+  expect(foreign_instance_running(w.bootstrap, &who) && who.find(std::to_string(other.pid)) != std::string::npos, "the marker of the second process is seen (" + who + ")");
+  const MigrationPlan plan = build_migration_plan(options_for(w));
+  expect(!plan.ok() && has_refusal(plan.refusals, MigrationRefusal::other_instance_running), "the plan carries the typed refusal");
+  const MigrationResult r = run_migration(options_for(w), busy);
+  expect(r.outcome == MigrationOutcome::refused && r.reason == "other_instance_running" && !busy.maintenance(), "the migration is refused with the typed reason");
+  expect(snapshot(w.S) == old_before && snapshot(w.D) == dest_before && !fs::exists(w.bootstrap) && !fs::exists(fs::path(w.bootstrap).concat(".journal")), "nothing was changed");
+  const PlainText t = refusal_text(MigrationRefusal::other_instance_running);
+  expect(t.what.find("Another Segarecomp") != std::string::npos && t.next.find("Close the other Segarecomp window") != std::string::npos, "plain text and next step");
+  end_instance(other);
+  expect(!foreign_instance_running(w.bootstrap), "after the second process exits its marker is gone");
+  expect(run_migration(options_for(w), busy).ok(), "the migration then succeeds");
+
+  // the same process blocks the old-root cleanup too
+  DataEnvironment none;
+  Child again = spawn_instance(w.bootstrap);
+  const Snapshot old_after_move = snapshot(w.S);
+  const CleanupPlan cp = plan_old_root_cleanup(w.bootstrap, none, true);
+  expect(!cp.eligible && cp.reason == "other_instance_running", "cleanup plan refuses while another instance runs");
+  const CleanupResult cr = run_old_root_cleanup(w.bootstrap, none, true, busy);
+  expect(cr.refused && cr.reason == "other_instance_running" && snapshot(w.S) == old_after_move, "cleanup run refuses and removes nothing");
+  end_instance(again);
+  expect(plan_old_root_cleanup(w.bootstrap, none, false).eligible, "cleanup is offered once it has exited");
+
+  // a stale marker (dead pid) never blocks, and is swept
+  const pid_t dead = fork();
+  if (dead == 0) _exit(0);
+  int status = 0;
+  waitpid(dead, &status, 0);
+  spit(fs::path(w.bootstrap).concat(".instances") / std::to_string(dead), "segarecomp-instance 1 stale\n");
+  spit(fs::path(w.bootstrap).concat(".instances") / "not-a-pid.txt", "ignored");
+  expect(!foreign_instance_running(w.bootstrap) && !fs::exists(fs::path(w.bootstrap).concat(".instances") / std::to_string(dead)), "a stale marker is ignored and removed");
+  fs::remove_all(w.base);
+}
+
+// A second process that appears DURING the move is caught by the pre-commit re-check (the guarantee is best effort, see InstanceMarker).
+void test_instance_started_during_move() {
+  const World w = make_world("p11_instance_during");
+  const Snapshot dest_before = snapshot(w.D);
+  Child late;
+  MigrationHooks hooks;
+  bool started = false;
+  hooks.after_copy = [&](const fs::path &) { if (!started) { started = true; late = spawn_instance(w.bootstrap); } };
+  BusyGuard busy;
+  const MigrationResult r = run_migration(options_for(w), busy, nullptr, {}, &hooks);
+  expect(r.outcome == MigrationOutcome::failed && r.reason == "other_instance_running", "an instance that started mid-move stops the commit (" + r.reason + ")");
+  expect(!fs::exists(w.bootstrap) && snapshot(w.D) == dest_before, "rolled back, bootstrap never written");
+  end_instance(late);
+  fs::remove_all(w.base);
+}
+#endif
 } // namespace
 
 int main() {
@@ -688,6 +1001,14 @@ int main() {
   test_failures_and_recovery();
   test_journal_damage();
   test_double_migration_chain();
+  test_source_changed_same_size_is_detected();
+  test_cleanup_validates_destination_catalog();
+  test_cleanup_revalidates_before_delete();
+  test_cleanup_refuses_active_environment();
+#if !defined(_WIN32)
+  test_other_instance_blocks_move_and_cleanup();
+  test_instance_started_during_move();
+#endif
   if (failures != 0) { std::cerr << failures << " failure(s)\n"; return 1; }
   std::cout << "data_location_test: all checks passed\n";
   return 0;

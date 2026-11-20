@@ -237,6 +237,11 @@ bool rollback_destination(const Journal &j, const std::vector<ManifestEntry> &en
   return clean;
 }
 
+// ---- cooperative instance markers (beside the bootstrap, outside every movable root) ----
+fs::path instances_dir(const fs::path &bootstrap) { return fs::path(bootstrap).concat(".instances"); }
+
+bool all_digits(const std::string &t) { return !t.empty() && t.size() < 19 && std::all_of(t.begin(), t.end(), [](char c) { return c >= '0' && c <= '9'; }); }
+
 struct TreeMeasure { std::uintmax_t bytes = 0; std::size_t entries = 0; bool has_symlink = false, truncated = false; };
 
 TreeMeasure measure_tree(const fs::path &root, const std::atomic<bool> *cancel = nullptr) {
@@ -433,6 +438,51 @@ std::string random_id() {
 
 } // namespace
 
+
+// ------------------------------------------------------------------------------------------------ instance markers
+
+InstanceMarker::InstanceMarker(const fs::path &bootstrap_file) {
+  std::error_code ec;
+  const fs::path dir = instances_dir(bootstrap_file);
+  if (!fs::exists(bootstrap_file.parent_path(), ec)) created_parent_ = bootstrap_file.parent_path();   // leave nothing behind that did not exist before
+  fs::create_directories(dir, ec);
+  if (ec) return;   // best effort: a launcher that cannot register simply is not seen by a move (the final digest re-check still applies)
+  pid_ = own_pid();
+  const fs::path file = dir / std::to_string(pid_);
+  std::ofstream out(file, std::ios::binary | std::ios::trunc);
+  out << "segarecomp-instance 1 " << pid_ << " " << now_seconds() << "\n";
+  out.flush();
+  if (out) file_ = file;
+}
+
+InstanceMarker::~InstanceMarker() {
+  if (file_.empty() || own_pid() != pid_) return;   // a forked child that inherited this object never removes its parent's marker
+  std::error_code ec;
+  fs::remove(file_, ec);
+  fs::remove(file_.parent_path(), ec);   // only when it is empty
+  if (!created_parent_.empty()) fs::remove(created_parent_, ec);
+}
+
+bool foreign_instance_running(const fs::path &bootstrap_file, std::string *who) {
+  std::error_code ec;
+  const fs::path dir = instances_dir(bootstrap_file);
+  if (!fs::is_directory(dir, ec)) return false;
+  bool found = false;
+  std::vector<fs::path> dead;
+  for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+    const std::string name = u8(it->path().filename());
+    if (!all_digits(name) || !it->is_regular_file(ec)) continue;
+    const long long pid = std::stoll(name);
+    if (pid == own_pid()) continue;
+    if (process_alive(pid)) {
+      if (!found && who) *who = "another Segarecomp process (id " + name + ") is running; its marker is " + u8(it->path());
+      found = true;
+    } else dead.push_back(it->path());
+  }
+  for (const auto &d : dead) fs::remove(d, ec);
+  return found;
+}
+
 // ------------------------------------------------------------------------------------------------ bootstrap
 
 Bootstrap read_bootstrap(const fs::path &file) {
@@ -505,6 +555,7 @@ const char *refusal_name(MigrationRefusal r) {
     case MigrationRefusal::destination_not_empty: return "destination_not_empty";
     case MigrationRefusal::destination_not_writable: return "destination_not_writable";
     case MigrationRefusal::insufficient_space: return "insufficient_space";
+    case MigrationRefusal::other_instance_running: return "other_instance_running";
   }
   return "unknown";
 }
@@ -545,18 +596,19 @@ PlainText refusal_text(MigrationRefusal r) {
     case MigrationRefusal::destination_not_empty: return {"The chosen folder already contains files, and Segarecomp never mixes its data into other files.", "Choose an empty folder, or a new folder inside it."};
     case MigrationRefusal::destination_not_writable: return {"Segarecomp cannot write to the chosen folder.", "Choose a folder you can write to."};
     case MigrationRefusal::insufficient_space: return {"There is not enough free space at the chosen location.", "Free up space there or choose another drive."};
+    case MigrationRefusal::other_instance_running: return {"Another Segarecomp window or command is running and could be using your data.", "Close the other Segarecomp window (or wait for its command to finish), then try again. Nothing was changed."};
   }
   return {"The move was refused.", "Nothing was changed. Choose another location."};
 }
 
 PlainText failure_text(const std::string &reason) {
-  for (int i = static_cast<int>(MigrationRefusal::env_override_cache); i <= static_cast<int>(MigrationRefusal::insufficient_space); ++i)
+  for (int i = static_cast<int>(MigrationRefusal::env_override_cache); i <= static_cast<int>(MigrationRefusal::other_instance_running); ++i)
     if (reason == refusal_name(static_cast<MigrationRefusal>(i))) return refusal_text(static_cast<MigrationRefusal>(i));
   if (reason == "busy") return {"A game, a preparation, an import or a cleanup is running.", "Wait for it to finish (or cancel it), then try again."};
   if (reason == "cancelled") return {"The move was cancelled.", "Nothing was changed; the current location stays in use. Start again whenever you like."};
   if (reason == "interrupted") return {"The move was interrupted.", "Restart Segarecomp: the unfinished move is rolled back at the next start. Nothing was switched."};
   if (reason == "copy_failed") return {"A file could not be copied to the new location.", "Check that the destination has room and is writable, then try again. The current location is unchanged."};
-  if (reason == "source_changed") return {"A file in your data changed while it was being moved.", "Try again when nothing else is using Segarecomp. The current location is unchanged."};
+  if (reason == "source_changed") return {"A file in your data changed while it was being moved (checked again by content just before switching).", "Close any other Segarecomp window, then try again when nothing else is using your data. The current location is unchanged."};
   if (reason == "rebase_failed") return {"The copied library could not be updated for the new location.", "Try again. The current location is unchanged."};
   if (reason == "verify_failed") return {"The copy did not match the original, so it was not used.", "Try again, or choose another drive. The current location is unchanged."};
   if (reason == "journal_write_failed") return {"Segarecomp could not write its move record next to the data location file.", "Check that the folder holding that file is writable, then try again. The current location is unchanged."};
@@ -567,9 +619,12 @@ PlainText failure_text(const std::string &reason) {
 PlainText cleanup_refusal_text(const std::string &reason) {
   if (reason == "not_completed") return {"There is no completed move to clean up.", "Nothing to do."};
   if (reason == "bootstrap_mismatch") return {"The data location has changed since the move, so the old folder is no longer offered for cleanup.", "Nothing was removed. Choose Keep it to forget the previous location."};
-  if (reason == "old_root_active") return {"The previous folder is still the one in use (an environment variable names it).", "Remove SEGARECOMP_CACHE_DIR, restart, and try again."};
+  if (reason == "old_root_active") return {"The previous folder is still the one in use (SEGARECOMP_CACHE_DIR names it or a folder inside or around it).", "Remove SEGARECOMP_CACHE_DIR, restart, and try again."};
   if (reason == "old_root_missing") return {"The previous folder is no longer there (or is a link).", "Nothing to remove. Choose Keep it to forget it."};
   if (reason == "busy") return {"A game, a preparation, an import or another cleanup is running.", "Wait for it to finish, then try again."};
+  if (reason == "library_active") return {"The library folder in use is set by the SEGARECOMP_LIBRARY_DIR environment variable and lies inside the previous folder, so removing anything there could delete your active library.", "Remove or change SEGARECOMP_LIBRARY_DIR, restart, and try again. Nothing was removed."};
+  if (reason == "home_active") return {"The Segarecomp home folder (SEGARECOMP_HOME) lies inside the previous folder, so it cannot be cleaned up.", "Remove or change SEGARECOMP_HOME, restart, and try again. Nothing was removed."};
+  if (reason == "other_instance_running") return {"Another Segarecomp window or command is running and could be using the previous folder.", "Close the other Segarecomp window, then try again. Nothing was removed."};
   if (reason == "restart_needed") return {"Segarecomp is still using the previous location until it is restarted.", "Restart Segarecomp first; the previous location can be cleaned up afterwards."};
   return {"The cleanup was refused.", "Nothing was removed."};
 }
@@ -600,6 +655,7 @@ MigrationPlan build_migration_plan(const MigrationOptions &o, const std::atomic<
       break;
     default: plan.refusals.push_back({MigrationRefusal::journal_present, "a migration journal exists that this release cannot read"});
   }
+  if (std::string who; foreign_instance_running(o.bootstrap_file, &who)) plan.refusals.push_back({MigrationRefusal::other_instance_running, who});
   if (!fs::is_directory(o.source, ec)) { plan.refusals.push_back({MigrationRefusal::source_missing, "no data folder at " + u8(o.source)}); return plan; }
   if (path_is_link(o.source)) { plan.refusals.push_back({MigrationRefusal::source_symlink, "the data folder is a link: " + u8(o.source)}); return plan; }
   scan_source(plan, o.max_files, cancel);
@@ -770,6 +826,10 @@ MigrationResult run_migration(const MigrationOptions &o, BusyGuard &busy, const 
     if (plan.items[i].rel == fs::path("library") / "library.json") catalog_index = i;
   }
   if (catalog_index < plan.items.size()) {
+    // The copy must still be exactly what was hashed before it was copied (the source catalog is only digested once; this closes the copy-time window for the file the rebase rewrites).
+    const scd::Digest copied = scd::hash_file(j.dest / plan.items[catalog_index].rel, hash_limit, nullptr, cancel);
+    if (!copied.ok) return abort_with(copied.error == "cancelled" ? MigrationOutcome::cancelled : MigrationOutcome::failed, copied.error == "cancelled" ? "cancelled" : "verify_failed", "cannot read back the copied catalog");
+    if (copied.size != plan.items[catalog_index].bytes || copied.sha256 != digests[catalog_index]) return abort_with(MigrationOutcome::failed, "source_changed", "the catalog changed while it was being copied");
     rebase = rebase_catalog(plan.source, j.dest, migrated);
     if (!rebase.ok) return abort_with(MigrationOutcome::failed, "rebase_failed", rebase.error);
   }
@@ -819,6 +879,27 @@ MigrationResult run_migration(const MigrationOptions &o, BusyGuard &busy, const 
   }
   for (std::size_t i = 0; i < manifest.size(); ++i) manifest[i].sha = digests[i];
   if (!write_manifest(o.bootstrap_file, j.id, manifest, &error)) return abort_with(MigrationOutcome::failed, "journal_write_failed", error);
+
+  // ---- final source re-verification (SEG-150 round A): every planned source file is hashed again and must equal the digest taken before it was copied (size alone cannot see a
+  // same-length rewrite); the durable file set must still be exactly the planned one. The catalog's destination copy is rebased by design, so its SOURCE is compared with the digest
+  // of what was copied and rebased, never with the rebased bytes. A writer that ignores the protocol and changes the source after this point is not detectable.
+  for (std::size_t i = 0; i < plan.items.size(); ++i) {
+    if (cancelled()) return abort_with(MigrationOutcome::cancelled, "cancelled", "cancelled during the final source check; the old data folder is unchanged");
+    report("verify", i, plan.items.size(), 0, 0, u8(plan.items[i].rel));
+    const scd::Digest again = scd::hash_file(plan.source / plan.items[i].rel, hash_limit, nullptr, cancel);
+    if (!again.ok && again.error == "cancelled") return abort_with(MigrationOutcome::cancelled, "cancelled", "cancelled during the final source check; the old data folder is unchanged");
+    if (!again.ok || again.size != plan.items[i].bytes || again.sha256 != digests[i]) return abort_with(MigrationOutcome::failed, "source_changed", u8(plan.items[i].rel) + " changed during the move");
+  }
+  {
+    MigrationPlan now;
+    now.source = plan.source;
+    scan_source(now, o.max_files, cancel);
+    bool same = now.refusals.empty() && now.items.size() == plan.items.size();
+    for (std::size_t i = 0; same && i < plan.items.size(); ++i) same = now.items[i].rel == plan.items[i].rel && now.items[i].bytes == plan.items[i].bytes;
+    if (cancelled()) return abort_with(MigrationOutcome::cancelled, "cancelled", "cancelled during the final source check; the old data folder is unchanged");
+    if (!same) return abort_with(MigrationOutcome::failed, "source_changed", "files were added, removed or replaced in the old data folder during the move");
+  }
+  if (std::string who; foreign_instance_running(o.bootstrap_file, &who)) return abort_with(MigrationOutcome::failed, "other_instance_running", who);
 
   // ---- commit: the atomic bootstrap write is the one irreversible step; cancel is honoured only before it ----
   if (cancelled()) return abort_with(MigrationOutcome::cancelled, "cancelled", "cancelled before the switch; the old data folder is unchanged");
@@ -922,6 +1003,69 @@ bool physically_inside(const fs::path &root, const fs::path &p) {
   return is_within(a, b);
 }
 
+// Is `p` the same place as `root` or lies inside it, after symlink resolution, ".." and trailing separators are normalized?
+bool place_in_or_same(const fs::path &p, const fs::path &root) {
+  if (p.empty() || root.empty()) return false;
+  std::error_code ec;
+  const auto canon = [&](const fs::path &p) { fs::path c = fs::weakly_canonical(p, ec).lexically_normal(); if (!c.has_filename() && c != c.root_path()) c = c.parent_path(); return c; };
+  const fs::path cp = canon(p), cr = canon(root);
+  return cp == cr || is_within(cr, cp) || same_place(p, root);
+}
+
+// The destination catalog must be a catalog the regular loader reads unchanged. Loading happens on a temporary COPY (Catalog::load() renames a damaged file aside and may restore the
+// backup; the destination must not be touched by a check). Anything but CatalogLoad::loaded, a record the loader would drop, or a managed reference without its file is a "no".
+struct CatalogCheck { bool ok = false; std::string why; std::set<fs::path> old_refs; };
+
+CatalogCheck check_destination_catalog(const fs::path &dest_root, const fs::path &old_root) {
+  CatalogCheck r;
+  std::error_code ec;
+  const fs::path file = dest_root / "library" / "library.json";
+  if (path_is_link(file) || !fs::is_regular_file(file, ec)) { r.why = "the new catalog is missing or not a regular file"; return r; }
+  std::string text;
+  if (!read_text(file, text, 64U << 20U) || text.empty()) { r.why = "the new catalog is empty or unreadable"; return r; }
+  const fs::path tmp = fs::temp_directory_path(ec) / ("segarecomp-catalog-check-" + random_id());
+  fs::create_directories(tmp, ec);
+  struct Cleanup { fs::path p; ~Cleanup() { std::error_code e; fs::remove_all(p, e); } } cleanup{tmp};
+  if (ec) { r.why = "cannot examine the new catalog"; return r; }
+  {
+    std::ofstream out(tmp / "library.json", std::ios::binary | std::ios::trunc);
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!out.flush()) { r.why = "cannot examine the new catalog"; return r; }
+  }
+  Catalog catalog(tmp / "library.json");
+  if (catalog.load() != CatalogLoad::loaded) { r.why = "the new catalog is not a readable library catalog"; return r; }
+  const auto raw = json::parse(text);
+  const json::Value *games = raw ? raw->get("games") : nullptr;
+  if (games == nullptr || !games->is_array() || games->items.size() != catalog.entries().size()) { r.why = "the new catalog has records that cannot be read"; return r; }
+  const fs::path lib = dest_root / "library";
+  const auto classify = [&](const std::string &text_path, std::string &problem) {
+    const fs::path p = from_u8(text_path);
+    if (p.empty() || !p.is_absolute()) return;
+    const fs::path canon_p = fs::weakly_canonical(p, ec);
+    if (place_in_or_same(p, old_root)) r.old_refs.insert(canon_p);
+    if (place_in_or_same(p, lib) && !fs::is_regular_file(p, ec) && problem.empty()) problem = "a library file it names is missing: " + u8(p.filename());
+  };
+  std::string problem;
+  for (const LibraryEntry &e : catalog.entries()) {
+    for (const auto &path : e.rom_paths) classify(path, problem);
+    if (e.platform_id == "sega-cd") { classify(e.sega_cd.bios_path, problem); classify(e.sega_cd.cue_path, problem); classify(e.sega_cd.program.path, problem); }
+    if (!e.cover.empty() && !fs::is_regular_file(lib / "covers" / from_u8(e.cover), ec) && problem.empty()) problem = "a cover it names is missing: " + e.cover;
+    for (const auto &patch : e.patches)
+      if (!fs::is_regular_file(lib / "patches" / from_u8(patch.identity + ".segapatch"), ec) && problem.empty()) problem = "an installed patch package it names is missing";
+  }
+  if (!problem.empty()) { r.why = problem; return r; }
+  r.ok = true;
+  return r;
+}
+
+// "" when no environment override touches the old root; otherwise the typed cleanup reason.
+std::string active_environment_reason(const DataEnvironment &env, const fs::path &old_root) {
+  if (env.cache_dir && place_in_or_same(from_u8(*env.cache_dir), old_root)) return "old_root_active";
+  if (env.library_dir && place_in_or_same(from_u8(*env.library_dir), old_root)) return "library_active";
+  if (env.home_dir && place_in_or_same(from_u8(*env.home_dir), old_root)) return "home_active";
+  return "";
+}
+
 void add_cleanup_dir(CleanupPlan &plan, const fs::path &dir, const std::string &area) {
   const TreeMeasure m = measure_tree(dir);
   if (m.has_symlink || m.truncated) { plan.kept.push_back(u8(dir.filename()) + ": contains a link or is too large to examine; kept"); return; }
@@ -938,8 +1082,9 @@ CleanupPlan plan_old_root_cleanup(const fs::path &bootstrap_file, const DataEnvi
   const Bootstrap boot = read_bootstrap(bootstrap_file);
   if (boot.state != BootstrapState::valid || !(boot.root == j.dest || same_place(boot.root, j.dest))) { plan.reason = "bootstrap_mismatch"; return plan; }
   std::error_code ec;
-  if (env.cache_dir && (same_place(from_u8(*env.cache_dir), j.source) || from_u8(*env.cache_dir) == j.source)) { plan.reason = "old_root_active"; return plan; }
+  if (const std::string active = active_environment_reason(env, j.source); !active.empty()) { plan.reason = active; return plan; }
   if (same_place(j.source, j.dest) || !fs::is_directory(j.source, ec) || path_is_link(j.source)) { plan.reason = "old_root_missing"; return plan; }
+  if (foreign_instance_running(bootstrap_file)) { plan.reason = "other_instance_running"; return plan; }
   const fs::path &S = j.source;
   // Regenerable items: the same shapes storage.cpp recognizes. Nothing else is ever a candidate.
   if (fs::is_directory(S / "games", ec) && !path_is_link(S / "games"))
@@ -956,17 +1101,20 @@ CleanupPlan plan_old_root_cleanup(const fs::path &bootstrap_file, const DataEnvi
     std::vector<ManifestEntry> manifest;
     if (!read_manifest(bootstrap_file, j.id, manifest)) { plan.kept.push_back("the manifest is unreadable; no migrated copy is offered"); }
     else {
+      const CatalogCheck catalog_check = check_destination_catalog(j.dest, S);
       for (const auto &e : manifest) {
         const fs::path old_file = S / e.rel, new_file = j.dest / e.rel;
         const auto note = [&](const char *why) { plan.kept.push_back(u8(e.rel) + ": " + why); };
         if (e.sha == "-") { note("not verified at migration time; kept"); continue; }
+        if (e.rel == fs::path("library") / "library.json" && !catalog_check.ok) { plan.kept.push_back(u8(e.rel) + ": " + catalog_check.why + "; the original catalog is kept"); continue; }
+        if (catalog_check.old_refs.count(fs::weakly_canonical(old_file, ec)) != 0) { note("the new catalog still refers to this file; kept"); continue; }
         if (path_is_link(old_file) || !fs::is_regular_file(old_file, ec)) { note("no longer a regular file; kept"); continue; }
         if (!fs::is_regular_file(new_file, ec) || path_is_link(new_file)) { note("no copy at the new location; kept"); continue; }
         const scd::Digest d = scd::hash_file(old_file, hash_limit);
         if (!d.ok || d.size != e.size || d.sha256 != e.sha) { note("changed since the move; kept"); continue; }
-        // The new copy must still match what was verified at the move (the catalog is the one file the move rewrites by design: it only has to exist and be non-empty).
-        if (e.rel == fs::path("library") / "library.json") { if (fs::file_size(new_file, ec) == 0 || ec) { note("the new copy is empty or unreadable; kept"); continue; } }
-        else { const scd::Digest nd = scd::hash_file(new_file, hash_limit); if (!nd.ok || nd.size != e.size || nd.sha256 != e.sha) { note("the new copy differs from what was verified at the move; kept"); continue; } }
+        // The new copy must still match what was verified at the move. The catalog is the one file the move rewrites by design (and the user may have updated it since): it was
+        // validated above as a loadable catalog with its managed references instead of being compared byte for byte.
+        if (e.rel != fs::path("library") / "library.json") { const scd::Digest nd = scd::hash_file(new_file, hash_limit); if (!nd.ok || nd.size != e.size || nd.sha256 != e.sha) { note("the new copy differs from what was verified at the move; kept"); continue; } }
         plan.items.push_back({old_file, e.size, false, CleanupKind::migrated_copy, "migrated_copy"});
         plan.bytes += e.size;
       }
@@ -976,7 +1124,7 @@ CleanupPlan plan_old_root_cleanup(const fs::path &bootstrap_file, const DataEnvi
   return plan;
 }
 
-CleanupResult run_old_root_cleanup(const fs::path &bootstrap_file, const DataEnvironment &env, bool include_copies, BusyGuard &busy, const std::atomic<bool> *cancel) {
+CleanupResult run_old_root_cleanup(const fs::path &bootstrap_file, const DataEnvironment &env, bool include_copies, BusyGuard &busy, const std::atomic<bool> *cancel, const CleanupHooks *hooks) {
   CleanupResult res;
   if (!busy.try_begin_maintenance()) { res.refused = true; res.reason = "busy"; return res; }
   struct Release { BusyGuard &b; ~Release() { b.end_maintenance(); } } release{busy};
@@ -987,9 +1135,16 @@ CleanupResult run_old_root_cleanup(const fs::path &bootstrap_file, const DataEnv
   const fs::path &S = j.source;
   std::error_code ec;
   std::set<fs::path> parents;
+  const fs::path catalog_file = S / "library" / "library.json";
   for (const auto &item : plan.items) {
     if (cancel != nullptr && cancel->load()) { res.problems.push_back("cancelled; the remaining items were not removed"); break; }
     const std::string shown = u8(item.path);
+    if (hooks != nullptr && hooks->before_remove) hooks->before_remove(item.path);
+    if (const std::string active = active_environment_reason(env, S); !active.empty()) { res.refused = true; res.reason = active; break; }   // re-checked at the moment of deletion
+    if (item.kind == CleanupKind::migrated_copy && item.path == catalog_file) {   // the destination catalog is validated again right before the original is removed
+      const CatalogCheck again = check_destination_catalog(j.dest, S);
+      if (!again.ok) { res.problems.push_back("kept the original catalog: " + again.why); continue; }
+    }
     if (!is_within(S, item.path) || !physically_inside(S, item.path) || path_is_link(item.path)) { res.problems.push_back("outside the old folder or a link, skipped: " + shown); continue; }
     if (item.directory) {
       if (!fs::is_directory(item.path, ec) || measure_tree(item.path).has_symlink) { res.problems.push_back("changed or contains a link, skipped: " + shown); continue; }
@@ -1007,7 +1162,7 @@ CleanupResult run_old_root_cleanup(const fs::path &bootstrap_file, const DataEnv
   std::vector<fs::path> dirs(parents.begin(), parents.end());
   std::sort(dirs.begin(), dirs.end(), [](const fs::path &a, const fs::path &b) { return std::distance(a.begin(), a.end()) > std::distance(b.begin(), b.end()); });
   for (const auto &d : dirs) fs::remove(d, ec);   // empty directories only
-  if (include_copies && res.problems.empty() && plan.kept.empty()) {
+  if (include_copies && !res.refused && res.problems.empty() && plan.kept.empty()) {
     fs::remove(S / "library", ec);
     fs::remove(S, ec);
     remove_journal(bootstrap_file);

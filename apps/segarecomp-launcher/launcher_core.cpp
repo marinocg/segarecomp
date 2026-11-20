@@ -155,6 +155,7 @@ DataEnvironment data_environment() {
   DataEnvironment env;
   if (const char *cache = SDL_getenv("SEGARECOMP_CACHE_DIR")) env.cache_dir = cache;
   if (const char *library = SDL_getenv("SEGARECOMP_LIBRARY_DIR")) env.library_dir = library;
+  if (const char *home = SDL_getenv("SEGARECOMP_HOME")) env.home_dir = home;
   return env;
 }
 
@@ -165,6 +166,7 @@ const Startup &startup_state() {
   static const Startup state = [] {
     Startup s;
     const fs::path file = data_bootstrap_file();
+    static const InstanceMarker marker(file);   // every process that resolves the data roots (window or --import/--build/--sega-cd) is visible to a move or an old-root cleanup
     s.recovery = recover_pending_migration(file);
     s.bootstrap = read_bootstrap(file);
     return s;

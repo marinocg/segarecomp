@@ -23,6 +23,7 @@ namespace launcher {
 struct DataEnvironment {
   std::optional<std::string> cache_dir;    // SEGARECOMP_CACHE_DIR (set, even empty, means overridden)
   std::optional<std::string> library_dir;  // SEGARECOMP_LIBRARY_DIR
+  std::optional<std::string> home_dir;     // SEGARECOMP_HOME (only the old-root cleanup looks at it: a home inside the old root must never be deleted)
 };
 
 enum class BootstrapState { absent, valid, damaged, newer_schema };
@@ -51,7 +52,8 @@ struct ResolvedRoots {
 enum class MigrationRefusal {
   env_override_cache, env_override_library, bootstrap_unusable, saved_location_unavailable, journal_present, previous_migration_pending_cleanup, source_missing, source_symlink,
   source_unsupported_entry, source_unsafe_name, source_too_large, destination_not_absolute, destination_unsafe, destination_same, destination_inside_source,
-  source_inside_destination, destination_symlink, destination_not_directory, destination_not_empty, destination_not_writable, insufficient_space
+  source_inside_destination, destination_symlink, destination_not_directory, destination_not_empty, destination_not_writable, insufficient_space,
+  other_instance_running   // SEG-150 round A: another Segarecomp process has registered itself against this data location (see InstanceMarker)
 };
 [[nodiscard]] const char *refusal_name(MigrationRefusal refusal);   // the stable lower-case code
 // SEG-150-T009: the plain-language explanation of a typed reason and what the user can do next (the Settings screens show both; every code has one, a test enumerates them).
@@ -61,6 +63,25 @@ struct PlainText { std::string what, next; };
 [[nodiscard]] PlainText cleanup_refusal_text(const std::string &reason);   // a CleanupPlan::reason / CleanupResult::reason
 
 struct Refused { MigrationRefusal code; std::string detail; };
+
+// ---- cooperative multi-process marker (SEG-150 corrective round A) ----
+// Every Segarecomp process that resolves the data roots registers `<bootstrap>.instances/<pid>` (removed at exit; a marker whose pid is no longer alive is ignored and
+// deleted). A move or an old-root cleanup REFUSES while a live marker of ANOTHER process exists. Guarantee: two processes that both follow this protocol never move or
+// clean the data at the same time as the other is running. It does NOT stop an instance started after the check, a third-party writer, or a pid that the OS reused for an
+// unrelated program (the marker then names the file to delete); a change made by such a writer during a move is detected only by the final source digest re-check.
+class InstanceMarker {
+public:
+  explicit InstanceMarker(const std::filesystem::path &bootstrap_file);
+  ~InstanceMarker();
+  InstanceMarker(const InstanceMarker &) = delete;
+  InstanceMarker &operator=(const InstanceMarker &) = delete;
+  [[nodiscard]] bool registered() const { return !file_.empty(); }
+private:
+  std::filesystem::path file_, created_parent_;
+  long long pid_ = 0;
+};
+// True when a live marker of another process exists; `who` (optional) receives a one-line description naming the marker file. Dead markers are removed.
+[[nodiscard]] bool foreign_instance_running(const std::filesystem::path &bootstrap_file, std::string *who = nullptr);
 
 enum class ItemClass { durable, regenerable, left_behind };
 // The data-class areas (one stable name each, the table in the ADR): catalog, settings, bios_profiles, covers, managed_roms, mods, saves, recordings, sega_cd_data,
@@ -164,14 +185,16 @@ struct CleanupItem {
 };
 struct CleanupPlan {
   bool eligible = false;
-  std::string reason;                           // when not eligible: not_completed | bootstrap_mismatch | old_root_active | old_root_missing
+  std::string reason;                           // when not eligible: not_completed | bootstrap_mismatch | old_root_active | library_active | home_active | other_instance_running | old_root_missing
   std::vector<CleanupItem> items;
   std::uintmax_t bytes = 0;
   std::vector<std::string> kept;                // what stays and why (changed since migration, symlink inside, unknown, ...)
 };
 // Lists what removing the old root's managed items would delete. Regenerable items (build folders, zig-cache, Sega CD object cache, cover downloads) are always
 // listed; `include_migrated_copies` adds the durable files whose verified copy exists at the new root unchanged. Saves, recordings, ROMs and approvals are never listed
-// otherwise. Anything else in the old root (unknown files, the catalog backup) is kept.
+// otherwise. Anything else in the old root (unknown files, the catalog backup) is kept. The old catalog is offered only while the destination catalog loads through the
+// regular Catalog loader (on a temporary copy: nothing at the destination is touched) and its managed references exist; a file the new catalog still references at the old root is kept.
+// Never offered while an environment override (cache, library or home) equals or lies inside the old root (symlink aliases, .. and trailing separators resolved) (old_root_active | library_active | home_active).
 [[nodiscard]] CleanupPlan plan_old_root_cleanup(const std::filesystem::path &bootstrap_file, const DataEnvironment &env, bool include_migrated_copies);
 struct CleanupResult {
   std::size_t removed = 0;
@@ -181,8 +204,11 @@ struct CleanupResult {
   std::string reason;
   bool ok() const { return !refused && problems.empty(); }
 };
-// Re-plans, re-validates every item (lexically and physically inside the old root, never a symlink) and removes only those. Takes BusyGuard maintenance.
+// Test seam: runs just before each item is removed (after the run's own re-plan), so a test can change the world between plan and delete.
+struct CleanupHooks { std::function<void(const std::filesystem::path &next)> before_remove; };
+// Re-plans, re-validates every item (lexically and physically inside the old root, never a symlink) and removes only those; the destination catalog is validated again
+// immediately before the old catalog is removed. Takes BusyGuard maintenance.
 [[nodiscard]] CleanupResult run_old_root_cleanup(const std::filesystem::path &bootstrap_file, const DataEnvironment &env, bool include_migrated_copies, BusyGuard &busy,
-                                                 const std::atomic<bool> *cancel = nullptr);
+                                                 const std::atomic<bool> *cancel = nullptr, const CleanupHooks *hooks = nullptr);
 
 } // namespace launcher
