@@ -336,6 +336,8 @@ private:
   // SEG-069-T004: a sheet (modal or picker) returns keyboard/gamepad focus to the control that opened it.
   struct FocusMemory { ImGuiID id = 0; ImGuiWindow *window = nullptr; ImRect rel; bool armed = false; };
   FocusMemory modal_return_;
+  bool modal_return_stale_ = false;  // the sheet was raised in the same breath as a page change: on close focus restarts on the new page's entry
+  int page_changed_frame_ = -100;   // the frame of the last page change (a sheet raised in the same breath has no control of the new page to return to)
   void remember_focus_for_sheet(bool sheet_open);
   bool modal_focus_done_ = false;  // the first-run sheet puts keyboard/gamepad focus on its first choice once, when it opens
   // SEG-069-T002: the mode the game will really build as, for display: the stored intent, except a Master System game whose Optimized the product has

@@ -108,7 +108,7 @@ Virtual sprites (ADR 0303, 0306, 0307) do not change this. The viewer now presen
 
 ### Installing a verified patch
 
-See [From install to a patched game](../../README.md#install-a-verified-patch-main-only-genesis) in the README for the short walk-through.
+See [From install to a patched game](../../README.md#install-a-verified-mod-or-patch-main-only-genesis) in the README for the short walk-through.
 
 ## 4. Writing your own provider
 

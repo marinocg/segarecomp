@@ -201,7 +201,7 @@ void App::draw_file_picker(float w, float h) {
   const bool cancel_button = button(ctx_, "pk_cancel", "Cancel", ImVec2(bw, bh), Style::secondary);
   ImGui::SetCursorScreenPos(ImVec2(lx + 3.0F * (bw + ctx_.u(6.0F)), by));
   const bool folder_pick = picker_.purpose == "data_folder";
-  const std::string ok_label = folder_pick ? "Use this folder" : (picker_.multi ? "Import (" + std::to_string(picker_.chosen.size()) + ")" : "Select");
+  const std::string ok_label = folder_pick ? "Use this folder" : (picker_.multi ? "Review (" + std::to_string(picker_.chosen.size()) + ")" : "Select");
   const bool ok_button = button(ctx_, "pk_ok", ok_label.c_str(), ImVec2(bw, bh), Style::primary, folder_pick ? !at_roots : !picker_.chosen.empty());
   draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::dim, ImVec2(lx, b.y - ctx_.u(8.0F) - ctx_.u(11.0F)), picker_.purpose == "data_folder" ? "A: open a folder     B: up / back     LB / RB: page" : "A: open / tick     B: up / back     LB / RB: page");
   const bool back = ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);

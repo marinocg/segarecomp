@@ -7,7 +7,7 @@ Sega CD keeps its own recorder (see [sega-cd-play.md](sega-cd-play.md)); Master 
 
 ## Using it
 
-**Launcher window (Genesis games).** Open the game's Details page: *Input recording* has the switch "Record my next play session from power-on when I press Play", the list of this game's
+**Launcher window (Genesis games).** Open the game's page and its **Game settings** tab: *Input recording* has the switch "Record my next play session from power-on when I press Play", the list of this game's
 recordings (newest six) with a **Replay** button each, and "Replay even if the game version differs". In the game, **Esc > Stop recording** ends a recording (quitting does too).
 Recordings live under the library folder, `sessions/genesis/<first 16 digits of the image digest>/session-<time>.rec`.
 

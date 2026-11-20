@@ -1959,6 +1959,10 @@ set_property(TEST packaging_trim_zig_test APPEND PROPERTY LABELS full)
 add_test(NAME packaging_smoke_hermeticity_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/packaging_smoke_hermeticity_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST packaging_smoke_hermeticity_test APPEND PROPERTY LABELS full fast)
+# SEG-150-T010: the launcher asset manifest, the shipped asset tree, the font licences and the install rules agree.
+add_test(NAME packaging_launcher_assets_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/packaging_launcher_assets_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST packaging_launcher_assets_test APPEND PROPERTY LABELS full fast)
 add_test(NAME packaging_sdl_check_test COMMAND ${Python3_EXECUTABLE} -I
   ${CMAKE_CURRENT_SOURCE_DIR}/packaging_sdl_check_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST packaging_sdl_check_test APPEND PROPERTY LABELS full fast)

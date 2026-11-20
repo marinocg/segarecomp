@@ -1,7 +1,7 @@
 # Launcher: operating it with a gamepad only (SEG-069-T004)
 
-The launcher's ordinary journeys can be completed with an SDL gamepad and no mouse or keyboard: first-run setup, importing a ROM, browsing the library, opening a game's
-page, building / cancelling / queueing builds, playing an earlier build, Storage cleanup and Settings. This page records what is automated and how to walk the
+The launcher's ordinary journeys can be completed with an SDL gamepad and no mouse or keyboard: the welcome page and first-run question, Add game (choose, review, Add & prepare / Add only), browsing the library, opening a game's
+page and its tabs, preparing / cancelling / queueing, playing an earlier version, mods (approve or decline), Sega CD BIOS choice, Settings and Storage & Data (cleanup, Change data location with Cancel move). This page records what is automated and how to walk the
 same journeys by hand on a real controller (CI cannot drive a real device or an OS-specific dialog).
 
 ## Button conventions
@@ -10,7 +10,7 @@ same journeys by hand on a real controller (CI cannot drive a real device or an 
 | --- | --- |
 | D-pad / left stick | move focus (spatial); in the sidebar Up/Down walk Library, Settings and the primary Add game button |
 | **A** (South) | activate the focused control (open a card, press a button, tick a row, enter a folder) |
-| **B** (East) | back: closes a sheet, leaves Details/Settings/Add game for the Library (Storage returns to Settings first), goes up one folder in the picker; on the Library page it moves focus to the sidebar |
+| **B** (East) | back: closes a sheet, leaves the game page/Settings/Add game for the Library (the cleanup page and Change data location return to Settings first), goes up one folder in the picker; on the Library page it moves focus to the sidebar |
 | **Y** (North) | the focused game's menu (Details, Play, Build, Cancel build, Remove from build queue, favorite, covers, storage, remove) |
 | **LB / RB** | previous / next page in the built-in file picker |
 | D-pad **Right** in the sidebar | enters the page (the first game card on the Library; the first control elsewhere). **Left** at a page's left edge returns to the sidebar |
@@ -41,6 +41,10 @@ picker is also used when no system file chooser exists, for example under WSL). 
   section drop-down, a long tab scrolled to its last control, restore-defaults confirmed/cancelled with focus returning to the control); Storage cleanup confirm/cancel;
   hot-plug and the hint bar. `pad_seek <control> <direction>` presses real virtual-gamepad D-pad buttons until the control has focus, which is how reachability is asserted.
 * `launcher_gui_navigation_test.py`, `launcher_input_diagnostics_test.py`: keyboard, mouse overlay buttons and the input diagnostics are unchanged.
+* Added by the UX overhaul (SEG-150): `launcher_import_review_gui_test.py` (Add game review: Add only / Add & prepare, a batch with an invalid, a duplicate and a needs-choice item, decline, cancel of a queued and a running preparation),
+  `launcher_details_tabs_gui_test.py` (the game page's tabs), `launcher_mods_gui_test.py` (a controller declines and approves a native mod, Vanilla unchanged), `launcher_sega_cd_review_gui_test.py` (BIOS choice in the review),
+  `launcher_settings_groups_gui_test.py` (the four Settings groups, long groups scrolled to their last control) and `launcher_data_location_gui_test.py` (the data-location page by gamepad at both sizes, Cancel move leaves the data untouched).
+  Physical controllers are not covered (SDL virtual joysticks only).
 
 ### What CI runs
 
@@ -53,11 +57,11 @@ with the `full`/`fast` labels and run locally: `ctest --test-dir build/sdl3 -j 4
 
 1. Start with a fresh profile (`SEGARECOMP_LIBRARY_DIR` / `SEGARECOMP_CACHE_DIR` pointing at empty folders) and a controller connected; do not touch the mouse.
 2. First-run sheet: D-pad between the two choices, **A** to confirm; relaunch: it does not return. Repeat with **B** and quit without importing or changing anything: it is asked again next start (once anything has been saved the profile is no longer new, so it is not asked again).
-3. Library is empty: D-pad to **Browse for ROMs...**, **A**. In the picker choose a location, open the folder holding your own legally owned ROMs, tick two files with **A**,
-   move to **Import (2)**, **A**. Try **B** repeatedly: it goes up, to the locations, then closes without importing.
-4. Open a game with **A**. **Right** from the sidebar enters the page; move to **Build**, **A**; focus lands on **Cancel build**; **A** cancels. Build again, go **B** back, open a
-   second game, **Build**: it is queued and focus lands on **Unqueue**.
+3. Fresh profile: the welcome page. D-pad to **Add game**, **A**. In the built-in picker choose a location, open the folder holding your own legally owned game files, tick two files with **A**,
+   move to **Review (2)**, **A**: the Add game review lists both. Choose **Add only (2)** (or **Add & prepare (2)**) with **A**. Try **B** in the picker repeatedly: it goes up, to the locations, then closes without reviewing anything.
+4. Open a game with **A**. **Right** from the sidebar enters the page; move to **Prepare** (or **Prepare & play**), **A**; focus lands on **Cancel**; **A** cancels. Prepare again, go **B** back, open a
+   second game, **Prepare**: it is queued and focus lands on **Unqueue**. On the game page, the tabs (Overview, Mods, Game settings, Advanced) are reached with D-pad Left/Right on the tab strip.
 5. **Y** on a card: favorite it; **Y** again: Details; **B** returns to the same card.
-6. Settings: walk the sections, scroll a long one with the D-pad to its last control, open **Restore launcher defaults**, **B** to cancel.
-7. Storage: tick a game, **Remove build intermediates**, **B** to cancel, repeat and confirm.
+6. Settings: walk the four groups (General, Appearance & Controls, Storage & Data, Advanced), scroll a long one with the D-pad to its last control, open **Restore launcher defaults**, **B** to cancel.
+7. Storage & Data: **Review usage and clean up**, tick a game, **Remove build intermediates**, **B** to cancel, repeat and confirm; **Change data location**: choose a folder with the picker, read the plan, **Cancel**/**B** leaves everything as it was.
 8. Unplug and replug the controller while on a page: the window stays usable with the keyboard and the pad works again after reconnecting.

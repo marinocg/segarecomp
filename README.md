@@ -126,18 +126,18 @@ Check the downloaded archive against `SHA256SUMS.txt`.
 ### From a game image you own to playing
 
 1. Extract the archive and open **Segarecomp** (`Segarecomp.exe`, `Segarecomp.app` or `./Segarecomp`, depending on your platform).
-2. Drop your ROM into the window or select **Browse...** (Genesis `.md/.bin/.gen/.smd` and Master System `.sms`, or a `.zip` holding exactly one). For Sega CD use **Add game > Add Sega CD game...** with your BIOS image and the disc's CUE file.
-3. Open the game and choose the build settings below, then **Recompile & Play** (for Sega CD, **Build**, then **Play**). The first build can take several minutes (a Sega CD disc, much longer); cached builds start immediately.
+2. Choose **Add game**: drop your game files into the window or select **Choose files...** (Genesis `.md/.bin/.gen/.smd` and Master System `.sms`, or a `.zip` holding exactly one; a Sega CD disc is added from its `.cue` file, and the review asks for your own BIOS image). Segarecomp inspects every file first and shows a **review** (valid, needs a choice, already in your library, cannot be added); nothing is added until you decide.
+3. Choose **Add & prepare** (or **Add only** and prepare later from the game's page). Preparing builds the native program on this computer, one game at a time, and can be cancelled; the first build can take several minutes (a Sega CD disc, much longer) and an unchanged game starts immediately. Then **Play** (or **Prepare & play** on a game that was never prepared). Per-game choices (build mode, region, Master System mapper, mods) are on the game's page under **Game settings** and **Mods**.
 4. Play. **Esc** (or the gamepad's Back button) opens the pause menu: Save State, Load State, Rewind, Quick Settings, Video & Display, Controls, Audio, System. Closing the window returns to the launcher.
    On Genesis your game's own saves (SRAM / EEPROM) are kept automatically when you quit; on Genesis, Master System and Sega CD you can save and load whole-machine states (**F5** / **F8** for the quick slot, five numbered slots in the menu) and
    **rewind** (**F7**) through the last minute of play (about 43 seconds on Sega CD): see [docs/product/save-states.md](docs/product/save-states.md).
-   Master System games need their cartridge mapper declared on the game's page.
+   Master System games need their cartridge mapper declared on the game's page (**Game settings**).
 
-### Install a verified patch **(main only; Genesis)**
+### Install a verified mod or patch **(main only; Genesis)**
 
-1. Open the game's **Details** page and find the **Patches / Variants** card, then **Install patch...** and choose the `.segapatch` file.
-2. The package is verified against the game's exact image; a package for another game or revision is refused. For a native (schema 2) patch, read the sheet: author, license, source digest and "contains executable source, not sandboxed". **Approve only a patch you trust.**
-3. Select **Patched**, then **Build patched version**, then **Play Patched**. **Vanilla** stays untouched and playable. **Remove patch** returns to Vanilla and keeps your saves, recordings and settings.
+1. Open the game's page, choose the **Mods** tab and **Install mod...**, then pick the `.segapatch` file.
+2. The package is verified against the game's exact image before anything is installed; a package for another game or revision is refused. For a native (schema 2 or 3) mod, read the sheet: author, license, source digest and "contains executable source, not sandboxed"; **Cancel** installs and approves nothing.
+3. Choose **Use this mod**, then **Prepare selected mod**, then **Play modded game**. **No mod (original game)** stays untouched and playable (**Use original game**). **Remove** returns to the original and keeps your saves, recordings and settings.
 
 **Recommended first try (based on maintainer testing):**
 
@@ -173,7 +173,7 @@ An image without compatibility metadata may be labelled **Compatibility unknown*
   menu's **Controls** page (Player 1 and Player 2, fresh-press capture, duplicate-owner warning, restore defaults), and the menu key is rebindable (Esc always works). Genesis is a **three-button** pad; there is no
   six-button X/Y/Z/Mode input. Other in-game keys: **F11** fullscreen, **F12** saves a PNG of the **game picture** (source pixels, not the effects or the widescreen extension) to `Pictures/Segarecomp`,
   **F5** / **F8** quick save / quick load and **F7** rewind (Genesis, Master System, Sega CD; the Sega CD frame step is **F9**), **F3** cycles the performance overlay **(main only)**. Audio volume and mute are on the Audio page; the output device follows the OS. Controller trouble: Settings > Input Diagnostics.
-- **Recording and replay:** Sega CD sessions can be recorded and replayed exactly from the game's details page; the Master System viewer records with `--viewer-record`. The Genesis viewer has no input recording.
+- **Recording and replay:** Sega CD sessions can be recorded and replayed exactly from the game's page; the Master System viewer records with `--viewer-record`. The Genesis viewer has no input recording.
 - **Sega CD saves:** the internal backup RAM persists between sessions as protected user data that cleanup, rebuilds and removing the game never delete.
 - **Genesis region:** USA NTSC, Japan NTSC or Europe PAL. This currently changes
   the version register only; execution remains **60 Hz** even when Europe is

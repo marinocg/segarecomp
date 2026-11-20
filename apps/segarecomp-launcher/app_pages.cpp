@@ -388,7 +388,7 @@ void App::draw_settings(float full_w, float h) {
   // ImGui scores a move from the parent into a child clipped, which skips the body's controls. The page-level entry stays the first tab.
   const ui::ZoneEntry outer_first = ui::zone_first;
   ui::zone_first = ui::ZoneEntry{};
-  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
+  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y)), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);   // minus the spacing after the child: the page itself must not overflow
   settings_body_window_ = ImGui::GetCurrentWindow();
   if (const char *shot_scroll = SDL_getenv("SEGARECOMP_SHOT_SCROLL")) ImGui::SetScrollY(std::string(shot_scroll) == "middle" ? ImGui::GetScrollMaxY() * 0.5F : ImGui::GetScrollMaxY());  // review aid, never a persisted preference
   dl = ImGui::GetWindowDrawList();

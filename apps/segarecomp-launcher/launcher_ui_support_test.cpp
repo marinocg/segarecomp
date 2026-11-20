@@ -348,6 +348,20 @@ int run_tests() {
     expect(std::string(region_label("genesis", "usa")) == "USA" && std::string(region_label("genesis", "japan")) == "Japan" && std::string(region_label("genesis", "europe")) == "Europe", "Genesis regions are named");
     expect(std::string(region_label("genesis", "")) == "Unknown" && std::string(region_label("genesis", "mars")) == "Unknown" && std::string(region_label("saturn", "usa")) == "Unknown", "an unavailable region reads Unknown");
     expect(std::string(region_label("master-system", "usa")) == "Export", "Master System shows its export baseline");
+    {  // T010: cutting text to fit never leaves a lone byte of a multi-byte sequence (it rendered as a replacement glyph)
+      std::string t = "Ab\xC3\x86";   // "AbÆ"
+      utf8_pop_back(t);
+      expect(t == "Ab", "utf8_pop_back removes a whole two-byte code point");
+      std::string e = "x\xE2\x80\x93";   // "x" + en dash (three bytes)
+      utf8_pop_back(e);
+      expect(e == "x", "utf8_pop_back removes a whole three-byte code point");
+      utf8_pop_back(e);
+      utf8_pop_back(e);
+      expect(e.empty(), "utf8_pop_back on an empty string is a no-op");
+      std::string lone = "ab\xC3";   // a truncated sequence is dropped entirely
+      utf8_pop_back(lone);
+      expect(lone == "ab", "utf8_pop_back drops a truncated lead byte");
+    }
 
     BuildQueue q;
     expect(q.empty() && q.size() == 0, "the queue starts empty");

@@ -169,6 +169,15 @@ def main():
                 present = (games[0] / "generated.c").exists() or (games[0] / "obj").exists()
                 expect(present != expect_removed, f"{name}: intermediates present={present}, expected removed={expect_removed}")
 
+        # 7. SEG-150-T010: keyboard only. Add & prepare leaves the Add game review for the Library and then raises the question; answering it (Return on Keep) must leave keyboard focus
+        #    on the Library's sidebar entry so Tab keeps working (it stayed on the vanished review button and Tab did nothing).
+        p = Profile(tmp, "keyboard-after-sheet", exe, fake_cli, fake_game)
+        genesis_rom(p.dir / "k.md")
+        trace = p.run(["frames 10", f"import_files {p.dir / 'k.md'}", "wait_import", "frames 8", "key Tab", "frames 3", "key Tab", "frames 3", "expect focus_id=review_prepare", "key Return", "frames 8",
+                       "expect modal=1", "expect focus_id=mod_keep", "key Return", "frames 8", "expect modal=0", "expect page=library", "expect focus=Library", "key Tab", "frames 3", "expect focus=Settings",
+                       "key Tab", "frames 3", "expect focus=Add game", "wait_idle", "frames 60", "expect build_outcome=ok", "quit"])
+        check_trace("keyboard after sheet", trace, 9)
+
     if failures:
         print("\n".join(failures))
         return 1

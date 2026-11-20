@@ -74,3 +74,10 @@ first-run "Keep build intermediates?" (T003: raised when the user first prepares
 ## Input paths
 
 mouse; keyboard (Tab/arrows, Enter, Esc, Ctrl+F or Cmd+F, scripted via `SEGARECOMP_GUI_SCRIPT`); gamepad zones (`app_input.cpp`: D-pad/stick navigation, A confirm, B back, West/Y context). Existing journey suites: `launcher_gamepad_journey_*`, `launcher_gui_navigation_test`, `launcher_parity_gui_*`.
+
+## T010 reachability check
+
+Every row above was walked against the final code and the native captures (`launcher-ux-review.md`, "Acceptance (T010)"): 60 control labels sampled from the Actions, Settings groups, Game tabs and Modals rows were searched in the launcher
+sources (59 literally; the 60th, the mapping reload in Input diagnostics, reads "Reload mapping file"), every Settings group and Game tab was opened natively at three sizes, and each journey suite that reaches a control asserts the reach
+(`launcher_settings_groups_gui_test`, `launcher_details_tabs_gui_test`, `launcher_gamepad_journey_*`, `launcher_mods_gui_test`, `launcher_data_location_gui_test`). No unreachable or orphaned capability was found; the only reference
+capabilities without a native equivalent are deliberate (per-game widescreen controls, a mod drop page, a mod combination page).

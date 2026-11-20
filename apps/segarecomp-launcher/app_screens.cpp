@@ -156,7 +156,10 @@ void App::draw() {
   ui::zone_capture = true;
   ui::zone_first = ui::ZoneEntry{};
   card_entry_ = ui::ZoneEntry{};
-  ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
+  // Settings has its own scrolling body (`##settings_body`) that fills this child; the page itself must not scroll too (a second scroll bar and a header that slid up by the
+  // few pixels of overflow whenever the wheel reached the end of the body). Every other page scrolls as a whole.
+  const ImGuiWindowFlags content_flags = ImGuiWindowFlags_NoBackground | (page_ == Page::settings ? (ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse) : ImGuiWindowFlags_None);
+  ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened, content_flags);
   if (SDL_getenv("SEGARECOMP_SHOT_SCROLL") && page_ != Page::settings) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid: lower part of a long page
   if (script_page_scroll_ >= 0.0F) { ImGui::SetScrollY(script_page_scroll_ > 1e8F ? ImGui::GetScrollMaxY() : script_page_scroll_); script_page_scroll_ = -1.0F; }
   const float inner_w = cw - 2.0F * pad_x - ctx_.u(8.0F);
@@ -832,10 +835,14 @@ void App::draw_library(float w, float h) {
 void App::remember_focus_for_sheet(bool sheet_open) {
   ImGuiContext &g = *ImGui::GetCurrentContext();
   if (sheet_open && !modal_return_.armed) {
-    if (g.NavId != 0 && g.NavWindow != nullptr && g.NavWindow->ID != ImGui::GetID("##modal") && g.NavWindow->ID != ImGui::GetID("##picker")) {
+    // A sheet raised by an action that also changed the page (Add & prepare leaves the Add game review for the Library, then asks the first-run question) finds NavId still on a control of the
+    // page that is gone: remembering it would strand keyboard navigation (Tab did nothing once the sheet closed). Such a sheet has nothing to return to; the new page's entry gets focus instead.
+    const bool stale = frame_ <= page_changed_frame_ + 1;
+    if (!stale && g.NavId != 0 && g.NavWindow != nullptr && g.NavWindow->ID != ImGui::GetID("##modal") && g.NavWindow->ID != ImGui::GetID("##picker")) {
       modal_return_ = FocusMemory{g.NavId, g.NavWindow, g.NavWindow->NavRectRel[ImGuiNavLayer_Main], true};
     } else {
       modal_return_.armed = true;  // nothing to return to
+      modal_return_stale_ = stale;
     }
   } else if (!sheet_open && modal_return_.armed) {
     if (modal_return_.id != 0 && modal_return_.window != nullptr) {
@@ -845,6 +852,7 @@ void App::remember_focus_for_sheet(bool sheet_open) {
       g.NavHighlightItemUnderNav = true;
     }
     modal_return_ = FocusMemory{};
+    if (std::exchange(modal_return_stale_, false)) nav_reset_ = true;   // ImGui itself returns to the page's last focused control, which is gone: start on the new page's entry
   }
 }
 

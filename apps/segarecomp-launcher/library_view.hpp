@@ -12,6 +12,13 @@ namespace launcher {
 // Standard box-art proportion (portrait 479x680), width / height.
 inline constexpr float kCoverAspect = 479.0F / 680.0F;
 
+// Removes the last Unicode code point of a UTF-8 string (never a lone byte of a multi-byte sequence): used when text is cut to fit, so a cut never produces
+// an invalid sequence that renders as a replacement glyph.
+inline void utf8_pop_back(std::string &text) {
+  while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0U) == 0x80U) text.pop_back();   // continuation bytes of the last code point
+  if (!text.empty()) text.pop_back();                                                                     // its lead byte (or the ASCII character)
+}
+
 struct FitRect { float x0, y0, x1, y1; };
 // The largest centred rectangle of a `tex_w x tex_h` image inside a `frame_w x frame_h` frame that shows the WHOLE image (never cropped).
 inline FitRect fit_inside(float frame_w, float frame_h, float tex_w, float tex_h) {

@@ -1,5 +1,6 @@
 #include "ui_kit.hpp"
 
+#include "library_view.hpp"
 #include "pixel_assets.hpp"
 
 #include <algorithm>
@@ -49,7 +50,7 @@ float text_width(ImFont *font, float px, const char *text) { return font->CalcTe
 std::string ellipsize(ImFont *font, float px, float max_px, const std::string &text) {
   if (text_width(font, px, text.c_str()) <= max_px) return text;
   std::string cut = text;
-  while (cut.size() > 1 && text_width(font, px, (cut + "...").c_str()) > max_px) cut.pop_back();
+  while (cut.size() > 1 && text_width(font, px, (cut + "...").c_str()) > max_px) launcher::utf8_pop_back(cut);
   return cut + "...";
 }
 

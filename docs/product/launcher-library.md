@@ -6,73 +6,61 @@ This is the user-facing description of what ships in the consumer launcher (`Seg
 ## What the launcher is
 
 A resizable window (default 1080x740, minimum about 720x520, HiDPI aware, compact mode) whose primary navigation is two destinations, **Library**
-and **Settings** (four groups: **General**, **Appearance & Controls** with Input diagnostics, **Storage & Data** and **Advanced**), plus the primary **Add game** button. A game's **Details** page is contextual, not a sidebar entry: a card, a
-list row's Details button or the game's context menu (right click, the Menu key or the gamepad's North button) opens it, and **Back** (the button, Esc or the
-gamepad's East button) returns to exactly the library state it came from: search text, platform/status filters, sort, grid/list view, scroll position and the
-focused card. The repository's sunset artwork forms the header banner and the dimmed scenery behind the window. Everything it shows is read from the library
-file, the build cache or the product: no placeholder values.
+and **Settings** (four groups: **General**, **Appearance & Controls** with Input diagnostics, **Storage & Data** and **Advanced**), plus the one primary **Add game** button.
+Below 900 px the sidebar becomes a rail (icon over a label). A game's page is contextual, not a sidebar entry: a card, a list row's Details button or the game's context
+menu (right click, the Menu key or the gamepad's North button) opens it, and **Back** (the button, Esc or the gamepad's East button) returns to exactly the library state it came from:
+search text, platform/status filters, sort, grid/list view, scroll position and the focused card. The repository's sunset artwork forms the header banner and the dimmed
+scenery behind the window. Everything it shows is read from the library file, the build cache or the product: no placeholder values. Text is Inter (Regular and SemiBold) with
+Silkscreen only for headings; the layout scale follows the display's scale and pixel density automatically (the review record `launcher-ux-review.md` states exactly what is and is not verified on which host).
 
-* **Library** - grid or list (a game without a cover shows one of four fictional placeholder paintings, picked from its digest, under the platform band and a
-  "NO COVER ART" tag; a cover is only ever an image you chose), each card with its build state, platform and last activity, search, platform/status filters, sort (last played, title, last built, added, size), favorites, multi-select
-  (Select mode) for storage actions and removal. An empty library shows the ROM drop zone.
-* **Import** - drag and drop or Browse (several files, plain ROMs or `.zip` archives). Each file is classified by the same media classifier as before, de-duplicated by SHA-256
-  (the same game elsewhere only adds a tracked location), and listed with a reason when refused. Importing never builds (an explicit checkbox builds
-  the new games). ROM files are added by reference: never copied, moved, modified or uploaded. **Zipped ROMs**: a `.zip` holding exactly one `.md/.bin/.gen/.smd/.sms`
-  (stored or deflate, CRC-checked; no zip64 or encryption) is unpacked once into `<library>/roms/<sha256>.<ext>` and that copy is what the library
-  tracks and builds; the archive is only read. Decoding writes into a buffer of exactly the declared size (at most 16 MiB) and stops if the stream would
-  exceed it; an existing copy is reused only when its own SHA-256 matches its name (a damaged copy is replaced, a link or folder in its place is refused);
-  writes go through a temporary file and a rename. A zip with no ROM or several ROMs is refused with the reason.
-  **Extracted copies are kept**: clearing build caches, keeping metadata only and removing a game from the library do not delete them (delete them from
-  the `roms` folder yourself if you want). The same ROM zipped or not is one game.
-  Works for drag and drop, Browse, Locate ROM and the headless `--import` / `--build`. A sidecar `.mapper.json` inside a zip is not read (declare the
-  Master System mapper on the game's page).
+A fresh profile (no settings, library or viewer-settings file) is welcomed with a skippable page (three steps, **Add game**, **Skip to Library**); skipping stores nothing.
+
+* **Library** - grid or list. Every card or row carries the cover (a game without a cover shows one of four fictional placeholder paintings, picked from its digest, under the platform
+  band and a "NO COVER ART" tag; a cover is only ever an image you chose), the name, the platform and region, ONE state (symbol, color and text) and ONE main action.
+  States: *Ready*, *Older version* (an earlier release's verified build still plays), *Not prepared*, *Preparing*, *Queued*, *Failed*, *Game file missing*, *Needs a mapper choice*,
+  *Metadata only*, *Running*. Main actions: *Play*, *Prepare & play*, *Prepare*, *Retry*, *Choose mapper*, *Find game file*, *Cancel* (while preparing), *Unqueue* (while queued). Search (Ctrl+F, Cmd+F on macOS),
+  platform and status filters, sort (last played, title, last built, added, size), favorites and **Select** (multi-select for storage actions and removal). An empty library shows the
+  Add game empty state.
+* **Add game** - drag and drop, or *Choose files* (several files, plain ROMs, `.zip` archives or a Sega CD `.cue`; a controller opens a built-in, root-confined chooser). Nothing is added at
+  once: every file is inspected first and listed in a **review** with its verdict (*Valid*, *Needs a choice*, *Already in library*, *Cannot be added*), the reason and the next step.
+  Then you decide: **Add & prepare (N)** adds the selected games and queues one preparation each (one at a time, cancellable, nothing starts playing by itself) or **Add only (N)** keeps
+  them in the library to prepare later; **Cancel** discards the review. ROM files are added by reference: never copied, moved, modified or uploaded; files are de-duplicated by SHA-256
+  (the same game elsewhere only adds a tracked location). **Zipped ROMs**: a `.zip` holding exactly one `.md/.bin/.gen/.smd/.sms`
+  (stored or deflate, CRC-checked; no zip64 or encryption) is unpacked once into `<library>/roms/<sha256>.<ext>` and that copy is what the library tracks and builds; the archive is only
+  read. Decoding writes into a buffer of exactly the declared size (at most 16 MiB) and stops if the stream would exceed it; an existing copy is reused only when its own SHA-256 matches its name;
+  writes go through a temporary file and a rename. **Extracted copies are kept** by every cleanup. The same ROM zipped or not is one game. Works for drag and drop, the chooser,
+  *Find game file* and the headless `--import` / `--build`. A sidecar `.mapper.json` inside a zip is not read (declare the Master System mapper on the game's page).
 * **Sega CD** - goes through the same **Add game** review: choose or drop the disc's **.cue**; the review shows the disc's verdict (tracks found, missing track files by
   name, or a typed unsupported-layout reason) and asks for your own BIOS image when no verified one is remembered (remembered BIOS references are measured again at every use; see
-  [sega-cd-play.md](sega-cd-play.md#remembered-bios-local-profiles)). A verified viewer program built with the developer procedure is attached afterwards (Game > Advanced). The BIOS and disc are referenced by path (never copied or bundled) and only
-  paths, sizes and SHA-256 values are stored.
-  After that a Sega CD game is an ordinary library game: the same cards, search, filters and sorting, the same **Details** page (its BIOS and disc are rows of
-  *Build configuration*, the build mode is a row of three tiles, the verified program, the save data and the build identity are rows of *Build provenance*, its
-  measured footprint is in the *Storage* rail), the same **Play / Build / Cancel / More** buttons and menus, the same one-at-a-time build queue with stage chips,
-  live build log, Cancel and notifications (experimental, see the coverage notes), the same cover workflow (Libretro's *Sega - Mega-CD - Sega CD* set, or your
-  own image) and the same Storage actions. Only fields that exist for a disc differ (BIOS/disc rows, Import / Verify program under *Advanced*,
-  and an *Input recording* section). See [sega-cd-play.md](sega-cd-play.md).
-* **Details** - top to bottom, inside the first 1080x740 view: the cover (change from its corner), editable display name (the header name is kept),
-  favorite, platform, build state and ROM link health, one sentence of what matters now, and the two dominant actions **Play** (only for an executable whose
-  identity matches the configuration exactly) and **Build / Recompile / Rebuild / Try again** (a missing ROM makes **Locate ROM** the primary action instead).
-  Rarer actions are in **More**: build log, open build folder, manage storage, change/remove cover, find cover online, copy SHA-256, locate ROM and (set
-  apart) remove from library. The **Build Configuration** card follows: **Build mode** (Compatibility | Optimized; **Optimized is the default** for newly imported Genesis and Master System games: Genesis Optimized is the
-  former Optimized + Experimental model request (`--aot-policy optimized --aot-model gen2`), and there is no model checkbox; Master System Optimized is its own
-  product policy, offered only when the product states it is available, otherwise the game builds as Compatibility and the card says so, without rewriting the
-  stored Optimized intent. An explicit Compatibility selection is kept, and a legacy Optimized/v1 Genesis record takes the new gen2 meaning and needs a rebuild)
-  and, for Genesis, the **console region**
-  (USA NTSC | Japan NTSC | Europe PAL, applied at launch, never a rebuild; PAL still runs on the 60 Hz schedule), or for Master System the **cartridge
-  mapper** (nothing preselected, never guessed; a sidecar manifest declares it) and the one console profile. A state line says what the executable on disk
-  actually is (from `status.json`: effective policy and any Optimized fallback), whether the selection matches it, and when a mode switch left the other
-  mode's executable on disk ("switch back to play it"). **Advanced build options** (H-interrupt alias discovery; the experimental **native GEMS audio replacement**, ADR 0291) sit behind an expander with their consequences. Below: **Build provenance** (SHA-256 with Copy, ROM file and folder, last recompiled, last
-  played and last run result, build version and toolchain, build identity with the selected options, effective policy details, **Audio implementation**, diagnostics) and the build
-  log. A **storage** rail shows the game's measured footprint (native executable, generated C, objects, logs, metadata, other build files) with *Clean
-  intermediates* and *Manage storage*; for a metadata-only game it says the history is kept and a new build is needed to play.
-* **Status** is computed from the build identity, never from a title: *Ready*, *Not built*, *Metadata only* (you removed the build on purpose; "rebuild
-  required"), *Needs rebuild* (made by another release or option set, or a build mode whose executable is not built yet; never started), *Build failed*, plus a *ROM missing* badge. Play is offered for a build
-  whose identity matches exactly, and for one more case: *Playable (older build)* (below).
-* **Playing a build from an earlier release.** Updating Segarecomp changes the build identity (the product tool, release and install path are part of it), which
-  used to force a recompile before anything could be played. The exact identity is still what decides whether generated output may be *reused* by a new build,
-  but a finished executable can additionally be *played* when the launcher can establish from the build's own records that it still runs here: a real build
+  [sega-cd-play.md](sega-cd-play.md#remembered-bios-local-profiles)). The BIOS and disc are referenced by path (never copied or bundled); only paths, sizes and SHA-256 values are stored.
+  After that a Sega CD game is an ordinary library game with the same cards, states, actions, page, queue and storage actions; only the BIOS / disc rows, *Import / Replace / Verify program*
+  (Game > Advanced), *Locate BIOS...* / *Locate disc...* and an *Input recording* section differ. See [sega-cd-play.md](sega-cd-play.md).
+* **Game page** - a header (cover with a pencil to change it, the editable display name, favorite, platform, ONE state pill, one sentence of what happens next and ONE primary action:
+  *Play*, *Prepare & play*, *Prepare*, *Retry*, *Choose mapper*, *Find game file*, *Cancel* or *Unqueue*, with *Prepare again* and **More** beside it) above four tabs:
+  * **Overview** - notices, the failure card (*What happened*: the reason, what can be done, *View log*, *Game settings*), and rows that open the other tabs.
+  * **Mods** (Genesis) - the per-game installed mods: *No mod (original game)* and each installed mod with a typed status; exactly one is selected; *Install mod...*, approval of native code, *Use this mod*,
+    *Prepare selected mod*, *Play modded game*, remove. See [patch-packages.md](patch-packages.md) and [mod-projects.md](mod-projects.md). The tab explains itself on platforms without mods.
+  * **Game settings** - *Preparation - this game* (mode Compatibility | Optimized; **Optimized is the default**, console region USA / Japan / Europe applied at launch, or for Master System the **cartridge
+    mapper**: nothing preselected, never guessed; *Advanced build options*: H-interrupt discovery, cartridge hardware Automatic / Standard / Lock-on), recording, the display and audio note (shared
+    settings, not per-game: see Settings) and *Library entry - this game* (favorite, cover, display name). A state line says what the executable on disk actually is and whether the selection matches it.
+  * **Advanced** - *Build provenance* (ROM SHA-256, build version and toolchain, build identity, effective policy, **Audio implementation**, diagnostics), older versions, the log, the game file
+    location and a measured *Storage* card with *Clean intermediates*.
+* **Status** is computed from the build identity, never from a title. The words you see are the library's (*Ready*, *Not prepared*, *Metadata only*, *Out of date*, *Failed*, *Older version*, *Game file missing*, *Needs a mapper choice*);
+  scripts and tests keep the stable technical labels *Ready*, *Not built*, *Metadata only*, *Needs rebuild*, *Build failed*, *Playable (older build)*. *Play* is offered for a build whose identity matches exactly, and for one more case: *Older version* (below).
+* **Playing a build from an earlier release.** Updating Segarecomp changes the build identity (the product tool, release and install path are part of it). The exact identity decides whether generated output
+  may be *reused* by a new build, but a finished executable can additionally be *played* when the launcher can establish from the build's own records that it still runs here: a real build
   folder inside the cache with an executable and a successful `status.json`; `metadata.json` that names this library ROM (SHA-256), the platform, this operating
-  system and processor and, for Master System, the same declared mapper and profile, for Genesis the same cartridge hardware; a complete recorded policy for the *same mode* (Compatibility/Optimized) the
-  game requests now (an Optimized build keeps being reported with its own model, e.g. v1, never relabelled as the new gen2); an H-interrupt discovery setting that
-  matches; an installed SDL3 library; and the host-interface marker `runtime_contract` (recorded by every new build; bumped only when a change would stop an
+  system and processor and, for Master System, the same declared mapper and profile, for Genesis the same cartridge hardware; a complete recorded policy for the *same mode* the
+  game requests now; an H-interrupt discovery setting that matches; an installed SDL3 library; and the host-interface marker `runtime_contract` (recorded by every new build; bumped only when a change would stop an
   already built program from running). Builds made before the marker existed are accepted only from the explicitly listed release (`0.5.0`); a version number
-  alone proves nothing. Everything else fails closed: the game shows *Needs rebuild* with the reason. A playable earlier build shows *Playable (older build)*,
-  keeps **Play** as the main action, shows what it actually is, and **Recompile** is an independent action that is never queued automatically. A cancelled or
-  failed recompile, or a moved ROM file, leaves the earlier build playable. A voluntary recompile builds into the current identity with the usual atomic
-  publication; afterwards the usual "keep old build artifacts" setting decides whether the earlier folder is removed. ADR 0138 records the rules.
-* **Build** shows the real `@stage` messages (analyze, generate, compile, link) and the tail of the build log. There is no percentage because the
-  build tool reports none. **Cancel build** (Details, and the game's menu) stops the running build: the build tool and every compiler process it started are shut down, the
-  attempt's own `.partial` folder is removed, no *Build failed* state or `.failed` diagnostics are created, and an earlier completed build of the game stays playable. A cancel that
-  arrives after the build has been published or has failed is refused (that outcome stands). A *queued* game is removed with **Unqueue** / *Remove from build queue*; it has
+  alone proves nothing. Everything else fails closed: the game shows *Out of date* with the reason. A playable earlier build shows *Older version*, keeps **Play** as the main action, and **Prepare** (again)
+  is an independent action that is never queued automatically. A cancelled or failed preparation, or a moved ROM file, leaves the earlier build playable. ADR 0138 records the rules.
+* **Preparing** shows the real `@stage` messages (analyze, generate C, compile, link) and the tail of the build log. There is no percentage because the build tool reports none. **Cancel** (library card, game page,
+  menu) stops the running build: the build tool and every compiler process it started are shut down, the attempt's own `.partial` folder is removed, no failed state or `.failed` diagnostics are created, and an
+  earlier completed build of the game stays playable. A cancel that arrives after the build has been published or has failed is refused (that outcome stands). A *queued* game is taken out with **Unqueue**; it has
   started nothing. Closing the window still waits for a running build.
-
+* **Settings** - *General* (library view and sort, compact mode, existing builds, the preparation cleanup policy, covers and metadata consent), *Appearance & Controls* (shared viewer settings: window, picture, widescreen,
+  audio, keyboard and gamepad, and **Input diagnostics**), *Storage & Data* (disk usage, **Clean up** with a truthful plan, and the data location: below) and *Advanced* (build and runtime options, about, effective paths).
 
 ## Audio implementation (Genesis, ADR 0291)
 
@@ -116,10 +104,12 @@ Lock-on pass-through automatically, saves that with the library entry, and Game 
 `SEGARECOMP_LIBRARY_DIR` overrides the library location. Package install directory (read-only program files) and these per-user folders are
 separate; Settings > Advanced shows both. Nothing is deleted at start-up, on import or on Play.
 
-The data folder can be relocated (core contract only, no UI yet): a one-line pointer file `Segarecomp-data-location.json` beside the default folder names the active
-one, absent means the defaults above, and `SEGARECOMP_CACHE_DIR` / `SEGARECOMP_LIBRARY_DIR` always win and refuse a move. Durable data (library, settings, covers, saves,
-recordings, mods) is copied, verified and switched atomically; builds and caches are not moved (those games rebuild), nothing is removed from the old folder
-automatically, and the old folder's cleanup is a separate explicit step. Exact classes, phases and crash recovery: [ADR 0317](../decisions/0317-launcher-data-location-and-migration.md).
+The data folder can be relocated from **Settings > Storage & Data > Change data location** (core contract: [ADR 0317](../decisions/0317-launcher-data-location-and-migration.md)): choose an empty folder, read the plan (exactly which
+durable files are copied and how many bytes, what is not copied, the free space needed), confirm, and watch the real phases (Check, Copy, Library, Verify, Switch) with **Cancel move** until the final switch. A one-line pointer file `Segarecomp-data-location.json` beside the
+default folder names the active one, absent means the defaults above, and `SEGARECOMP_CACHE_DIR` / `SEGARECOMP_LIBRARY_DIR` always win and refuse a move (the button says why). Durable data (library, settings, covers, saves,
+recordings, mods) is copied, verified and switched atomically; builds and caches are not moved (those games are prepared again), nothing is removed from the previous folder
+automatically, and its cleanup is a separate explicit step (*Clean up the previous location*, regenerable data by default, migrated copies unchanged since the move only when you ask). The new location is used from the next start;
+a crash or restart mid-move is recovered at the next start with a notice, and the previous location stays in use until the switch.
 
 ### `library.json` (schema 1)
 
@@ -174,7 +164,7 @@ Covers are images (PNG or JPEG, up to 2 MiB and 2048 px, validated by content an
 They survive cleanup and re-import. There are three ways to get one:
 
 * **Change cover** picks a local image.
-* **Download cover (Libretro)** (a game's *More* / context menu) and **Download missing covers** (Settings > Metadata) fetch the box art from the
+* **Download cover (Libretro)** (a game's *More* / context menu) and **Download missing covers** (Settings > General > Metadata & covers) fetch the box art from the
   public Libretro thumbnail trees (`Sega - Mega Drive - Genesis`, `Sega - Master System - Mark III`, `Sega - Mega-CD - Sega CD`, `Named_Boxarts`). This happens **only on that
   explicit action**, on a worker thread, and the downloaded file goes through the same validation as a local image before it is used.
 * **Find cover online** opens your browser at the likeliest Libretro name.
@@ -255,6 +245,7 @@ See `docs/testing/input-diagnostics.md` for the A-F diagnostic states, the Switc
 (`SEGARECOMP_SHOT_SCALE` forces a UI scale, `SEGARECOMP_SHOT_LOG` expands the build log, `SEGARECOMP_SHOT_MENU` opens the first game's context menu);
 the Master System/Genesis review hooks (`SEGARECOMP_SHOT_ROM`, `..._POLICY`, `..._MODEL`, `..._REGION`, `SEGARECOMP_GUI_AUTOPLAY`, `SEGARECOMP_GUI_TRACE`) behave as before.
 `tools/launcher_ui_fixture.py` builds the fictional fixture library used for the screenshots.
+`tools/launcher_acceptance_capture.py` builds the review profiles on the product and game doubles (ready, older version, failed, queued, mod, Sega CD, lock-on, error and data-relocation states) and captures them at the three review sizes; it needs Pillow and the built launcher and test doubles (review tooling only).
 `tools/launcher_visual_capture.py` captures an existing synthetic fixture with the **specified binary**, at both supported sizes. It requires Pillow
 (review tooling only, not a runtime dependency). `--build-rom` optionally captures an actual build of a project-authored synthetic cartridge in a temporary
 cache; it never runs the resulting game. `SEGARECOMP_SHOT_SCROLL=bottom` captures the lower part of a long page without saving a scroll preference.
@@ -268,11 +259,13 @@ an Optimized selection made after a Compatibility build (its Compatibility execu
 metadata-only game whose ROM was moved away, and a deliberately invalid cartridge whose build really fails. Two games carry fictional user-chosen covers; the
 others show the placeholder paintings.
 
-* `screenshots/launcher/` - 1080x740 and `launcher-small/` - 720x520 (the minimum): library grid/list/select and context menu, every Details state
-  (`03*`: Genesis Compatibility, Genesis Optimized, mode switch awaiting a build, Master System mapper selection, metadata only + missing ROM, failed build and
-  its log, Master System ready), import with real results (added, duplicate, refused), the empty library, storage and its cleanup confirmation, all settings
-  sections, lower-page views and a real build in progress. `launcher-hidpi/` - the same layout at a forced 2x UI scale in 2160x1480 output pixels (a
-  simulation, not an OS HiDPI test). `screenshots/launcher-capture.json` records the captured binary SHA-256 and the exact file list.
+* `screenshots/launcher/` - 1080x740 and `launcher-small/` - 720x520 (the minimum): library grid/list/select and context menu, every game page state (`03*`: Genesis Compatibility, Genesis Optimized, mode switch awaiting a
+  preparation, Master System mapper selection, metadata only + missing game file, failed preparation and its log, Master System ready) and the Mods / Game settings / Advanced tabs (`23`-`29`), Add game with real
+  results (added, duplicate, refused), the empty library, the cleanup page and its confirmation sheet, the four Settings groups with their lower parts, Input diagnostics, About, and a real preparation in progress.
+  They are captured from the **installed package** (an extracted release-layout tree, so the bundled fonts and assets are what is drawn), not from the source tree. `launcher-hidpi/` - the same layout at a forced 2x UI scale in
+  2160x1480 output pixels (a simulation, not an OS HiDPI test). `screenshots/launcher-capture.json` records the captured binary SHA-256 and the exact file list.
+* `screenshots/launcher-ux/` - small synthetic crops that back the findings of [launcher-ux-review.md](launcher-ux-review.md) (before/after text rendering, shell, review, Game page, Sega CD BIOS, mods, Settings, data
+  location). Nothing there is a full capture set; those stay in the reviewer's scratch directory.
 * `screenshots/parity/` - Genesis, Master System and Sega CD side by side (SEG-109 / ADR 0253): a ready game's Details page at 1080x740 and 720x520 and a running
   build at 1080x740, from project-authored fixtures (synthetic ROM headers, a synthetic BIOS/disc, the build and game doubles; placeholder art only). They come
   from `launcher_parity_gui_test.py` (`SEGARECOMP_PARITY_SHOTS=<dir>`), which also compares the three pages structurally (sections, reading order, columns, menus).
@@ -290,32 +283,18 @@ python3 tools/launcher_visual_capture.py --launcher <staged-package>/Segarecomp 
   --out docs/product/screenshots --build-rom <project-authored-synthetic-ROM> [--references <kit>/references/launcher_screens --comparisons <ignored dir>]
 ```
 
-### Launcher design correction (SEG-058, final pass)
+### Design record
 
-* **Navigation.** Exactly four primary areas; Details is contextual (card, row action, context menu). Back restores the library state; the navigation test
-  asserts the four entries, keyboard and gamepad walks, and Details round trips that keep search, platform filter, view, scroll position and card focus.
-* **Details hierarchy.** Identity and the two dominant actions first, the Build Configuration card next (Build mode and region or mapper as large option
-  tiles, fully visible at 1080x740 for Genesis; for Master System the mapper and build mode are visible and the expander sits at the fold), provenance and
-  the build log below, a measured storage rail on the right (below the configuration in narrow windows). The configuration states what the executable on
-  disk is (from `status.json`), not only what is selected.
-* **Art.** The repository's sunset remains the only scenery: the hero is about 163 points high at 1080x740 (114 at 720x520), cover-scaled so the whole sun
-  disc, mountains and waterfalls stay visible, with readable scrims. The v2 kit's backgrounds were audited and not shipped (smooth 47k-141k-colour
-  renders; see `apps/segarecomp-launcher/assets/manifest.json`) and its four covers were one image. A game without a cover shows one of the four distinct
-  placeholder paintings supplied afterwards by the project owner (chosen by digest) under the platform band and a "NO COVER ART" tag.
-* **Cards and screens.** Cards show the art, a build-state badge, title, platform and last activity (size and dates moved to the list, storage and
-  Details). Settings groups are titled section cards. The empty library shows the import guide. Import results replace the guide when present.
-* **Fixes found while reviewing captures.** Build records adopted at start-up for existing entries were not saved; the GUI trace path dangled after
-  `SDL_Quit`, so its last line went to a garbage file name in the working directory.
-
-Remaining differences from the concepts, with reasons: long pages still scroll at the minimum size and below the Details configuration (provenance is
-secondary by design); there are no invented compatibility ratings, build percentages, storage figures or bundled commercial covers. Cover
-downloads happen only on an explicit request (see *Covers and metadata provider*). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter.
-**Audio device selection is not implemented**. Cancelling a build is implemented (see *Build*); closing the window still waits for a running build.
+The launcher UX overhaul (milestone SEG-150) replaced the earlier six-tab Settings, the single long Details page and the separate Import / Storage destinations with the structure described
+above. What was checked on which host, every reference screen against its native equivalent (and where the product deliberately differs), the usability walk-throughs and the acceptance
+matrix are in [launcher-ux-review.md](launcher-ux-review.md) and [launcher-ux-acceptance.md](launcher-ux-acceptance.md); the feature inventory that guarded against orphaned capabilities is
+[launcher-ux-inventory.md](launcher-ux-inventory.md). There are no invented compatibility ratings, build percentages, storage figures or bundled commercial covers. Cover downloads happen
+only on an explicit request (see *Covers and metadata provider*). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter. **Audio device selection is not implemented**.
 
 
 ## Patches and variants (SEG-122, ADR 0266)
 
-A Genesis game's Details page has a **Patches / Variants** card. A patch is an optional, verified `.segapatch` package (format: `docs/product/patch-packages.md`) that adds a
+A Genesis game's page has a **Mods** tab (the Patches / Variants flow, per game; the buttons read *Install mod...*, *Use this mod*, *Use original game*, *Prepare selected mod*, *Play modded game*, *Remove*). A patch is an optional, verified `.segapatch` package (format: `docs/product/patch-packages.md`) that adds a
 second, separately built version of the same library game. The game stays one library entry.
 
 * **Install patch...** opens the file chooser (native dialog, or the built-in picker). The package is verified completely against the game's exact original image before

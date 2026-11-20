@@ -48,7 +48,7 @@ by path, never copied, never uploaded and never part of a release.
 3. **Play** opens the viewer. Keys: arrows = D-pad, Z/X/C = A/B/C, Return = Start (change them in the viewer's pause menu, shared with Genesis);
    Esc or the gamepad's Back button opens the pause menu; **F6** holds the machine, **F9** steps one frame while held (F7 is the rewind key on every console; **F5** / **F8** quick save / quick load, five more slots in the pause menu: see [save-states.md](save-states.md)). Closing the window returns to the
    launcher (a clean end).
-4. **Record this session** (details page) writes a small text script of your button presses at exact frame boundaries. **Replay** plays it back in the
+4. **Record this session** (the game page, Game settings) writes a small text script of your button presses at exact frame boundaries. **Replay** plays it back in the
    viewer; **No window** replays it as fast as possible and reports the result. A replay reproduces the run exactly. The recording is written when the viewer closes (a crash loses it); sessions you do not record have no length limit, a recording is limited to about 2,000 button changes. "No window" stops by itself two seconds of game time after the last recorded button change.
 
 ## Remembered BIOS (local profiles)
@@ -76,7 +76,7 @@ Rules at every use (the review, Add, and the game's later checks):
 
 ## Building a program (Build)
 
-**Build** (the details page, or `Segarecomp --sega-cd --bios ... --cue ... --build` without a window) runs `segarecomp sega-cd build` with the compiler bundled in the
+**Prepare** (the game page, or `Segarecomp --sega-cd --bios ... --cue ... --build` without a window) runs `segarecomp sega-cd build` with the compiler bundled in the
 release. Several minutes the first time (a real disc compiles tens of millions of lines of generated C; later builds reuse the compiled objects), cancellable
 at any time (the whole tool tree is stopped and the attempt's files are removed; an earlier finished build is kept). The built program is then verified like an
 imported one (it must state that it was built for exactly your BIOS and disc). A Sega CD build uses the launcher's one build flow: it joins the same queue as every
@@ -85,7 +85,7 @@ other game (one build at a time), shows its stages as chips (generate, compile, 
 
 ### Build modes
 
-The details page offers three modes (one at a time; the choice is stored per game and applies at the **next** Build):
+The game page (Game settings) offers three modes (one at a time; the choice is stored per game and applies at the **next** Build):
 
 | Mode | What it compiles | Use it when |
 |---|---|---|

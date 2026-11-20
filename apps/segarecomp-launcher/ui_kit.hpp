@@ -19,7 +19,7 @@ inline ImU32 rgba(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a
 namespace col {
 const ImU32 panel = rgba(8, 19, 44, 226), panel_solid = rgba(9, 22, 50), panel_hover = rgba(15, 34, 74), panel_dark = rgba(5, 12, 30, 245), field = rgba(5, 13, 32), glow = rgba(46, 104, 214), glow_soft = rgba(46, 104, 214, 46);
 const ImU32 border_dark = rgba(7, 16, 38), edge = rgba(35, 62, 120), highlight = rgba(77, 103, 167), dash = rgba(94, 132, 209, 215), dash_hover = rgba(70, 220, 255);
-const ImU32 text = rgba(220, 232, 255), text2 = rgba(169, 183, 221), dim = rgba(120, 133, 170), footer = rgba(202, 211, 235);
+const ImU32 text = rgba(220, 232, 255), text2 = rgba(169, 183, 221), dim = rgba(140, 153, 190), footer = rgba(202, 211, 235);
 const ImU32 ok = rgba(104, 224, 158), err = rgba(255, 129, 119), warn = rgba(255, 197, 109), info = rgba(64, 191, 245);
 const ImU32 btn = rgba(21, 87, 201), btn_hover = rgba(27, 111, 231), btn_top = rgba(64, 191, 245), btn_inner = rgba(38, 141, 238), btn_bottom = rgba(8, 41, 110), btn_outer = rgba(3, 21, 56), btn_text = rgba(244, 247, 255);
 const ImU32 danger = rgba(160, 48, 56), danger_hover = rgba(190, 62, 70), danger_top = rgba(255, 129, 119), danger_bottom = rgba(80, 18, 28);

@@ -7,11 +7,12 @@ Quick start
 -----------
 1. Extract this archive anywhere you can write to (do not run it from inside the archive).
 2. Open Segarecomp (Segarecomp.exe on Windows, Segarecomp.app on macOS, ./Segarecomp on Linux).
-3. Drop your ROMs onto the window, or click "Import ROM" (several files at once are fine). They are added to your
-   library; adding a game does not build it. ROM files are added by reference and never modified or uploaded.
-   ZIP archives (one ROM inside) are read without modification: the ROM is extracted into your local library.
-4. Open a game and click "Build" (or "Recompile"), then "Play". The first build of a game can take a few minutes;
-   later launches are instant. Each game's page shows its real status, size and build details.
+3. Click "Add game" and drop your game files onto the window, or click "Choose files..." (several files at once are fine). Segarecomp inspects every file
+   and shows a review (valid, needs a choice, already in your library, cannot be added); nothing is added until you decide. ROM files are added by
+   reference and never modified or uploaded. ZIP archives (one ROM inside) are read without modification: the ROM is extracted into your local library.
+4. Choose "Add & prepare" (or "Add only" and prepare later from the game's page), then "Play". Preparing a game builds its native program on this
+   computer, one game at a time, and can be cancelled; the first one can take a few minutes, later launches are instant. Each game's page shows its
+   real state, size and build details.
 
 Nothing else needs to be installed: the C compiler (Zig, used only to compile the generated C) and SDL3
 are included in this package.
@@ -22,8 +23,8 @@ Good to know
 * Compatibility is experimental. Sega Genesis / Mega Drive images and (baseline) Sega Master System images
   are supported, and many games will not translate or run correctly yet. A Master System cartridge's mapper cannot be
   detected: the launcher asks you to choose it (or reads a `<rom name>.mapper.json` file beside the ROM). "Compatibility unknown" means nothing is known about that ROM.
-* Sega CD (experimental): Import ROMs > "Add Sega CD game..." references your own BIOS image and your own disc (the CUE file); nothing is
-  copied, and none of it is part of this package. Choose Build and Segarecomp compiles a playable program from those two files on this
+* Sega CD (experimental): "Add game" with the disc's CUE file, then your own BIOS image when asked, references both; nothing is
+  copied, and none of it is part of this package. Choose Prepare and Segarecomp compiles a playable program from those two files on this
   computer (several minutes the first time; it can be cancelled). The build finds which code the disc loads by running the console from reset;
   code that does not exist verbatim on the disc (generated or decompressed at run time) is never guessed: the program stops there with a typed
   stop and the build says so. A program built elsewhere with the developer procedure (docs/product/sega-cd-play.md) can still be imported
@@ -64,7 +65,7 @@ Good to know
   xattr -dr com.apple.quarantine Segarecomp.app
 * Linux: needs glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+, Fedora 36+) and a graphical session (X11 or Wayland).
 * WSL (Windows Subsystem for Linux): the launcher can run under WSLg, but WSLg does not ship a
-  file-chooser service, so "Browse..." will show an error ("The file picker could not be opened");
+  file-chooser service, so "Choose files..." will show an error ("The file picker could not be opened");
   it also does not bridge drag-and-drop from Windows Explorer into a WSLg window. This is a WSLg
   limitation, not specific to Segarecomp; native Linux, Windows and macOS are unaffected. As a
   workaround under WSL, use the bundled CLI directly: `bin/segarecomp build --rom <file> --output <dir>

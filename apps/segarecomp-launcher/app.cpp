@@ -830,6 +830,7 @@ void App::go(Page page) {
   if (page_ == Page::details && page == previous_page_) { close_details(); return; }
   if (page_ != Page::details) previous_page_ = page_;
   page_ = page;
+  page_changed_frame_ = frame_;
   if (page == Page::settings) reload_viewer_settings();
   if (page == Page::settings && page_before_ == Page::storage) settings_focus_storage_ = true;   // Back from the cleanup page: focus returns to "Review usage and clean up"
   if (page == Page::settings && page_before_ == Page::data_location) settings_focus_move_ = true;   // Back from the data-location page: focus returns to "Change data location"
