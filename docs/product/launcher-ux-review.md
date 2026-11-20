@@ -382,3 +382,13 @@ Scope: the validator's P1/P2 findings after round B; SDL3 + Dear ImGui only, syn
 | P3 wording | yes | "1 needs a choice first" / "N need a choice first"; the Settings policy text no longer says "Nothing is cleaned automatically" next to the recompile toggle: "Finished builds are not removed to save space. (Recompiling a game still replaces its older builds unless the keep-old-builds option is on.)" | `launcher_import_review_gui_test` (summary grammar), `storage_test` (policy text) |
 
 **Corrections to earlier claims.** F9 is now actually fixed: round B only made the report truthful; the pending catalog is saved once the folder works, and "the notice disappears when the cause is fixed" is true because the pending save is retried and the notice goes only after it succeeded. The multi-process marker covers processes that resolve the data roots from the bootstrap pointer, not env-overridden ones (above). Hidden toasts no longer age.
+
+### Final validation note (F30, round C head 10bb512)
+
+An independent validator found no P0/P1 at 10bb512 (fast preset 262/262 and focused extras 9/9 in one run; native captures at 720x520 and 1080x740 opened). Remaining non-blocking limits, recorded rather than hidden:
+
+- **P2: closing the window waits for a stalled health probe.** `shutdown()` waits for the pending library/layout probe, so on a hung network mount closing can block until the probe returns (observed: about 8 s with a test delay of 8 s). It is not a regression (the old probe ran synchronously and froze the window), and it is not detached on purpose, to avoid a thread touching freed state.
+- **P3: the retry save does not merge.** When a library that could not be saved becomes writable, the in-memory catalog is written as is. If another launcher process created a valid `library.json` in the meantime, it is replaced; the previous file survives only as the one-generation `library.json.bak`.
+- **P3: error-toast queue bound.** With more than eight unshown error toasts the queue can exceed its cap (practically unreachable).
+- **P3: `.write-probe`.** The probe removes a file of exactly that name in the library folder before writing (the old probe truncated it).
+- The toast overlap check was exercised at 720x520 and 1080x740 by the validator and at 1600x900 by the earlier validation round.
