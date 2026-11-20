@@ -713,6 +713,107 @@ void test_experimental_policy(const fs::path &base, const fs::path &fake) {
   }
 }
 
+// SEG-150-T005: the Add game review of a CUE (tracks named, typed unsupported layouts, cancel) and the remembered BIOS profiles (identity, revalidation, store).
+std::string bios_with_region(char region, std::size_t size = 0x400U) {
+  std::string image(size, '\0');
+  image.replace(0x100, 4, "SEGA");
+  image[0x1F0] = region;
+  return image;
+}
+
+void test_review_core(const fs::path &base) {
+  const fs::path dir = base / "review";
+  fs::create_directories(dir);
+  using V = scd::DiscInspection::Verdict;
+  {  // missing track files are named (file names only), not a path; a complete set of names reaches the disc parser
+    spit(dir / "gone.cue", "FILE \"Game (Track 1).bin\" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\nFILE \"Game (Track 2).bin\" BINARY\n  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n");
+    spit(dir / "Game (Track 1).bin", track1);
+    const scd::DiscInspection one = scd::inspect_disc(dir / "gone.cue");
+    expect(one.verdict == V::tracks_missing && one.reason == "tracks_missing", "review: a missing track file is the typed tracks_missing verdict");
+    expect(one.files.size() == 2U && one.files[0].found && one.files[0].name == "Game (Track 1).bin" && !one.files[1].found && one.files[1].name == "Game (Track 2).bin", "review: every named file reports found / missing in CUE order");
+    expect(one.detail.find("Game (Track 2).bin") != std::string::npos && one.detail.find(u8(dir)) == std::string::npos && one.next_action.find("same folder") != std::string::npos, "review: the missing file is named without a path and the next action says where to put it");
+    expect(!one.cue_sha256.empty() && one.title == "gone", "review: the CUE digest and the title come from the sheet");
+  }
+  {  // the layout is the product parser's: a raw track without sync is its own typed reason; a data track that is not a Sega CD disc is the boot reason
+    spit(dir / "raw.cue", "FILE \"raw.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n");
+    spit(dir / "raw.bin", std::string(2352U * 20U, 'x'));
+    const scd::DiscInspection raw = scd::inspect_disc(dir / "raw.cue");
+    expect(raw.verdict == V::unsupported && raw.reason == "raw_sync" && raw.detail.find("raw_sync") != std::string::npos && raw.next_action.find("MODE1/2048") != std::string::npos, "review: an unsupported layout is refused with the product's own typed reason and a next action");
+    spit(dir / "plain.cue", "FILE \"plain.bin\" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\n");
+    spit(dir / "plain.bin", std::string(2048U * 20U, 'x'));
+    const scd::DiscInspection plain = scd::inspect_disc(dir / "plain.cue");
+    expect(plain.verdict == V::unsupported && plain.reason == "system_id", "review: a data disc that is not a Sega CD disc is refused with its typed boot reason");
+    spit(dir / "unsafe.cue", "FILE \"../outside.bin\" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\n");
+    const scd::DiscInspection unsafe = scd::inspect_disc(dir / "unsafe.cue");
+    expect(unsafe.verdict == V::tracks_missing && !unsafe.files[0].found, "review: a track outside the CUE's folder is never looked up (it counts as missing)");
+    std::string many;
+    for (int i = 0; i < 9; ++i) { many += "FILE \"t" + std::to_string(i) + ".bin\" BINARY\n  TRACK " + std::to_string(10 + i) + " AUDIO\n    INDEX 01 00:00:00\n"; spit(dir / ("t" + std::to_string(i) + ".bin"), "x"); }
+    spit(dir / "many.cue", many);
+    const scd::DiscInspection nine = scd::inspect_disc(dir / "many.cue");
+    expect(nine.verdict == V::unsupported && nine.reason == "too_many_files", "review: more files than the runtime's table holds is refused before any hashing");
+    spit(dir / "empty.cue", "REM nothing\n");
+    expect(scd::inspect_disc(dir / "empty.cue").reason == "no_files", "review: a sheet with no FILE line names no track");
+    spit(dir / "huge.cue", std::string(70000, ' '));
+    expect(scd::inspect_disc(dir / "huge.cue").reason == "cue_unreadable" && scd::inspect_disc(dir / "nothing.cue").reason == "cue_unreadable", "review: a missing or oversized CUE is cue_unreadable");
+  }
+  {  // cancel: a cancelled check reports cancelled and reads nothing
+    std::atomic<bool> cancel{true};
+    expect(scd::inspect_disc(dir / "raw.cue", &cancel).verdict == V::cancelled, "review: a cancelled disc check is cancelled, not a verdict on the disc");
+  }
+  {  // BIOS identity, region (from the header only), and revalidation at use time
+    const scd::BiosCheck usa = [&] { spit(dir / "usa.bin", bios_with_region('U')); return scd::check_bios_file(dir / "usa.bin"); }();
+    expect(usa.state == scd::BiosCheckState::ok && usa.region == "USA" && usa.sha256 == sha(bios_with_region('U')) && usa.size == 0x400U, "bios: identity is the SHA-256 and the region is what the header declares");
+    spit(dir / "eur.bin", bios_with_region('E'));
+    spit(dir / "jpn.bin", bios_with_region('J'));
+    expect(scd::check_bios_file(dir / "eur.bin").region == "Europe" && scd::check_bios_file(dir / "jpn.bin").region == "Japan", "bios: Europe and Japan headers");
+    spit(dir / "plainbios.bin", bios_bytes);
+    expect(scd::check_bios_file(dir / "plainbios.bin").region.empty(), "bios: no recognizable header means no region is claimed");
+    std::string both = bios_with_region('U');
+    both[0x1F1] = 'E';
+    expect(scd::bios_region_of_image(std::vector<std::uint8_t>(both.begin(), both.end())).empty(), "bios: a header naming several regions claims none");
+    expect(scd::check_bios_file(dir / "usa.bin", usa.sha256).state == scd::BiosCheckState::ok, "bios: the same file revalidates");
+    expect(scd::check_bios_file(dir / "eur.bin", usa.sha256).state == scd::BiosCheckState::changed, "bios: other content at the remembered place is 'changed'");
+    expect(scd::check_bios_file(dir / "moved.bin", usa.sha256).state == scd::BiosCheckState::missing, "bios: a moved file is 'missing'");
+    spit(dir / "big.bin", std::string(0x20001U, 'x'));
+    expect(scd::check_bios_file(dir / "big.bin").state == scd::BiosCheckState::too_large, "bios: more than 128 KiB is refused");
+    expect(std::string(scd::bios_check_code(scd::BiosCheckState::changed)) == "bios_changed" && !scd::bios_check_message(scd::BiosCheckState::missing).empty(), "bios: every state has a stable code and a plain sentence");
+  }
+  {  // the profile store: round trip, newest first, one per identity, damaged / newer / malformed content is ignored
+    const fs::path file = dir / "store" / "sega-cd-bios.json";
+    expect(scd::load_bios_profiles(file).empty(), "store: a missing file is empty");
+    std::vector<scd::BiosProfile> list;
+    scd::BiosProfile a;
+    a.sha256 = sha(bios_with_region('U'));
+    a.size = 0x400U;
+    a.region = "USA";
+    a.path = u8(dir / "usa.bin");
+    a.verified_at = 100;
+    scd::BiosProfile b = a;
+    b.sha256 = sha(bios_with_region('E'));
+    b.region = "Europe";
+    b.path = u8(dir / "eur.bin");
+    scd::remember_bios_profile(list, a);
+    scd::remember_bios_profile(list, b);
+    scd::BiosProfile moved = a;
+    moved.path = u8(dir / "elsewhere" / "usa.bin");
+    scd::remember_bios_profile(list, moved);
+    expect(list.size() == 2U && list[0].sha256 == a.sha256 && list[0].path == moved.path && list[1].sha256 == b.sha256, "store: one profile per identity, a re-remembered one moves to the front with its new location");
+    expect(scd::save_bios_profiles(list, file), "store: saved");
+    expect(!fs::exists(fs::path(file).concat(".tmp")) && !fs::exists(fs::path(file).concat(".new")), "store: no temporary file is left (atomic write)");
+    const auto back = scd::load_bios_profiles(file);
+    expect(back.size() == 2U && back[0].sha256 == a.sha256 && back[0].region == "USA" && back[0].path == moved.path && back[1].region == "Europe", "store: reloads exactly");
+    const std::string text = slurp(file);
+    expect(text.find("\"schema\": 1") != std::string::npos && text.find("trust") == std::string::npos, "store: schema 1; a location is stored, never a trust flag");
+    spit(file, "{\"schema\":1,\"profiles\":[{\"sha256\":\"zz\",\"path\":\"x\",\"size\":10},{\"sha256\":\"" + a.sha256 + "\",\"path\":\"/p\",\"size\":10,\"region\":\"Mars\",\"future_member\":true},{\"sha256\":\"" + a.sha256 + "\",\"path\":\"/dup\",\"size\":10}]}");
+    const auto odd = scd::load_bios_profiles(file);
+    expect(odd.size() == 1U && odd[0].region.empty() && odd[0].path == "/p", "store: a malformed digest is dropped, an unknown region is not claimed, a duplicate identity and unknown members are ignored");
+    spit(file, "{\"schema\":2,\"profiles\":[]}");
+    expect(scd::load_bios_profiles(file).empty(), "store: a newer schema is ignored, not misread");
+    spit(file, "not json");
+    expect(scd::load_bios_profiles(file).empty(), "store: a damaged file is empty, never fatal");
+  }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -732,6 +833,7 @@ int main(int argc, char **argv) {
   test_backup_persistence(base, fake);
   test_catalog(base, fake);
   test_experimental_policy(base, fake);
+  test_review_core(base);
   std::cout << failures << " failures\n";
   return failures == 0 ? 0 : 1;
 }

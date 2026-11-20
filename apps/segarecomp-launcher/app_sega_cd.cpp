@@ -1,5 +1,5 @@
-// SEG-078-T002 (ADR 0204): Sega CD in the launcher window - the "Add a Sega CD game" form, the game's details panel (inputs, program, verification,
-// recordings), the verification worker and the run of an imported viewer program. The checks themselves live in sega_cd.cpp (no window); this file
+// SEG-078-T002 (ADR 0204): Sega CD in the launcher window - the game's details panel (inputs, program, verification, recordings), the verification worker
+// and the run of an imported viewer program. SEG-150-T005: a Sega CD game is ADDED through the one Add game review (disc verdict + the user's BIOS step below). The checks themselves live in sega_cd.cpp (no window); this file
 // is the screen and the job plumbing, reusing the launcher's pickers, status badges, modals, process orchestration and failure banners.
 
 #include "app.hpp"
@@ -8,7 +8,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
+#include <functional>
+#include <thread>
 
 namespace fs = std::filesystem;
 using namespace ui;
@@ -29,6 +32,13 @@ bool inputs_unusable(scd::Refusal refusal) {
     case scd::Refusal::cue_missing: case scd::Refusal::cue_changed: return true;
     default: return false;
   }
+}
+
+// Test hook (like SEGARECOMP_SCD_BUILD_ARGS): hold a check's worker for N ms, polling the cancel flag, so a cancel can be exercised deterministically on a tiny synthetic disc.
+void hold_for_test(const std::atomic<bool> &cancel) {
+  int hold_ms = 0;
+  if (const char *hold = std::getenv("SEGARECOMP_SCD_CHECK_HOLD_MS")) hold_ms = std::clamp(std::atoi(hold), 0, 60000);
+  for (int waited = 0; waited < hold_ms && !cancel.load(); waited += 10) std::this_thread::sleep_for(std::chrono::milliseconds(10));
 }
 
 }  // namespace
@@ -81,33 +91,30 @@ std::vector<fs::path> App::session_recordings(const LibraryEntry &entry) const {
 // ---------------------------------------------------------------- jobs
 
 void App::scd_start_import(const std::string &target_id, const fs::path &bios, const fs::path &cue, const fs::path &program) {
+  (void)bios;
+  (void)cue;   // a NEW game is added through the Add game review (commit_review); this is only the attach / re-verify of an existing entry
   if (scd_import_job_.valid()) { toast("A Sega CD check is already running.", true); return; }
+  const LibraryEntry *existing = target_id.empty() ? nullptr : catalog_.find_id(target_id);
+  if (existing == nullptr) return;
   scd_done_ = 0;
   scd_cancel_ = false;
   scd_import_target_ = target_id;
-  scd_import_reverify_ = !target_id.empty() && program.empty();
+  scd_import_reverify_ = program.empty();
   std::uint64_t total = 0;
   std::error_code ec;
-  const LibraryEntry *existing = target_id.empty() ? nullptr : catalog_.find_id(target_id);
   const auto size_of = [&](const fs::path &p) { return p.empty() ? std::uint64_t{0} : static_cast<std::uint64_t>(fs::is_regular_file(p, ec) ? fs::file_size(p, ec) : 0); };
-  total = size_of(bios) + size_of(cue) + size_of(program);
-  if (existing != nullptr) {
-    for (const auto &f : existing->sega_cd.disc_files) total += f.size;
-  }
+  total = size_of(from_u8(existing->sega_cd.bios_path)) + size_of(from_u8(existing->sega_cd.cue_path)) + size_of(program.empty() ? from_u8(existing->sega_cd.program.path) : program);
+  for (const auto &f : existing->sega_cd.disc_files) total += f.size;
   scd_total_ = total;
-  if (target_id.empty()) {
-    scd::ImportRequest request;
-    request.bios = bios;
-    request.cue = cue;
-    request.program = program;
-    scd_import_job_ = std::async(std::launch::async, [request, this] { return scd::import_entry(request, &scd_done_, &scd_cancel_); });
-  } else if (existing != nullptr) {
-    // Re-verify (no program given) or attach a program: both measure everything against the entry's recorded BIOS and CUE.
-    scd::EntryRecord record = existing->sega_cd;
-    const fs::path chosen = program.empty() ? from_u8(record.program.path) : program;
-    scd_import_job_ = std::async(std::launch::async, [record, chosen, this] { return scd::attach_program(record, chosen, &scd_done_, &scd_cancel_); });
-  }
-  trace(std::string("scd=verify_started target=") + (target_id.empty() ? "new" : "existing"));
+  // Re-verify (no program given) or attach a program: both measure everything against the entry's recorded BIOS and CUE.
+  scd::EntryRecord record = existing->sega_cd;
+  const fs::path chosen = program.empty() ? from_u8(record.program.path) : program;
+  scd_import_job_ = std::async(std::launch::async, [record, chosen, this] {
+    hold_for_test(scd_cancel_);
+    if (scd_cancel_.load()) return scd::ImportResult{};   // cancelled before it began: nothing was measured
+    return scd::attach_program(record, chosen, &scd_done_, &scd_cancel_);
+  });
+  trace("scd=verify_started target=existing");
 }
 
 bool App::scd_can_build(const LibraryEntry &entry, const StatusInfo &info) const {
@@ -205,30 +212,16 @@ void App::scd_poll() {
     scd::ImportResult result = scd_import_job_.get();
     const std::string target = scd_import_target_;
     scd_import_target_.clear();
-    if (target.empty()) {
-      if (result.record.bios_sha256.empty() || result.record.cue_sha256.empty()) {
-        scd_form_.message = scd::message(result.refusal, result.detail);
-        scd_form_.error = true;
-        trace(std::string("scd=add_refused refusal=") + scd::code(result.refusal));
-      } else {
-        const auto added = catalog_.import_sega_cd(result.record, result.title, unix_now());
-        if (added.entry == nullptr) {
-          scd_form_.message = added.error;
-          scd_form_.error = true;
-        } else {
-          save_catalog();
-          request_status_refresh();
-          const std::string id = added.entry->id();
-          trace(std::string("scd=added program=") + (result.program_attached ? "verified" : scd::code(result.refusal)) + (added.added ? " new=1" : " new=0"));
-          scd_form_ = ScdForm{};
-          if (!result.program_attached && result.refusal != scd::Refusal::none)
-            show_message("The game was added, but the program was not accepted", {scd::message(result.refusal, result.detail), "The game stays in the library without a program."});
-          if (added.added) queue_auto_covers({id});   // like a newly added ROM: an automatic, silent Libretro lookup (never in automation)
-          open_details(id);
-          toast(result.program_attached ? "Added. Verified prebuilt program available." : "Added. Import a verified program to play it.");
-        }
-      }
-    } else if (LibraryEntry *entry = catalog_.find_id(target)) {
+    if (scd_cancel_.load() && !result.program_attached) {   // the user cancelled the check: nothing is changed and no refusal is shown for what was only interrupted
+      scd_cancel_ = false;
+      scd_built_.erase(target);
+      request_status_refresh();
+      toast("Check cancelled. Nothing was changed.");
+      trace("scd=verify_cancelled");
+      return;
+    }
+    scd_cancel_ = false;
+    if (LibraryEntry *entry = catalog_.find_id(target)) {
       if (result.program_attached) {
         const bool keep_choice = entry->sega_cd.experimental_m3, keep_file_first = entry->sega_cd.file_first;   // the build choice is the user's; importing a program never changes it
         const bool same_program = !entry->sega_cd.program.sha256.empty() && entry->sega_cd.program.sha256 == result.record.program.sha256;
@@ -412,9 +405,12 @@ void App::scd_finish_run() {
 void App::scd_dialog_result(const std::string &purpose, const std::string &id, const std::vector<std::string> &paths) {
   if (paths.empty()) return;
   const std::string &path = paths.front();
-  if (purpose == "scd_bios") { scd_form_.bios = path; scd_form_.message.clear(); }
-  else if (purpose == "scd_cue") { scd_form_.cue = path; scd_form_.message.clear(); }
-  else if (purpose == "scd_program") { scd_form_.program = path; scd_form_.message.clear(); }
+  if (purpose == "scd_review_bios") {   // key: "<expected sha256 or empty>:<cue path>" - the review item this BIOS is for
+    const std::size_t colon = id.find(':');
+    const std::string expected = colon == std::string::npos ? std::string() : id.substr(0, colon), cue = colon == std::string::npos ? id : id.substr(colon + 1);
+    for (std::size_t i = 0; i < review_.size(); ++i)
+      if (review_[i].sega_cd && review_[i].path == cue) { scd_review_choose_bios(i, from_u8(path), expected); break; }
+  }
   else if (purpose == "scd_attach") scd_start_import(id, {}, {}, from_u8(path));
   else if (purpose == "scd_locate_bios" || purpose == "scd_locate_cue") {
     LibraryEntry *entry = catalog_.find_id(id);
@@ -429,62 +425,237 @@ void App::scd_dialog_result(const std::string &purpose, const std::string &id, c
     }
     (bios ? entry->sega_cd.bios_path : entry->sega_cd.cue_path) = path;
     if (!bios) entry->rom_paths.assign(1, path);
+    if (bios) {   // the remembered profile of this BIOS follows its new location (same SHA-256, measured just above)
+      scd::BiosProfile profile;
+      profile.sha256 = d.sha256;
+      profile.size = d.size;
+      profile.region = scd::bios_region_of_file(from_u8(path));
+      profile.path = path;
+      profile.verified_at = unix_now();
+      scd_remember_bios(profile);
+    }
     save_catalog();
     request_status_refresh();
     toast(bios ? "BIOS location updated." : "Disc location updated.");
   }
 }
 
-// ---------------------------------------------------------------- the Import page card
+// ---------------------------------------------------------------- Add game: a Sega CD disc (.cue)
 
-void App::draw_scd_import(float w) {
-  if (!scd_form_open_ && !scd_import_job_.valid() && scd_form_.message.empty()) return;
-  ImDrawList *dl = ImGui::GetWindowDrawList();
-  ImGui::Dummy(ImVec2(1, ctx_.u(14.0F)));
-  heading(ctx_, "SEGA CD (DISC)");
-  paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w,
-            "A Sega CD game is your BIOS image plus your disc (the CUE file), added by reference: nothing is copied. After adding it, choose Build to compile a playable program from these two "
-            "files on this computer (experimental; code the disc does not contain verbatim is never guessed), or import a verified prebuilt program. A program is checked "
-            "against exactly these two files.");
-  ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-  const bool busy = scd_import_job_.valid() || scd_build_ != nullptr;
-  const auto row = [&](const char *id, const char *label, const std::string &path, const char *purpose, const char *hint) {
-    const ImVec2 a = ImGui::GetCursorScreenPos();
-    const float rh = ctx_.u(40.0F), bw = ctx_.u(120.0F);
-    card(ctx_, dl, a, ImVec2(a.x + w, a.y + rh));
-    draw_text(dl, ctx_.bold, ctx_.u(12.5F), col::text, ImVec2(a.x + ctx_.u(14.0F), a.y + ctx_.u(7.0F)), label);
-    draw_text(dl, ctx_.regular, ctx_.u(11.5F), path.empty() ? col::dim : col::text2, ImVec2(a.x + ctx_.u(14.0F), a.y + ctx_.u(22.0F)),
-              ellipsize(ctx_.regular, ctx_.u(11.5F), w - bw - ctx_.u(40.0F), path.empty() ? std::string(hint) : u8s(from_u8(path).filename())).c_str());
-    ImGui::SetCursorScreenPos(ImVec2(a.x + w - bw - ctx_.u(8.0F), a.y + (rh - ctx_.u(28.0F)) * 0.5F));
-    ImGui::BeginDisabled(busy);
-    if (button(ctx_, id, path.empty() ? "Choose..." : "Change...", ImVec2(bw, ctx_.u(28.0F)), Style::secondary, true, ctx_.icon("folder"))) scd_browse(purpose, "");
-    ImGui::EndDisabled();
-    ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(5.0F)));
-    ImGui::Dummy(ImVec2(w, 1));
-  };
-  row("scd_bios_pick", "BIOS image", scd_form_.bios, "scd_bios", "The Sega CD BIOS file you own (up to 128 KiB)");
-  row("scd_cue_pick", "Disc (CUE sheet)", scd_form_.cue, "scd_cue", "The .cue file of your disc image; the track files must be beside it");
-  row("scd_prog_pick", "Verified program (optional)", scd_form_.program, "scd_program", "A viewer program built for this BIOS and disc");
-  const bool ready = !scd_form_.bios.empty() && !scd_form_.cue.empty() && !busy;
-  if (button(ctx_, "scd_add", "Add Sega CD game", ImVec2(ctx_.u(200.0F), ctx_.u(34.0F)), Style::primary, ready, ctx_.icon("import")))
-    scd_start_import({}, from_u8(scd_form_.bios), from_u8(scd_form_.cue), scd_form_.program.empty() ? fs::path{} : from_u8(scd_form_.program));
-  if (ImGui::IsItemHovered() && !ready) tooltip(ctx_, busy ? "A check is running." : "Choose the BIOS image and the CUE file first.");
-  if (busy) {
-    ImGui::SameLine(0.0F, ctx_.u(14.0F));
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    spinner(ctx_, dl, ImVec2(p.x + ctx_.u(8.0F), p.y + ctx_.u(17.0F)), ctx_.u(7.0F), col::info);
-    const std::uint64_t done = scd_done_.load();
-    draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y + ctx_.u(9.0F)),
-              ("Verifying: " + format_bytes(done) + (scd_total_ > 0 ? " of " + format_bytes(scd_total_) : std::string())).c_str());
-    ImGui::Dummy(ImVec2(ctx_.u(260.0F), ctx_.u(28.0F)));
-    ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    if (button(ctx_, "scd_cancel", "Cancel", ImVec2(ctx_.u(90.0F), ctx_.u(30.0F)), Style::ghost)) scd_cancel_ = true;
+void App::scd_start_inspect(std::vector<std::string> cue_paths) {
+  if (cue_paths.empty()) return;
+  if (scd_inspect_job_.valid()) { for (auto &p : cue_paths) deferred_paths_.push_back(std::move(p)); return; }
+  scd_inspect_cancel_ = false;
+  scd_inspect_done_ = 0;
+  scd_inspect_total_ = static_cast<int>(cue_paths.size());
+  std::vector<scd::BiosProfile> profiles = bios_profiles_;
+  scd_inspect_job_ = std::async(std::launch::async, [paths = std::move(cue_paths), profiles = std::move(profiles), this] {
+    std::vector<ScdInspected> out;
+    hold_for_test(scd_inspect_cancel_);
+    for (const std::string &p : paths) {
+      ScdInspected one;
+      one.path = p;
+      one.disc = scd::inspect_disc(from_u8(p), &scd_inspect_cancel_);
+      if (one.disc.verdict == scd::DiscInspection::Verdict::ready) {
+        for (const scd::BiosProfile &profile : profiles) {   // revalidated NOW: a remembered profile is only a reference to a file
+          ScdReviewBios o;
+          o.profile = profile;
+          o.state = scd::check_bios_file(from_u8(profile.path), profile.sha256).state;
+          one.options.push_back(std::move(o));
+        }
+      }
+      out.push_back(std::move(one));
+      scd_inspect_done_.fetch_add(1);
+    }
+    return out;
+  });
+  trace("scd=inspect_started count=" + std::to_string(scd_inspect_total_));
+}
+
+namespace {
+// Does a BIOS header's region contradict the disc's own region characters? Unknown on either side never conflicts.
+bool region_conflicts(const std::string &bios_region, const std::string &disc_region) {
+  if (bios_region.empty() || disc_region.empty()) return false;
+  const char letter = bios_region == "Japan" ? 'J' : bios_region == "USA" ? 'U' : 'E';
+  return disc_region.find(letter) == std::string::npos;
+}
+std::string region_word(const std::string &region) { return region.empty() ? std::string("region not stated") : region; }
+std::string file_name_of(const std::string &path) { return u8s(from_u8(path).filename()); }
+}  // namespace
+
+// The BIOS step of one review item, from what is known now: nothing chosen yet (request / ambiguity / refusal text) or a verified choice.
+static void scd_refresh_review(ReviewItem &item, const std::function<const LibraryEntry *(const std::string &)> &find_identity) {
+  ScdReview &r = item.scd;
+  item.sega_cd = true;
+  item.title = r.disc.title;
+  item.entry_id.clear();
+  if (r.disc.verdict != scd::DiscInspection::Verdict::ready) {
+    item.verdict = ReviewItem::Verdict::invalid;
+    item.message = r.disc.detail;
+    item.next_action = r.disc.next_action;
+    item.selected = false;
+    return;
   }
-  if (!scd_form_.message.empty()) {
-    ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), scd_form_.error ? col::err : col::ok, w, scd_form_.message);
+  item.message = "Sega CD disc: " + r.disc.detail;
+  if (r.chosen) {
+    const std::string identity = scd::entry_identity(r.bios_sha256, r.disc.cue_sha256);
+    if (const LibraryEntry *existing = find_identity(identity); existing != nullptr) {
+      item.verdict = ReviewItem::Verdict::duplicate;
+      item.entry_id = existing->id();
+      item.title = existing->title();
+      item.message = "Already in your library (same BIOS and disc). Nothing is added or replaced; its saves and recordings stay as they are.";
+      item.next_action = "Open the game.";
+      item.selected = false;
+      return;
+    }
+    item.verdict = ReviewItem::Verdict::valid;
+    item.selected = true;
+    item.next_action = "Ready to add with the BIOS below. Add & prepare compiles a playable version from your BIOS and disc on this computer (experimental); Add only keeps it in your library.";
+    return;
   }
-  ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+  item.verdict = ReviewItem::Verdict::needs_choice;
+  item.selected = false;
+  item.next_action = "A Sega CD game needs your own BIOS image. Choose it below; nothing is added until you do.";
+}
+
+void App::poll_scd_inspect() {
+  if (!scd_inspect_job_.valid() || scd_inspect_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+  auto inspected = scd_inspect_job_.get();
+  const auto find_identity = [this](const std::string &identity) { return catalog_.find("sega-cd", identity); };
+  int cancelled = 0;
+  for (auto &one : inspected) {
+    if (one.disc.verdict == scd::DiscInspection::Verdict::cancelled) { ++cancelled; continue; }
+    ReviewItem item;
+    item.path = one.path;
+    item.sega_cd = true;
+    item.scd.disc = std::move(one.disc);
+    item.scd.options = std::move(one.options);
+    if (!layout_.scd_build_problem.empty() || !layout_.problem.empty()) item.prepare_blocked = "This installation cannot prepare Sega CD games here (its Sega CD runtime is missing), so only Add only is available; a verified prebuilt program can be attached on the game's page (Advanced).";
+    if (std::any_of(review_.begin(), review_.end(), [&](const ReviewItem &o) { return o.sega_cd && o.path == item.path; })) continue;   // the same disc dropped twice
+    if (item.scd.disc.verdict == scd::DiscInspection::Verdict::ready) {
+      // Which remembered BIOS may be used without asking? Exactly one that is verified now, and whose header region does not contradict the disc.
+      std::size_t usable = 0, pick = 0;
+      for (std::size_t i = 0; i < item.scd.options.size(); ++i) {
+        ScdReviewBios &o = item.scd.options[i];
+        o.region_conflict = region_conflicts(o.profile.region, item.scd.disc.region);
+        if (o.state == scd::BiosCheckState::ok) { ++usable; pick = i; }
+      }
+      const std::size_t total = item.scd.options.size();
+      scd_refresh_review(item, find_identity);
+      if (usable == 1 && !item.scd.options[pick].region_conflict) {
+        item.scd.chosen = true;
+        item.scd.bios_path = item.scd.options[pick].profile.path;
+        item.scd.bios_sha256 = item.scd.options[pick].profile.sha256;
+        item.scd.bios_region = item.scd.options[pick].profile.region;
+        item.scd.note = "Using your remembered BIOS (checked just now). Choose another below if you want a different one.";
+        scd_refresh_review(item, find_identity);
+      } else if (usable > 1) {
+        item.scd.note = "More than one verified BIOS is remembered. Choose which one this disc uses; it is never guessed.";
+      } else if (usable == 1) {
+        item.scd.note = "The remembered BIOS declares a different region than this disc. Use it only if you mean to, or choose another.";
+      } else if (total > 0) {
+        item.scd.note = "The remembered BIOS cannot be used as it is (see below). Locate it, or choose another.";
+        item.scd.note_error = true;
+      } else {
+        item.scd.note = "No BIOS is remembered yet. Choose your own Sega CD BIOS image (Segarecomp does not include or download one).";
+      }
+    } else {
+      scd_refresh_review(item, find_identity);
+    }
+    review_.push_back(std::move(item));
+  }
+  if (cancelled > 0) toast("Disc check cancelled.");
+  go(Page::import_page);
+  trace("scd=inspected total=" + std::to_string(inspected.size()) + " cancelled=" + std::to_string(cancelled) + " reviewed=" + std::to_string(review_.size()));
+  if (!deferred_paths_.empty()) { auto next = std::move(deferred_paths_); deferred_paths_.clear(); start_import(std::move(next)); }
+}
+
+// A BIOS file chosen (or located) for review item `index`. `expected_sha256` set = "locate the remembered BIOS": the file must be that very BIOS.
+void App::scd_review_choose_bios(std::size_t index, const fs::path &file, const std::string &expected_sha256) {
+  if (index >= review_.size() || !review_[index].sega_cd) return;
+  ReviewItem &item = review_[index];
+  ScdReview &r = item.scd;
+  const scd::BiosCheck check = scd::check_bios_file(file, expected_sha256);
+  const auto find_identity = [this](const std::string &identity) { return catalog_.find("sega-cd", identity); };
+  if (check.state != scd::BiosCheckState::ok) {
+    r.note = (check.state == scd::BiosCheckState::changed ? std::string("That file is not the remembered BIOS (its SHA-256 differs).") : scd::bios_check_message(check.state)) +
+             " Locate the right file, or choose another BIOS.";
+    r.note_error = true;
+    trace(std::string("scd=bios_refused reason=") + scd::bios_check_code(check.state));
+    return;
+  }
+  r.chosen = true;
+  r.bios_path = u8s(file);
+  r.bios_sha256 = check.sha256;
+  r.bios_region = check.region;
+  r.note_error = false;
+  r.note = "BIOS verified: " + file_name_of(r.bios_path) + " (" + region_word(check.region) + ", " + format_bytes(check.size) + "). It is remembered on this computer as a reference only and checked again every time it is used.";
+  if (region_conflicts(check.region, r.disc.region)) r.note += " Its header declares a different region than this disc.";
+  for (auto &o : r.options)   // a located remembered BIOS is valid again
+    if (o.profile.sha256 == check.sha256) { o.state = scd::BiosCheckState::ok; o.profile.path = r.bios_path; }
+  scd_refresh_review(item, find_identity);
+  trace(std::string("scd=bios_chosen region=") + (check.region.empty() ? "unknown" : check.region) + (expected_sha256.empty() ? " via=choose" : " via=locate"));
+}
+
+void App::scd_review_use_profile(std::size_t index, std::size_t option) {
+  if (index >= review_.size() || !review_[index].sega_cd || option >= review_[index].scd.options.size()) return;
+  const scd::BiosProfile profile = review_[index].scd.options[option].profile;   // used only after it is measured again, right now
+  scd_review_choose_bios(index, from_u8(profile.path), profile.sha256);
+}
+
+void App::scd_remember_bios(const scd::BiosProfile &profile) {
+  scd::remember_bios_profile(bios_profiles_, profile);
+  if (!scd::save_bios_profiles(bios_profiles_, bios_profiles_file_)) toast("The BIOS could not be remembered (settings folder not writable).", true);
+}
+
+// Add / Add & prepare of one Sega CD review item. Everything is measured again NOW (the files may have changed since the review): the BIOS, the CUE and the track files.
+bool App::scd_commit_review_item(ReviewItem &item, std::vector<std::string> &added_ids, std::vector<std::string> &prepare_ids) {
+  ScdReview &r = item.scd;
+  const scd::BiosCheck bios = scd::check_bios_file(from_u8(r.bios_path), r.bios_sha256);
+  if (bios.state != scd::BiosCheckState::ok) {
+    r.chosen = false;
+    r.note = std::string(bios.state == scd::BiosCheckState::changed ? "The BIOS changed after you chose it. " : "") + scd::bios_check_message(bios.state) + " Choose the BIOS again.";
+    r.note_error = true;
+    item.verdict = ReviewItem::Verdict::needs_choice;
+    item.selected = false;
+    trace(std::string("scd=add_refused refusal=") + scd::bios_check_code(bios.state));
+    return false;
+  }
+  const scd::DiscInspection disc = scd::inspect_disc(from_u8(item.path));
+  if (disc.verdict != scd::DiscInspection::Verdict::ready || disc.cue_sha256 != r.disc.cue_sha256) {
+    r.disc = disc;
+    item.verdict = ReviewItem::Verdict::invalid;
+    item.message = disc.verdict == scd::DiscInspection::Verdict::ready ? std::string("The CUE sheet changed after it was checked.") : disc.detail;
+    item.next_action = disc.verdict == scd::DiscInspection::Verdict::ready ? std::string("Add the disc again.") : disc.next_action;
+    item.selected = false;
+    trace(std::string("scd=add_refused refusal=") + disc.reason);
+    return false;
+  }
+  scd::ImportRequest request;
+  request.bios = from_u8(r.bios_path);
+  request.cue = from_u8(item.path);
+  const scd::ImportResult imported = scd::import_entry(request);   // measures the BIOS and the CUE once more and builds the record (no program: that is Game > Advanced)
+  if (imported.record.bios_sha256.empty() || imported.record.cue_sha256.empty()) {
+    r.note = scd::message(imported.refusal, imported.detail);
+    r.note_error = true;
+    item.verdict = ReviewItem::Verdict::needs_choice;
+    item.selected = false;
+    trace(std::string("scd=add_refused refusal=") + scd::code(imported.refusal));
+    return false;
+  }
+  const auto added = catalog_.import_sega_cd(imported.record, imported.title, unix_now());
+  if (added.entry == nullptr) { toast("Could not add " + item.title + ": " + added.error, true); return false; }
+  scd::BiosProfile profile;
+  profile.sha256 = bios.sha256;
+  profile.size = bios.size;
+  profile.region = bios.region;
+  profile.path = r.bios_path;
+  profile.verified_at = unix_now();
+  scd_remember_bios(profile);
+  added_ids.push_back(added.entry->id());
+  if (item.preparable()) prepare_ids.push_back(added.entry->id());
+  trace(std::string("scd=added program=none new=") + (added.added ? "1" : "0") + " region=" + (bios.region.empty() ? "unknown" : bios.region));
+  return true;
 }
 
 }  // namespace launcher

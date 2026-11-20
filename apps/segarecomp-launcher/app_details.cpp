@@ -143,8 +143,8 @@ std::string App::prepare_label(const LibraryEntry &entry, const StatusInfo &info
 std::string App::details_primary_label(const LibraryEntry &entry, const StatusInfo &info) const {
   if (is_stopping(entry.id())) return "Stopping...";
   if (is_building(entry.id())) return "Cancel";
-  const bool scd_locate = info.sega_cd && (info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::cue_missing);
-  if ((info.rom_missing && !info.runnable() && !entry.rom_paths.empty() && !info.sega_cd) || scd_locate) return scd_locate ? (info.scd.refusal == scd::Refusal::bios_missing ? "Locate BIOS..." : "Locate disc...") : "Find game file";
+  const bool scd_locate = info.sega_cd && ((info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed) || (info.scd.refusal == scd::Refusal::cue_missing || info.scd.refusal == scd::Refusal::cue_changed));
+  if ((info.rom_missing && !info.runnable() && !entry.rom_paths.empty() && !info.sega_cd) || scd_locate) return scd_locate ? ((info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed) ? "Locate BIOS..." : "Locate disc...") : "Find game file";
   if (!info.sega_cd && entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty() && !info.runnable()) return "Choose mapper";
   if (info.sega_cd ? info.scd.state == scd::State::ready : info.runnable()) return "Play";
   if (is_queued(entry.id())) return "Unqueue";
@@ -213,8 +213,8 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
   }
   if (menu_item(ctx_, "m_sha", entry->platform_id == "sega-cd" ? "Copy game identity" : "Copy ROM SHA-256", nullptr, ctx_.icon("file"), mw)) { SDL_SetClipboardText(entry->sha256.c_str()); toast("SHA-256 copied."); }
   if (info.rom_missing && !scd_game && menu_item(ctx_, "m_locate", "Locate ROM...", "Re-link a moved ROM (same SHA-256)", ctx_.icon("folder"), mw)) browse_locate(id);
-  if (scd_game && info.scd.refusal == scd::Refusal::bios_missing && menu_item(ctx_, "m_locate_bios", "Locate BIOS...", "Re-link a moved BIOS (same SHA-256)", ctx_.icon("folder"), mw)) scd_browse("scd_locate_bios", id);
-  if (scd_game && info.scd.refusal == scd::Refusal::cue_missing && menu_item(ctx_, "m_locate_cue", "Locate disc...", "Re-link a moved CUE file (same SHA-256)", ctx_.icon("folder"), mw)) scd_browse("scd_locate_cue", id);
+  if (scd_game && (info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed) && menu_item(ctx_, "m_locate_bios", "Locate BIOS...", "Point to the original BIOS (same SHA-256)", ctx_.icon("folder"), mw)) scd_browse("scd_locate_bios", id);
+  if (scd_game && (info.scd.refusal == scd::Refusal::cue_missing || info.scd.refusal == scd::Refusal::cue_changed) && menu_item(ctx_, "m_locate_cue", "Locate disc...", "Point to the original CUE file (same SHA-256)", ctx_.icon("folder"), mw)) scd_browse("scd_locate_cue", id);
   menu_separator(ctx_, mw);
   if (menu_item(ctx_, "m_remove", "Remove from library...", scd_game ? "BIOS, disc files and saves stay" : "ROM files and extracted copies stay", ctx_.icon("trash"), mw, !game_ || game_id_ != id, true)) ask_remove(*entry);
   end_menu();
@@ -349,8 +349,19 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     if (cancel_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "build" : std::string(); details_refocus_ttl_ = 30; cancel_build(entry.id()); }
     if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop preparing and discard its partial files. A version prepared earlier is kept.");
     y += bh;
+  } else if (info.sega_cd && scd_import_job_.valid() && scd_import_target_ == entry.id()) {
+    // SEG-150-T005: the verification of a program (attach, Verify again, or the program a build just made) hashes the program and the disc files: it can be cancelled at any time
+    // and nothing is changed by a cancelled check.
+    const bool stopping_check = scd_cancel_.load();
+    const ImVec2 sp = ImGui::GetCursorScreenPos();
+    spinner(ctx_, dl, ImVec2(sp.x + ctx_.u(8.0F), sp.y + bh * 0.5F), ctx_.u(7.0F), col::info);
+    draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text, ImVec2(sp.x + ctx_.u(26.0F), sp.y + bh * 0.5F - ctx_.u(7.0F)), stopping_check ? "Cancelling..." : "Verifying the program and the disc files...");
+    ImGui::SetCursorScreenPos(ImVec2(x0 + ctx_.u(250.0F) < x0 + tw - ctx_.u(120.0F) ? x0 + ctx_.u(250.0F) : x0 + tw - ctx_.u(120.0F), y));
+    if (button(ctx_, "scd_cancel_check", "Cancel check", ImVec2(ctx_.u(120.0F), bh), Style::secondary, !stopping_check, ctx_.icon("close"))) scd_cancel_ = true;
+    note_item_layout("build");
+    y += bh;
   } else {
-    const bool scd_locate = info.sega_cd && (info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::cue_missing);   // the Sega CD "Locate ROM"
+    const bool scd_locate = info.sega_cd && ((info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed) || (info.scd.refusal == scd::Refusal::cue_missing || info.scd.refusal == scd::Refusal::cue_changed));   // the Sega CD "Locate ROM"
     const bool locate_primary = (info.rom_missing && !info.runnable() && !entry.rom_paths.empty() && !info.sega_cd) || scd_locate;  // a playable version needs no game file: Play stays primary
     const bool mapper_needed = !info.sega_cd && entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty() && !info.runnable();
     const bool runnable_now = info.sega_cd ? info.scd.state == scd::State::ready : info.runnable();
@@ -362,8 +373,8 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     const float play_w = std::min(ctx_.u(150.0F), (tw - ctx_.u(16.0F)) * 0.36F), build_w = std::min(ctx_.u(170.0F), (tw - ctx_.u(16.0F)) * 0.40F), more_w = std::min(ctx_.u(96.0F), tw - play_w - build_w - ctx_.u(16.0F));
     bool slot_drawn = false;
     if (locate_primary) {
-      if (button(ctx_, "locate", scd_locate ? (info.scd.refusal == scd::Refusal::bios_missing ? "Locate BIOS..." : "Locate disc...") : "Find game file", ImVec2(std::max(play_w, build_w), bh), Style::primary, true, ctx_.icon("folder"))) {
-        if (scd_locate) scd_browse(info.scd.refusal == scd::Refusal::bios_missing ? "scd_locate_bios" : "scd_locate_cue", entry.id());
+      if (button(ctx_, "locate", scd_locate ? ((info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed) ? "Locate BIOS..." : "Locate disc...") : "Find game file", ImVec2(std::max(play_w, build_w), bh), Style::primary, true, ctx_.icon("folder"))) {
+        if (scd_locate) scd_browse((info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed) ? "scd_locate_bios" : "scd_locate_cue", entry.id());
         else browse_locate(entry.id());
       }
       note_item_layout("play");
@@ -972,13 +983,16 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
     input_file("BIOS", r.bios_path, r.bios_size, r.bios_sha256, "scd_locate_bios", "bios_action");
     input_file("Disc (CUE)", r.cue_path, r.cue_size, r.cue_sha256, "scd_locate_cue", "cue_action");
     if (row("Game identity", entry.sha256.substr(0, 16) + " ... " + entry.sha256.substr(48), col::text, "Identifies the game: derived from the BIOS and disc digests; the library never matches by name.", "Copy", "copy_sha")) { SDL_SetClipboardText(entry.sha256.c_str()); toast("SHA-256 copied."); }
-    if (r.program.path.empty()) row("Program", "none yet", col::text2, "Build one, or import a verified prebuilt program (Advanced build options).");
-    else {
+    // SEG-150-T005: attaching or re-verifying a prebuilt program is reachable right here (Advanced); each is checked against exactly this BIOS and disc and refused with a typed reason otherwise.
+    const bool prog_busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr || scd_build_ != nullptr;
+    if (r.program.path.empty()) {
+      if (row("Program", "none yet", col::text2, "Prepare builds one on this computer, or import a verified prebuilt program: it is checked against exactly this BIOS and disc.", "Import", "prog_import") && !prog_busy) scd_browse("scd_attach", entry.id());
+    } else {
       const fs::path program = path_from_text(r.program.path);
-      row("Program", file_name_text(r.program.path) + "  (" + format_bytes(r.program.size) + ", SHA-256 " + short_hash(r.program.sha256) + ")", col::text, u8s(program.parent_path()));
+      if (row("Program", file_name_text(r.program.path) + "  (" + format_bytes(r.program.size) + ", SHA-256 " + short_hash(r.program.sha256) + ")", col::text, u8s(program.parent_path()), "Replace", "prog_replace") && !prog_busy) scd_browse("scd_attach", entry.id());
       row("Program kind", std::string(r.program.viewer ? "Viewer build (playable)" : "Headless-only build (not playable in the viewer)") + ", runtime contract " + std::to_string(r.program.runtime_abi),
           r.program.viewer && r.program.runtime_abi == scd::supported_runtime_abi ? col::text : col::warn);
-      row("Verified", fmt_date(r.program.verified_at), col::text2, "The program's own statement matches your BIOS and disc; it is not signed or compiled by Segarecomp when imported.");
+      if (row("Verified", fmt_date(r.program.verified_at), col::text2, "The program's own statement matches your BIOS and disc; it is not signed or compiled by Segarecomp when imported. Verify checks it and every disc file again.", "Verify", "prog_verify") && !prog_busy) scd_start_import(entry.id(), {}, {}, {});
     }
   } else {
   if (row("ROM SHA-256", entry.sha256.substr(0, 16) + " ... " + entry.sha256.substr(48), col::text, "Identifies the game: the library never matches by name.", "Copy", "copy_sha")) { SDL_SetClipboardText(entry.sha256.c_str()); toast("SHA-256 copied."); }

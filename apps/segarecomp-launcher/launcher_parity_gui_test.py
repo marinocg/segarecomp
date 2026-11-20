@@ -79,21 +79,26 @@ def sha(data):
 
 
 def scd_fixture(root, fake_program):
-    """A synthetic BIOS-like image, a two-track disc and the statement of a program double built for exactly these two."""
+    """A synthetic BIOS-like image, a project-authored two-track Sega CD fixture disc (the Add game review validates it with the product's own CUE parser) and the statement of a program double built for exactly these two."""
     bios_bytes = b"SYNTHETIC BIOS-LIKE IMAGE FOR THE PARITY TEST " + b"x" * 4000
-    track1, track2 = b"SYNTHETIC TRACK ONE " + b"1" * 3000, b"SYNTHETIC TRACK TWO " + b"2" * 5000
     root.mkdir(parents=True)
-    (root / "disc").mkdir()
+    subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve().parents[2] / "tools" / "sega_cd_fixture_disc.py"), "build", "--fixture", "comm", "--variant", "cooked", "--out", str(root / "disc")],
+                   check=True, capture_output=True)
     (root / "bios.bin").write_bytes(bios_bytes)
-    cue = root / "disc" / (TITLE["sega-cd"] + ".cue")
-    cue.write_text('FILE "Game (Track 1).bin" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\nFILE "Game (Track 2).bin" BINARY\n  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n')
-    (root / "disc" / "Game (Track 1).bin").write_bytes(track1)
-    (root / "disc" / "Game (Track 2).bin").write_bytes(track2)
-    statement = ('{"describe":1,"runtime_abi":1,"profile":"bios_image","viewer":true,"program_identity":"%s","disc_identity":"%s","bios":{"size":%d,"sha256":"%s"},'
-                 '"disc_files":[{"name":"Game (Track 1).bin","size":%d,"sha256":"%s"},{"name":"Game (Track 2).bin","size":%d,"sha256":"%s"}]}\n'
-                 % ("7" * 64, "8" * 64, len(bios_bytes), sha(bios_bytes), len(track1), sha(track1), len(track2), sha(track2)))
+    cue = root / "disc" / (TITLE["sega-cd"] + ".cue")   # the game's title comes from the CUE file's name
+    (root / "disc" / "disc.cue").rename(cue)
+    files = [(n, (root / "disc" / n).read_bytes()) for n in ("track01.bin", "track02.bin")]
+    table = ",".join('{"name":"%s","size":%d,"sha256":"%s"}' % (n, len(d), sha(d)) for n, d in files)
+    statement = ('{"describe":1,"runtime_abi":1,"profile":"bios_image","viewer":true,"program_identity":"%s","disc_identity":"%s","bios":{"size":%d,"sha256":"%s"},"disc_files":[%s]}\n'
+                 % ("7" * 64, "8" * 64, len(bios_bytes), sha(bios_bytes), table))
     (root / "statement.json").write_text(statement)
     return root / "bios.bin", cue, root / "statement.json", fake_program
+
+
+def add_scd(bios, cue):
+    """SEG-150-T005: a Sega CD game is added through the one Add game review (the .cue is inspected, the BIOS chosen in its row, Add only) and its page is opened."""
+    return ["page import", "frames 6", "import_files %s" % cue, "wait_scd_inspect", "frames 6", "review_bios 0 %s" % bios, "frames 4", "review_add", "frames 8",
+            "platform_filter 3", "frames 4", "focus_card 0", "frames 4", "key Return", "frames 8"]
 
 
 def parse_layout(trace):
@@ -163,7 +168,7 @@ class Case:
             if game["platform"] == "master-system":
                 game["mapper"] = "sega"   # the header never names it: the user (here the test) declares it
         (self.lib / "library.json").write_text(json.dumps(data))
-        trace = self.run(["frames 8", "page import", "frames 6", "scd_form %s|%s|" % (self.bios, self.cue), "frames 4", "scd_add", "wait_scd", "frames 10", "quit"])
+        trace = self.run(["frames 8", *add_scd(self.bios, self.cue), "quit"])
         assert any("scd=added" in l for l in trace), trace
 
     def run(self, script, extra_env=None, size="1080x740"):
@@ -425,7 +430,7 @@ def stage_persist(r, c, size):
     r.ok((scd_dir / "backup-ram.bin").read_bytes() == save_before, "Sega CD: the save is intact after the rebuild and the run")
     # removal from the library keeps a Sega CD game's user data; adding the same BIOS and disc again finds it
     script = START + open_game("sega-cd") + ["scan", "wait_scan", "cleanup remove", "wait_idle", "frames 10", "expect maintenance=0"]
-    script += ["page import", "frames 6", "scd_form %s|%s|" % (c.bios, c.cue), "frames 4", "scd_add", "wait_scd", "frames 10", "build", "wait_idle", "frames 6", "expect can_play=1",
+    script += [*add_scd(c.bios, c.cue), "build", "wait_idle", "frames 6", "expect can_play=1",
                "play", "frames 4", "wait_play_end", "frames 10", "expect playing=0", "quit"]
     trace = c.run(script, {"FAKE_SCD_EXPECT_SAVE": "1"}, size)
     r.trace("removal and re-adding", trace)

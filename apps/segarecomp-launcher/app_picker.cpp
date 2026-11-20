@@ -41,12 +41,12 @@ void App::open_picker(const std::string &purpose, const std::string &key) {
   picker_.open = true;
   picker_.purpose = purpose;
   picker_.key = key;
-  if (purpose == "import") { picker_.title = "Choose ROMs to import"; picker_.multi = true; picker_.extensions = rom_extensions(); }
+  if (purpose == "import") { picker_.title = "Choose games or a Sega CD disc (.cue)"; picker_.multi = true; picker_.extensions = import_extensions(); }
   else if (purpose == "locate") { picker_.title = "Locate the ROM file"; picker_.extensions = rom_extensions(); }
   else if (purpose == "patch") { picker_.title = "Choose a widescreen patch package"; picker_.extensions = {"segapatch"}; }
-  else if (purpose == "scd_bios" || purpose == "scd_locate_bios") { picker_.title = "Choose the Sega CD BIOS image"; picker_.extensions = {"bin", "md", "rom"}; }
-  else if (purpose == "scd_cue" || purpose == "scd_locate_cue") { picker_.title = "Choose the disc's CUE file"; picker_.extensions = {"cue"}; }
-  else if (purpose == "scd_program" || purpose == "scd_attach") { picker_.title = "Choose the verified viewer program"; picker_.extensions = {"", "exe"}; }
+  else if (purpose == "scd_review_bios" || purpose == "scd_locate_bios") { picker_.title = "Choose your Sega CD BIOS image"; picker_.extensions = {"bin", "md", "rom"}; }
+  else if (purpose == "scd_locate_cue") { picker_.title = "Choose the disc's CUE file"; picker_.extensions = {"cue"}; }
+  else if (purpose == "scd_attach") { picker_.title = "Choose the verified viewer program"; picker_.extensions = {"", "exe"}; }
   else { picker_.title = "Choose a cover image"; picker_.extensions = {"png", "jpg", "jpeg"}; }
   const char *extra = SDL_getenv("SEGARECOMP_PICKER_ROOT");
   picker_.roots = picker_roots(extra != nullptr ? path_from_text(extra) : fs::path{});

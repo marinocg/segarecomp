@@ -3,6 +3,7 @@
 #include "json_lite.hpp"
 #include "launcher_core.hpp"
 
+#include "segarecomp/disc.hpp"
 #include "segarecomp/sha256.hpp"
 
 #include <SDL3/SDL.h>
@@ -92,9 +93,9 @@ std::string message(Refusal r, const std::string &detail) {
     case Refusal::bios_missing: text = "The BIOS file is not at its recorded location. Choose it again."; break;
     case Refusal::bios_unreadable: text = "The BIOS file could not be read."; break;
     case Refusal::bios_too_large: text = "That file is too large to be a Sega CD BIOS image (the limit is 128 KiB)."; break;
-    case Refusal::bios_changed: text = "The BIOS file is not the one this game was added with (its size or SHA-256 differs). Add the game again with this BIOS."; break;
+    case Refusal::bios_changed: text = "The BIOS file is not the one this game was added with (its size or SHA-256 differs). Use Locate BIOS... to point to the original file, or add the game again with this BIOS (it then becomes a separate game)."; break;
     case Refusal::cue_missing: text = "The disc (CUE) file is not at its recorded location. Choose it again."; break;
-    case Refusal::cue_changed: text = "The CUE file has changed since the game was added. Add the game again."; break;
+    case Refusal::cue_changed: text = "The CUE file has changed since the game was added. Use Locate disc... to point to the original file, or add the game again."; break;
     case Refusal::program_missing: text = "No verified program is imported for this game."; break;
     case Refusal::program_file_missing: text = "The imported program is no longer at its recorded location. Import it again."; break;
     case Refusal::program_changed: text = "The imported program has changed since it was verified (size, time or SHA-256). Import it again."; break;
@@ -627,6 +628,229 @@ std::string describe_outcome(const Outcome &o) {
     case 28: return "The game's backup RAM could not be exported; the previous save was kept.";
     default: return "The program ended unexpectedly (status " + std::to_string(o.exit_code) + ").";
   }
+}
+
+
+// ---- SEG-150-T005: the Add game review of a CUE ----
+
+namespace {
+
+// The FILE names a CUE sheet references, in order, each once. Only names: layout, modes and sizes are the disc parser's. Bounded (the sheet is <= 64 KiB).
+std::vector<std::string> cue_file_names(const std::string &text, unsigned *track_lines) {
+  std::vector<std::string> names;
+  std::size_t pos = 0, lines = 0;
+  while (pos < text.size() && ++lines <= 4096U) {
+    std::size_t end = text.find('\n', pos);
+    if (end == std::string::npos) end = text.size();
+    std::string line = text.substr(pos, end - pos);
+    pos = end + 1;
+    std::size_t i = 0;
+    while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+    const auto word_is = [&](const char *word) {
+      std::size_t n = 0;
+      while (word[n] != '\0') {
+        if (i + n >= line.size() || std::toupper(static_cast<unsigned char>(line[i + n])) != word[n]) return false;
+        ++n;
+      }
+      return i + n < line.size() && (line[i + n] == ' ' || line[i + n] == '\t');
+    };
+    if (word_is("TRACK")) { if (track_lines != nullptr) ++*track_lines; continue; }
+    if (!word_is("FILE")) continue;
+    i += 4;
+    while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+    std::string name;
+    if (i < line.size() && line[i] == '"') {
+      const std::size_t close = line.find('"', i + 1);
+      if (close == std::string::npos) continue;
+      name = line.substr(i + 1, close - i - 1);
+    } else {
+      const std::size_t stop = line.find_first_of(" \t\r", i);
+      name = line.substr(i, stop == std::string::npos ? std::string::npos : stop - i);
+    }
+    if (!name.empty() && std::find(names.begin(), names.end(), name) == names.end() && names.size() < 64U) names.push_back(name);
+  }
+  return names;
+}
+
+std::string join_names(const std::vector<std::string> &names, std::size_t limit = 4) {
+  std::string out;
+  for (std::size_t i = 0; i < names.size() && i < limit; ++i) out += (i == 0 ? "" : ", ") + names[i];
+  if (names.size() > limit) out += " and " + std::to_string(names.size() - limit) + " more";
+  return out;
+}
+
+DiscInspection &finish(DiscInspection &r, DiscInspection::Verdict v, std::string reason, std::string detail, std::string next) {
+  r.verdict = v;
+  r.reason = std::move(reason);
+  r.detail = std::move(detail);
+  r.next_action = std::move(next);
+  return r;
+}
+
+}  // namespace
+
+DiscInspection inspect_disc(const fs::path &cue, const std::atomic<bool> *cancel) {
+  DiscInspection r;
+  r.title = clean_title(u8(cue.stem()));
+  if (r.title.empty()) r.title = "Sega CD game";
+  const auto cancelled = [&] { return cancel != nullptr && cancel->load(); };
+  if (cancelled()) return finish(r, DiscInspection::Verdict::cancelled, "cancelled", "The check was cancelled.", "Add the file again to check it.");
+  const Digest c = hash_file(cue, max_cue_bytes, nullptr, cancel);
+  if (!c.ok) {
+    if (c.error == "cancelled") return finish(r, DiscInspection::Verdict::cancelled, "cancelled", "The check was cancelled.", "Add the file again to check it.");
+    return finish(r, DiscInspection::Verdict::unreadable, "cue_unreadable", c.error == "too_large" ? "That is not a CUE sheet (it is far too large)." : "The CUE sheet could not be read.",
+                  "Check that the .cue file is a small text file next to its track files, then add it again.");
+  }
+  r.cue_sha256 = c.sha256;
+  std::string text;
+  {
+    std::ifstream in(cue, std::ios::binary);
+    text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  }
+  unsigned track_lines = 0;
+  const std::vector<std::string> names = cue_file_names(text, &track_lines);
+  r.tracks = track_lines;
+  const fs::path dir = cue.parent_path();
+  std::vector<std::string> missing;
+  for (const std::string &name : names) {
+    TrackFile f;
+    f.name = name;
+    std::error_code ec;
+    if (plain_name(name)) {
+      const fs::path file = dir / from_u8(name);
+      f.found = fs::is_regular_file(file, ec) && !fs::is_symlink(file, ec);
+      if (f.found) f.size = static_cast<std::uint64_t>(fs::file_size(file, ec));
+    }
+    if (!f.found) missing.push_back(name);
+    r.files.push_back(std::move(f));
+  }
+  if (names.empty()) return finish(r, DiscInspection::Verdict::unsupported, "no_files", "The CUE sheet names no track file.", "Choose the .cue that belongs to a CUE/BIN disc image.");
+  if (!missing.empty()) {
+    return finish(r, DiscInspection::Verdict::tracks_missing, "tracks_missing", std::to_string(missing.size()) + " of " + std::to_string(names.size()) + " track " + (missing.size() == 1 ? "file is" : "files are") + " missing next to the CUE: " + join_names(missing) + ".",
+                  "Put the missing file(s) in the same folder as the CUE sheet (the names must match), then add the CUE again.");
+  }
+  if (names.size() > max_disc_files)
+    return finish(r, DiscInspection::Verdict::unsupported, "too_many_files", "The CUE sheet references " + std::to_string(names.size()) + " files; at most " + std::to_string(max_disc_files) + " are supported.",
+                  "Use an image where the tracks share fewer files (for example one BIN for the whole disc).");
+  if (cancelled()) return finish(r, DiscInspection::Verdict::cancelled, "cancelled", "The check was cancelled.", "Add the file again to check it.");
+  const std::string layout_next = "Segarecomp reads CUE sheets whose files are BINARY, with MODE1/2048, MODE1/2352 and AUDIO tracks, all beside the CUE. Re-create the image in that layout.";
+  const segarecomp::DiscLoadResult loaded = segarecomp::load_cue_disc(cue);
+  if (cancelled()) return finish(r, DiscInspection::Verdict::cancelled, "cancelled", "The check was cancelled.", "Add the file again to check it.");
+  if (!loaded.disc) {
+    const std::string code = segarecomp::disc_error_name(loaded.error);
+    return finish(r, DiscInspection::Verdict::unsupported, code, "This disc layout is not supported (reason: " + code + (loaded.detail.empty() ? std::string() : ", " + loaded.detail) + ").", layout_next);
+  }
+  r.tracks = static_cast<unsigned>(loaded.disc->tracks().size());
+  const segarecomp::SegaCdBootResult boot = segarecomp::read_sega_cd_boot(*loaded.disc);
+  if (!boot.header) {
+    const std::string code = segarecomp::sega_cd_boot_error_name(boot.error);
+    return finish(r, DiscInspection::Verdict::unsupported, code, "This does not look like a Sega CD disc (reason: " + code + ").", "Choose the .cue of a Sega CD disc image.");
+  }
+  r.region = boot.header->region;
+  return finish(r, DiscInspection::Verdict::ready, "ok", std::to_string(r.tracks) + (r.tracks == 1 ? " track" : " tracks") + " in " + std::to_string(names.size()) + (names.size() == 1 ? " file" : " files") + " found: " + join_names(names) + ".", "Ready to add.");
+}
+
+// ---- BIOS profiles ----
+
+std::string bios_region_of_image(const std::vector<std::uint8_t> &image) {
+  if (image.size() < 0x200U || image[0x100] != 'S' || image[0x101] != 'E' || image[0x102] != 'G' || image[0x103] != 'A') return {};
+  bool j = false, u = false, e = false;
+  for (std::size_t i = 0x1F0; i < 0x1F3U; ++i) { j = j || image[i] == 'J'; u = u || image[i] == 'U'; e = e || image[i] == 'E'; }
+  if (static_cast<int>(j) + static_cast<int>(u) + static_cast<int>(e) != 1) return {};   // none or several: the header does not name one region, so none is claimed
+  return j ? "Japan" : (u ? "USA" : "Europe");
+}
+
+std::string bios_region_of_file(const fs::path &file) {
+  std::ifstream in(file, std::ios::binary);
+  std::vector<std::uint8_t> head(0x200U);
+  in.read(reinterpret_cast<char *>(head.data()), static_cast<std::streamsize>(head.size()));
+  head.resize(static_cast<std::size_t>(std::max<std::streamsize>(0, in.gcount())));
+  return bios_region_of_image(head);
+}
+
+BiosCheck check_bios_file(const fs::path &path, const std::string &expected_sha256) {
+  BiosCheck out;
+  const Digest d = hash_file(path, max_bios_bytes);
+  if (!d.ok) { out.state = d.error == "missing" ? BiosCheckState::missing : d.error == "too_large" ? BiosCheckState::too_large : BiosCheckState::unreadable; return out; }
+  out.sha256 = d.sha256;
+  out.size = d.size;
+  out.region = bios_region_of_file(path);
+  out.state = !expected_sha256.empty() && d.sha256 != expected_sha256 ? BiosCheckState::changed : BiosCheckState::ok;
+  return out;
+}
+
+const char *bios_check_code(BiosCheckState state) {
+  switch (state) {
+    case BiosCheckState::ok: return "ok";
+    case BiosCheckState::missing: return "bios_missing";
+    case BiosCheckState::unreadable: return "bios_unreadable";
+    case BiosCheckState::too_large: return "bios_too_large";
+    case BiosCheckState::changed: return "bios_changed";
+  }
+  return "bios_missing";
+}
+
+std::string bios_check_message(BiosCheckState state) {
+  switch (state) {
+    case BiosCheckState::ok: return "The BIOS was checked just now.";
+    case BiosCheckState::missing: return "The BIOS file is not at its remembered location (it was moved or removed).";
+    case BiosCheckState::unreadable: return "The BIOS file could not be read.";
+    case BiosCheckState::too_large: return "That file is too large to be a Sega CD BIOS image (128 KiB at most).";
+    case BiosCheckState::changed: return "The file at the remembered location is not the BIOS that was verified (its SHA-256 differs).";
+  }
+  return {};
+}
+
+std::vector<BiosProfile> load_bios_profiles(const fs::path &file) {
+  std::vector<BiosProfile> out;
+  std::ifstream in(file, std::ios::binary);
+  if (!in) return out;
+  const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  const auto root = json::parse(text);
+  if (!root || !root->is_object() || root->num("schema", 0) != 1) return out;   // damaged or from a newer release: ignored, never fatal
+  const json::Value *list = root->get("profiles");
+  if (list == nullptr || !list->is_array()) return out;
+  for (const auto &p : list->items) {
+    if (!p.is_object() || out.size() >= max_bios_profiles) continue;
+    BiosProfile b;
+    b.sha256 = p.str("sha256");
+    b.size = static_cast<std::uint64_t>(std::max(0LL, p.num("size", 0)));
+    b.region = p.str("region");
+    b.path = p.str("path");
+    b.verified_at = p.num("verified_at", 0);
+    if (!hex_digest(b.sha256) || b.path.empty() || b.path.size() > 4096U || b.size == 0 || b.size > max_bios_bytes) continue;
+    if (b.region != "USA" && b.region != "Japan" && b.region != "Europe") b.region.clear();
+    if (std::any_of(out.begin(), out.end(), [&](const BiosProfile &o) { return o.sha256 == b.sha256; })) continue;
+    out.push_back(std::move(b));
+  }
+  return out;
+}
+
+bool save_bios_profiles(const std::vector<BiosProfile> &profiles, const fs::path &file) {
+  json::Value root = json::Value::make_object();
+  root.set("schema", json::Value::make_int(1));
+  json::Value list = json::Value::make_array();
+  for (std::size_t i = 0; i < profiles.size() && i < max_bios_profiles; ++i) {
+    json::Value o = json::Value::make_object();
+    o.set("sha256", json::Value::make_string(profiles[i].sha256));
+    o.set("size", json::Value::make_int(static_cast<long long>(profiles[i].size)));
+    if (!profiles[i].region.empty()) o.set("region", json::Value::make_string(profiles[i].region));
+    o.set("path", json::Value::make_string(profiles[i].path));
+    o.set("verified_at", json::Value::make_int(profiles[i].verified_at));
+    list.push(std::move(o));
+  }
+  root.set("profiles", std::move(list));
+  const std::string text = json::dump(root);
+  const std::vector<std::uint8_t> bytes(text.begin(), text.end());
+  std::error_code ec;
+  fs::create_directories(file.parent_path(), ec);
+  return write_file_atomic(file, bytes);
+}
+
+void remember_bios_profile(std::vector<BiosProfile> &profiles, BiosProfile profile) {
+  profiles.erase(std::remove_if(profiles.begin(), profiles.end(), [&](const BiosProfile &o) { return o.sha256 == profile.sha256; }), profiles.end());
+  profiles.insert(profiles.begin(), std::move(profile));
+  if (profiles.size() > max_bios_profiles) profiles.resize(max_bios_profiles);
 }
 
 } // namespace launcher::scd

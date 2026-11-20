@@ -252,4 +252,55 @@ struct Outcome {
 // True when the exit status is one of the program's typed host/refusal statuses (20 disc, 21 BIOS, 22 backup RAM, 23 input script, 24 host, 25 recording).
 [[nodiscard]] bool is_refusal_exit(int exit_code);
 
+// ---- SEG-150-T005: a CUE in the Add game review, and the remembered BIOS profiles ----
+// What the review shows about a disc BEFORE anything is added. The one CUE parser of the project (segarecomp/disc.hpp) decides what a layout is; this adds only the
+// names of the files the CUE references (so a missing track can be named) and a typed, plain-language verdict. Blocking (reads and hashes the disc files; worker only).
+struct TrackFile {
+  std::string name;                   // as written in the CUE (a plain file name); never a path
+  bool found = false;                 // a regular file of that name sits beside the CUE sheet
+  std::uint64_t size = 0;
+};
+struct DiscInspection {
+  enum class Verdict { ready, tracks_missing, unsupported, unreadable, cancelled } verdict = Verdict::unreadable;
+  std::string reason;                 // stable code: "ok", "tracks_missing", "too_many_files", the product's disc error name, its boot error name, "cue_unreadable", "cancelled"
+  std::string detail;                 // one plain sentence naming file names only
+  std::string next_action;
+  std::vector<TrackFile> files;       // in CUE order, each name once
+  unsigned tracks = 0;                // tracks the CUE declares (ready: the validated table)
+  std::string cue_sha256;
+  std::string title;                  // from the CUE file name
+  std::string region;                 // as the disc's own header declares it ("" when unknown)
+};
+[[nodiscard]] DiscInspection inspect_disc(const std::filesystem::path &cue, const std::atomic<bool> *cancel = nullptr);
+
+// A BIOS the user chose and the launcher verified: identity = SHA-256 of the whole file (<= 128 KiB). The location is a REFERENCE, never trust: a profile is used
+// only after `check_bios_profile` has measured the file at that location again.
+struct BiosProfile {
+  std::string sha256;                 // the identity (the key)
+  std::uint64_t size = 0;
+  std::string region;                 // "USA" | "Japan" | "Europe" | "" - what the image's own header declares, never inferred from the name
+  std::string path;                   // UTF-8 reference
+  long long verified_at = 0;
+};
+// The region the BIOS image's header declares (the Genesis-style header at $100, region field at $1F0), "" when the header is absent or says nothing usable.
+[[nodiscard]] std::string bios_region_of_image(const std::vector<std::uint8_t> &image);
+[[nodiscard]] std::string bios_region_of_file(const std::filesystem::path &file);
+enum class BiosCheckState { ok, missing, unreadable, too_large, changed };
+struct BiosCheck {
+  BiosCheckState state = BiosCheckState::missing;
+  std::string sha256, region;         // measured now (state ok / changed)
+  std::uint64_t size = 0;
+};
+// Measures the file at `path` now. `expected_sha256` empty: just verify it is a usable BIOS-sized file; otherwise a different digest is `changed`.
+[[nodiscard]] BiosCheck check_bios_file(const std::filesystem::path &path, const std::string &expected_sha256 = {});
+[[nodiscard]] const char *bios_check_code(BiosCheckState state);
+[[nodiscard]] std::string bios_check_message(BiosCheckState state);
+// The profile store: `<library>/sega-cd-bios.json` ({"schema":1,"profiles":[...]}), atomic like the other stores. A missing, damaged or newer file reads as
+// empty (never fatal); entries with a malformed digest are dropped; at most `max_bios_profiles` are kept (newest first).
+inline constexpr std::size_t max_bios_profiles = 16;
+[[nodiscard]] std::vector<BiosProfile> load_bios_profiles(const std::filesystem::path &file);
+[[nodiscard]] bool save_bios_profiles(const std::vector<BiosProfile> &profiles, const std::filesystem::path &file);
+// Inserts or refreshes the profile with this digest (location and region are updated, the digest is the key) and moves it to the front.
+void remember_bios_profile(std::vector<BiosProfile> &profiles, BiosProfile profile);
+
 } // namespace launcher::scd

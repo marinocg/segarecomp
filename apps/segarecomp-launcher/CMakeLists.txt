@@ -177,6 +177,15 @@ if(BUILD_TESTING)
   set_property(TEST launcher_import_review_gui_test PROPERTY TIMEOUT 600)
 endif()
 
+# SEG-150-T005: a Sega CD disc in the Add game review (tracks, typed layout refusals, the user's BIOS, remembered profiles revalidated at use, cancel). Synthetic fixture disc and BIOS doubles; no product build needed.
+if(BUILD_TESTING)
+  add_test(NAME launcher_sega_cd_review_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_sega_cd_review_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> ${PROJECT_SOURCE_DIR})
+  set_property(TEST launcher_sega_cd_review_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_sega_cd_review_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_sega_cd_review_gui_test PROPERTY TIMEOUT 600)
+endif()
+
 # SEG-069-T005: the playability predicate for builds of an earlier release (fail-closed, separate from the exact reuse identity).
 # SEG-137-T007 (ADR 0296): the launcher's executable cache and BuildJob with a Luau-only mod, against the real build driver (Linux; the driver script skips elsewhere).
 add_executable(launcher_mod_variant_test launcher_mod_variant_test.cpp)

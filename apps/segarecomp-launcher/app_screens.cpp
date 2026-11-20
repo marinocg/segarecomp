@@ -400,10 +400,10 @@ void App::draw_drop_zone(float w, float h, bool compact_box) {
   const float bw = w;
   // The box is as tall as its content needs (icon, headline, file types, the Browse and Sega CD buttons) and never shorter: a fixed height let the Sega CD button
   // spill over the dashed edge in a short window. With a review above it, or the Sega CD form below it, only the content height is used.
-  const bool slim = !review_.empty() || scd_form_open_ || win_h_ < ctx_.u(600.0F);
+  const bool slim = !review_.empty() || win_h_ < ctx_.u(600.0F);
   const bool with_icon = !slim;
   const float isz = ctx_.u(compact_box ? 52.0F : 64.0F), hpx = ctx_.u(compact_box ? 18.0F : 21.0F), npx = ctx_.u(12.0F);
-  const float content_h = (with_icon ? isz + ctx_.u(10.0F) : 0.0F) + hpx + ctx_.u(8.0F) + npx + ctx_.u(6.0F) + npx + ctx_.u(14.0F) + ctx_.u(36.0F) + ctx_.u(8.0F) + ctx_.u(30.0F);
+  const float content_h = (with_icon ? isz + ctx_.u(10.0F) : 0.0F) + hpx + ctx_.u(8.0F) + npx + ctx_.u(6.0F) + npx + ctx_.u(14.0F) + ctx_.u(36.0F);
   const float bh = compact_box ? std::max(content_h + ctx_.u(34.0F), ctx_.u(slim ? 0.0F : 300.0F)) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
   const ImVec2 a(origin.x, origin.y), b(a.x + bw, a.y + bh);
   const bool hover = ImGui::IsMouseHoveringRect(a, b, false);
@@ -417,19 +417,15 @@ void App::draw_drop_zone(float w, float h, bool compact_box) {
   const char *headline = active ? "Release to review these files" : (review_.empty() ? "Drag & drop game files here" : "Drop more files to review");
   draw_text(dl, ctx_.bold, hpx, col::text, ImVec2(cx - text_width(ctx_.bold, hpx, headline) * 0.5F, cy), headline);
   cy += hpx + ctx_.u(8.0F);
-  const char *note = "Genesis / Mega Drive and Master System games, or ZIP archives";
+  const char *note = "Genesis / Mega Drive and Master System games, ZIP archives, or a Sega CD disc (.cue)";
   draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, note) * 0.5F, cy), note);
   cy += npx + ctx_.u(6.0F);
-  const std::string types = "File types: " + rom_extension_pattern("  ", ".");   // read from the same list the choosers use
+  const std::string types = "File types: " + import_extension_pattern("  ", ".");   // read from the same list the choosers use
   draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, types.c_str()) * 0.5F, cy), types.c_str());
   cy += npx + ctx_.u(14.0F);
-  // SEG-078-T002: a Sega CD game is a BIOS plus a disc, not a dropped file: its own small form opens below, and the drop zone makes room for it.
-  const float bw1 = ctx_.u(180.0F), bw2 = ctx_.u(200.0F);
-  const char *scd_label_text = scd_form_open_ ? "Hide Sega CD form" : "Add Sega CD game...";
+  const float bw1 = ctx_.u(180.0F);
   ImGui::SetCursorScreenPos(ImVec2(cx - bw1 * 0.5F, cy));
   if (button(ctx_, "dz_browse", "Choose files...", ImVec2(bw1, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("folder"))) browse_import();
-  ImGui::SetCursorScreenPos(ImVec2(cx - bw2 * 0.5F, cy + ctx_.u(44.0F)));
-  if (button(ctx_, "dz_scd", scd_label_text, ImVec2(bw2, ctx_.u(30.0F)), Style::ghost, true, ctx_.icon("controller"))) scd_form_open_ = !scd_form_open_;
   ImGui::SetCursorScreenPos(ImVec2(origin.x, b.y + ctx_.u(8.0F)));
   ImGui::Dummy(ImVec2(w, ctx_.u(2.0F)));
 }
@@ -652,7 +648,7 @@ void App::draw_welcome(float w, float h) {
   body(ctx_.bold, ctx_.u(15.0F), col::text, "Turn your own Sega game files into native games for this computer.");
   body(ctx_.regular, ctx_.u(12.5F), col::text2, "Add a game file, check what Segarecomp found, then prepare it. Preparing builds a playable version here; it can take a few minutes the first time. Your original files are never changed or uploaded.");
   y += ctx_.u(4.0F);
-  const char *steps[] = {"Add a game file (Genesis / Mega Drive, Master System, or a ZIP)", "Review the result: valid, already added, or needs a choice", "Prepare and play, when you decide to"};
+  const char *steps[] = {"Add a game file (Genesis / Mega Drive, Master System, a ZIP, or a Sega CD disc .cue)", "Review the result: valid, already added, or needs a choice", "Prepare and play, when you decide to"};
   for (int i = 0; i < 3; ++i) {
     step_circle(ctx_, dl, ImVec2(a.x + pad + ctx_.u(11.0F), y + ctx_.u(10.0F)), ctx_.u(11.0F), i + 1);
     const auto lines = wrap(ctx_.regular, ctx_.u(12.5F), iw - ctx_.u(34.0F), steps[i]);
@@ -665,10 +661,7 @@ void App::draw_welcome(float w, float h) {
   if (button(ctx_, "welcome_add", "Add game", ImVec2(ctx_.u(170.0F), ctx_.u(40.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
   ImGui::SameLine(0.0F, ctx_.u(10.0F));
   if (button(ctx_, "welcome_skip", "Skip to Library", ImVec2(ctx_.u(160.0F), ctx_.u(40.0F)), Style::secondary)) { welcome_dismissed_ = true; trace("welcome=skipped"); }
-  y += ctx_.u(40.0F) + ctx_.u(8.0F);
-  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-  if (button(ctx_, "welcome_scd", "Add a Sega CD game...", ImVec2(ctx_.u(210.0F), ctx_.u(30.0F)), Style::ghost, true, ctx_.icon("controller"))) { scd_form_open_ = true; go(Page::import_page); }
-  y += ctx_.u(30.0F) + pad;
+  y += ctx_.u(40.0F) + pad;
   dl->ChannelsSetCurrent(0);
   card(ctx_, dl, ImVec2(a.x, top), ImVec2(a.x + w, y), false, false, rgba(8, 19, 46, 240));
   dl->ChannelsMerge();
@@ -686,13 +679,11 @@ void App::draw_empty_library(float w, float h) {
   dl->ChannelsSetCurrent(1);
   draw_text(dl, ctx_.bold, ctx_.u(17.0F), col::text, ImVec2(a.x + pad, y), "Your library is empty");
   y += ctx_.u(30.0F);
-  const std::string text = "Add a game file to get started. You review it before anything is added. Accepted: " + rom_extension_pattern(" ", ".") + " (Genesis / Mega Drive, Master System, or a ZIP that contains one).";
+  const std::string text = "Add a game file to get started. You review it before anything is added. Accepted: " + import_extension_pattern(" ", ".") + " (Genesis / Mega Drive, Master System, a ZIP that contains one, or the .cue of a Sega CD disc).";
   for (const auto &l : wrap(ctx_.regular, ctx_.u(12.5F), iw, text)) { draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text2, ImVec2(a.x + pad, y), l.c_str()); y += ctx_.u(17.0F); }
   y += ctx_.u(12.0F);
   ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
   if (button(ctx_, "empty_add", "Add game", ImVec2(ctx_.u(170.0F), ctx_.u(40.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
-  ImGui::SameLine(0.0F, ctx_.u(10.0F));
-  if (button(ctx_, "empty_scd", "Add a Sega CD game...", ImVec2(ctx_.u(210.0F), ctx_.u(40.0F)), Style::ghost, true, ctx_.icon("controller"))) { scd_form_open_ = true; go(Page::import_page); }
   y += ctx_.u(40.0F) + pad;
   dl->ChannelsSetCurrent(0);
   card(ctx_, dl, a, ImVec2(a.x + w, y), false, false, rgba(8, 19, 46, 240));

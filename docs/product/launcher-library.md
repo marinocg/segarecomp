@@ -26,13 +26,15 @@ file, the build cache or the product: no placeholder values.
   the `roms` folder yourself if you want). The same ROM zipped or not is one game.
   Works for drag and drop, Browse, Locate ROM and the headless `--import` / `--build`. A sidecar `.mapper.json` inside a zip is not read (declare the
   Master System mapper on the game's page).
-* **Sega CD** - only its **import** is different: **Add game > Add Sega CD game...** takes your BIOS image, the disc's CUE file and (optionally) a verified viewer
-  program built with the developer procedure. All three are referenced by path (never copied or bundled) and only paths, sizes and SHA-256 values are stored.
+* **Sega CD** - goes through the same **Add game** review: choose or drop the disc's **.cue**; the review shows the disc's verdict (tracks found, missing track files by
+  name, or a typed unsupported-layout reason) and asks for your own BIOS image when no verified one is remembered (remembered BIOS references are measured again at every use; see
+  [sega-cd-play.md](sega-cd-play.md#remembered-bios-local-profiles)). A verified viewer program built with the developer procedure is attached afterwards (Game > Advanced). The BIOS and disc are referenced by path (never copied or bundled) and only
+  paths, sizes and SHA-256 values are stored.
   After that a Sega CD game is an ordinary library game: the same cards, search, filters and sorting, the same **Details** page (its BIOS and disc are rows of
   *Build configuration*, the build mode is a row of three tiles, the verified program, the save data and the build identity are rows of *Build provenance*, its
   measured footprint is in the *Storage* rail), the same **Play / Build / Cancel / More** buttons and menus, the same one-at-a-time build queue with stage chips,
   live build log, Cancel and notifications (experimental, see the coverage notes), the same cover workflow (Libretro's *Sega - Mega-CD - Sega CD* set, or your
-  own image) and the same Storage actions. Only fields that exist for a disc differ (BIOS/disc rows, Import / Verify program under *Advanced build options*,
+  own image) and the same Storage actions. Only fields that exist for a disc differ (BIOS/disc rows, Import / Verify program under *Advanced*,
   and an *Input recording* section). See [sega-cd-play.md](sega-cd-play.md).
 * **Details** - top to bottom, inside the first 1080x740 view: the cover (change from its corner), editable display name (the header name is kept),
   favorite, platform, build state and ROM link health, one sentence of what matters now, and the two dominant actions **Play** (only for an executable whose

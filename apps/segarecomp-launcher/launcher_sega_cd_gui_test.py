@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SEG-078-T002 (ADR 0204): the Sega CD game in the REAL launcher window (dummy video driver, software renderer, scripted).
 
-The window's own code paths run: the "Add a Sega CD game" form on the Import page, the Details panel and its states, Play (the verification worker, the
+The window's own code paths run: the Add game review of a .cue (disc verdict, BIOS step), the Details panel and its states, Play (the verification worker, the
 process orchestration, the SDL3 viewer of the project-authored fixture as a child process with scripted keys), the typed end of the run, the recording
 list, the windowless replay, the platform filter, and the typed refusals of the unsupported build and of programs that do not belong to the BIOS and disc.
 
@@ -31,6 +31,12 @@ def check(ok, label):
     print(("ok    " if ok else "FAIL  ") + label)
     if not ok:
         failures.append(label)
+
+
+def add(bios, cue):
+    """SEG-150-T005: a Sega CD game enters through the one Add game review: the .cue is inspected, the user's BIOS is chosen in that review row, Add only, then the game opens."""
+    return ["page import", "frames 6", "import_files %s" % cue, "wait_scd_inspect", "frames 6", "expect review_disc.0=ok", "review_bios 0 %s" % bios, "frames 4", "expect review=valid", "review_add", "frames 8",
+            "focus_card 0", "frames 4", "key Return", "frames 8"]
 
 
 def run_window(tmp, name, script, extra_env=None):
@@ -72,7 +78,7 @@ def main():
 
         # ---- window A: add with a program, play with a recording, replay, filter, unsupported build ----
         trace, lib = run_window(tmp, "a", [
-            "frames 8", "page import", "frames 6", "scd_form %s|%s|%s" % (bios, cue, viewer), "frames 4", "scd_add", "wait_scd", "frames 10",
+            "frames 8", *add(bios, cue), "scd_attach %s" % viewer, "wait_scd", "frames 10",
             "expect page=details", "expect scd_state=Ready to play", "expect status=Ready", "expect can_play=1", "expect detail=disc",
             "scd_record on", "play", "frames 4", "wait_scd", "wait_play_end", "frames 10",
             "expect scd_outcome=Closed.", "expect scd_recordings=1", "expect playing=0",
@@ -83,8 +89,8 @@ def main():
         bad = [l for l in trace if l.startswith("expect FAIL")]
         check(not bad and sum(l.startswith("expect ok") for l in trace) >= 12, "window A: every expectation held (%s)" % (bad or "%d ok" % sum(l.startswith("expect ok") for l in trace)))
         text = "\n".join(trace)
-        check("scd=added program=verified" in text and "scd=run_started windowless=0 recording=1" in text and "scd=run_exited code=0" in text and "live=quit" in text,
-              "window A: added with a verified program, ran in the viewer with a recording, closed with exit 0")
+        check("scd=added program=none" in text and "scd=program_attached" in text and "scd=run_started windowless=0 recording=1" in text and "scd=run_exited code=0" in text and "live=quit" in text,
+              "window A: added through the review, the prebuilt program attached under Advanced, ran in the viewer with a recording, closed with exit 0")
         check("scd=run_started windowless=1" in text, "window A: the replay ran without a window")
         check("build=refused reason=unsupported_build platform=sega-cd" in text, "window A: Build is the typed unsupported state when the installation has no Sega CD runtime")
         stored = json.loads((lib / "library.json").read_text())
@@ -94,7 +100,7 @@ def main():
         other = tmp / "other-bios.bin"
         other.write_bytes(bios.read_bytes()[:-1] + b"\xff")
         trace, lib = run_window(tmp, "b", [
-            "frames 8", "page import", "frames 6", "scd_form %s|%s|" % (bios, cue), "frames 4", "scd_add", "wait_scd", "frames 10",
+            "frames 8", *add(bios, cue),
             "expect page=details", "expect scd_state=No program yet (can be built)", "expect can_play=0", "expect scd_refusal=program_missing",
             "scd_attach %s" % headless, "wait_scd", "frames 6", "expect modal=1", "key Escape", "frames 6", "expect modal=0", "expect scd_state=No program yet (can be built)",
             "scd_attach %s" % viewer, "wait_scd", "frames 8", "expect scd_state=Ready to play", "expect can_play=1",
@@ -105,7 +111,7 @@ def main():
         check("scd=program_refused refusal=program_headless_only" in text and "scd=program_attached" in text, "window B: a headless-only program is refused with its typed reason, the viewer program is then attached")
 
         # ---- window C: a moved BIOS file is 'inputs not configured'; a changed program is stale ----
-        trace, lib = run_window(tmp, "c", ["frames 8", "page import", "frames 6", "scd_form %s|%s|%s" % (bios, cue, viewer), "frames 4", "scd_add", "wait_scd", "frames 8", "quit"])
+        trace, lib = run_window(tmp, "c", ["frames 8", *add(bios, cue), "scd_attach %s" % viewer, "wait_scd", "frames 8", "quit"])
         moved = bios.with_name("moved-bios.bin")
         bios.rename(moved)
         trace, _ = run_window(tmp, "c", ["frames 12", "focus_card 0", "frames 4", "key Return", "frames 8", "expect page=details",
@@ -128,7 +134,7 @@ def main():
         env = {"SEGARECOMP_HOME": str(package), "SEGARECOMP_SCD_BUILD_ARGS": "--budget 3000000", "SEGARECOMP_VIEWER_KEY_SCRIPT": str(keys)}
         # window D: add without a program, cancel a running build (nothing is left behind), then build to the end and play the built program
         trace, lib = run_window(tmp, "d", [
-            "frames 8", "page import", "frames 6", "scd_form %s|%s|" % (lbios, lcue), "frames 4", "scd_add", "wait_scd", "frames 10",
+            "frames 8", *add(lbios, lcue),
             "expect page=details", "expect scd_state=No program yet (can be built)", "expect can_play=0",
             "build", "frames 20", "expect scd_building=1", "cancel_build", "wait_scd", "frames 10", "expect scd_building=0", "expect scd_state=No program yet (can be built)",
             "build", "frames 6", "expect scd_building=1", "wait_scd", "frames 20",
@@ -142,13 +148,24 @@ def main():
         scd_dir = next((lib / "sega-cd").glob("*"))
         check((scd_dir / "build").is_dir() and not (scd_dir / "build.partial").exists() and not (scd_dir / "build.failed").exists(), "window D: only the finished build remains (no partial or failed folder)")
 
+        # window H (SEG-150-T005): Add & prepare straight from the review: the game is added and the ONE build slot prepares it to the end; the BIOS is remembered
+        trace, lib = run_window(tmp, "h", [
+            "frames 8", "page import", "frames 6", "import_files %s" % lcue, "wait_scd_inspect", "frames 6", "expect review_disc.0=ok", "review_bios 0 %s" % lbios, "frames 4", "expect review=valid",
+            "review_prepare", "frames 10", "expect scd_building=1", "wait_scd", "frames 30", "expect scd_building=0",
+            "focus_card 0", "frames 4", "key Return", "frames 8", "expect scd_state=Ready to play", "expect can_play=1", "expect scd_profiles=1", "quit"], env)
+        bad = [l for l in trace if l.startswith("expect FAIL")]
+        text = "\n".join(trace)
+        check(not bad and sum(l.startswith("expect ok") for l in trace) >= 7 and "import=done added=1 total=1 prepare=1" in text and "build=started platform=sega-cd" in text and "build=ok platform=sega-cd" in text,
+              "window H: Add & prepare adds the disc, prepares it in the one build slot and ends Ready to play (%s)" % (bad or "ok"))
+        check(json.loads((lib / "sega-cd-bios.json").read_text())["profiles"][0]["sha256"] == hashlib.sha256(lbios.read_bytes()).hexdigest(), "window H: the BIOS used is remembered by its verified identity")
+
         # ---- SEG-103-T007: the build mode in the real window: three tiles, a selection that does not touch the current program, a rebuild that applies it, and a
         # failed rebuild that leaves the previous program in place ----
         pad = tmp / "padfx"
         subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_unvisited_fixture.py"), "build", "--out", str(pad), "--case", "unknown_lba", "--iso", "--pad", "3"], check=True, capture_output=True)
         env_e = {"SEGARECOMP_HOME": str(package), "SEGARECOMP_SCD_BUILD_ARGS": "--budget 3000000"}
         trace, lib = run_window(tmp, "e", [
-            "frames 8", "page import", "frames 6", "scd_form %s|%s|" % (pad / "bios.bin", pad / "disc" / "disc.cue"), "frames 4", "scd_add", "wait_scd", "frames 10",
+            "frames 8", *add(pad / "bios.bin", pad / "disc" / "disc.cue"),
             "expect page=details", "expect scd_selected_mode=compatibility", "expect scd_built_mode=-",
             "build", "frames 6", "wait_scd", "frames 20", "expect scd_building=0", "expect scd_built_mode=compatibility", "expect scd_state=Ready to play",
             "scd_mode file_first", "frames 4", "expect scd_selected_mode=file_first", "expect scd_built_mode=compatibility",

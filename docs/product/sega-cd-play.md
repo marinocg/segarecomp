@@ -22,8 +22,15 @@ by path, never copied, never uploaded and never part of a release.
 
 ## In the launcher
 
-1. **Import ROMs > Add Sega CD game...** (or `Segarecomp --sega-cd ...` without a window). Choose the BIOS image, the CUE file (the track files must be
-   in the same folder) and - if you have one - the verified program (`program-viewer`).
+1. **Add game** takes a Sega CD disc like any other game: choose or drop the disc's **.cue** file (the track files must be in the same folder). The file waits in
+   the **review** (nothing is added yet) with the disc's verdict: how many tracks and which files were found, or which track files are missing (named, never a
+   path), or - for a layout outside what Segarecomp reads - the product's own typed reason and what to do. The disc is checked by the project's one CUE parser:
+   `FILE "name" BINARY`, tracks `MODE1/2048`, `MODE1/2352` or `AUDIO`, every file beside the CUE, at most eight files, and a Sega CD boot header on track 1.
+   Then the review asks for **your own BIOS image** (a file chooser; Segarecomp neither includes nor downloads one). **Add & prepare** adds the game and builds a
+   playable program on this computer (one build at a time, cancellable); **Add only** keeps it in the library to prepare later. A prebuilt program built with the
+   developer procedure is attached afterwards: **Game > Advanced > Program > Import / Replace** (or the More menu), and **Verify** re-checks it. Sega CD support
+   is experimental: a successful preparation does not mean the whole game is playable.
+   (Headless: `Segarecomp --sega-cd ...` is unchanged.)
 2. The launcher stores only paths, sizes and SHA-256 values. It measures the BIOS and CUE, runs `<program> --describe`, compares the program's claims with
    your files and checks every disc file the program names. States you can see:
 
@@ -43,6 +50,29 @@ by path, never copied, never uploaded and never part of a release.
    launcher (a clean end).
 4. **Record this session** (details page) writes a small text script of your button presses at exact frame boundaries. **Replay** plays it back in the
    viewer; **No window** replays it as fast as possible and reports the result. A replay reproduces the run exactly. The recording is written when the viewer closes (a crash loses it); sessions you do not record have no length limit, a recording is limited to about 2,000 button changes. "No window" stops by itself two seconds of game time after the last recorded button change.
+
+## Remembered BIOS (local profiles)
+
+When a BIOS is used to add a game, the launcher remembers it so the next disc does not ask again - as a **reference, never as trust**. The store is a small JSON file
+in the library folder, `sega-cd-bios.json` (written atomically through a temporary file and one rename, like the library and settings files):
+
+```json
+{ "schema": 1, "profiles": [ { "sha256": "<64 hex>", "size": 131072, "region": "USA", "path": "<where the file was>", "verified_at": 1700000000 } ] }
+```
+
+The key is the verified identity (SHA-256 of the whole file, at most 128 KiB); `region` is only what the image's own header declares (`USA`, `Japan`, `Europe`, or
+absent when the header says nothing usable - it is never inferred from a file name); `path` is where the file was. Nothing else is stored: no trust flag, no content.
+A missing, damaged or newer-schema file reads as "no remembered BIOS"; unknown members are ignored; an older release ignores the file (no existing file changes).
+Rules at every use (the review, Add, and the game's later checks):
+
+* The file is **measured again** at its remembered location. Missing (moved or removed), unreadable, too large, or different content (**changed**) is an explicit
+  state with its next action: **Locate...** (the chosen file must be exactly that BIOS - the same SHA-256 - and the profile then follows it) or **Choose another
+  BIOS...**. A profile is never used because it was once verified.
+* One verified BIOS whose header region does not contradict the disc's is offered as the choice. **Several** verified BIOS, or one whose region contradicts the disc, are
+  never chosen for the user: each is listed with its state and **Use**.
+* The BIOS is measured once more when **Add** runs; a file that changed between choosing and adding is refused and the row asks again.
+* A Sega CD game's identity is its BIOS and CUE digests: the same disc with another BIOS is another game. A game's saves, recordings and states live in the game's folder and are never touched by
+  adding, preparing, replacing a program or removing a profile.
 
 ## Building a program (Build)
 

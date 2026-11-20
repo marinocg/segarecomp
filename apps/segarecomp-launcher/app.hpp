@@ -85,11 +85,36 @@ inline const std::vector<std::string> &rom_extensions() {
   static const std::vector<std::string> list = {"md", "bin", "gen", "smd", "sms", "zip"};
   return list;
 }
+// SEG-150-T005: what Add game accepts: the game files above plus the .cue of a Sega CD disc.
+inline const std::vector<std::string> &import_extensions() {
+  static const std::vector<std::string> list = {"md", "bin", "gen", "smd", "sms", "zip", "cue"};
+  return list;
+}
+inline std::string import_extension_pattern(const char *separator, const char *prefix = "") {
+  std::string out;
+  for (const auto &e : import_extensions()) out += (out.empty() ? "" : separator) + std::string(prefix) + e;
+  return out;
+}
 inline std::string rom_extension_pattern(const char *separator, const char *prefix = "") {
   std::string out;
   for (const auto &e : rom_extensions()) out += (out.empty() ? "" : separator) + std::string(prefix) + e;
   return out;
 }
+
+// SEG-150-T005: what the review adds for a Sega CD disc (.cue): the disc verdict and the BIOS that will be used (never chosen silently).
+struct ScdReviewBios {
+  scd::BiosProfile profile;             // a remembered profile
+  scd::BiosCheckState state = scd::BiosCheckState::missing;   // measured at inspection (and again when it is used): ok / missing / changed ...
+  bool region_conflict = false;         // the BIOS header's region differs from the disc's
+};
+struct ScdReview {
+  scd::DiscInspection disc;
+  std::vector<ScdReviewBios> options;   // remembered BIOS profiles, revalidated
+  bool chosen = false;                  // a BIOS has been chosen and measured
+  std::string bios_path, bios_sha256, bios_region;
+  std::string note;                     // what the BIOS step says (request, ambiguity, refusal)
+  bool note_error = false;
+};
 
 // SEG-150-T003: one inspected file waiting in the Add game review. Nothing is in the library until the user confirms (Add & prepare / Add only).
 // invalid: cannot be added (reason + next action); duplicate: the same game (platform + SHA-256) is already in the library, never overwritten;
@@ -100,7 +125,11 @@ struct ReviewItem {
   std::string entry_id;   // duplicate: the existing entry
   RomView rom;
   bool selected = false;  // valid / needs_choice items start selected
-  [[nodiscard]] bool selectable() const { return verdict == Verdict::valid || verdict == Verdict::needs_choice; }
+  bool sega_cd = false;   // SEG-150-T005: a disc (.cue); `scd` holds its verdict and BIOS step. Without a verified BIOS it is needs_choice but NOT addable (the BIOS is part of its identity).
+  ScdReview scd;
+  std::string prepare_blocked;   // why Add & prepare is unavailable for this item although it can be added ("" = none)
+  [[nodiscard]] bool selectable() const { return verdict == Verdict::valid || (verdict == Verdict::needs_choice && !sega_cd); }
+  [[nodiscard]] bool preparable() const { return verdict == Verdict::valid && prepare_blocked.empty(); }
 };
 
 struct Modal {
@@ -191,6 +220,7 @@ private:
   [[nodiscard]] static const char *verdict_name(ReviewItem::Verdict v);
   [[nodiscard]] std::string review_summary() const;
   [[nodiscard]] int review_count(ReviewItem::Verdict v, bool selected_only) const;
+  [[nodiscard]] int review_preparable_count() const;
   void draw_review(float w);
   void draw_welcome(float w, float h);
   void draw_empty_library(float w, float h);
@@ -419,9 +449,21 @@ private:
   Uint64 live_log_at_ = 0;
   // ---- SEG-078-T002 (ADR 0204): Sega CD ----
   // The "Add a Sega CD game" form of the Import page: BIOS, CUE and an optional verified program, each chosen with the file picker.
-  struct ScdForm { std::string bios, cue, program, message; bool error = false; };
-  ScdForm scd_form_;
-  bool scd_form_open_ = false;                         // the form is shown on the Import page
+  // SEG-150-T005: a Sega CD game enters through the one Add game review; there is no separate form. A .cue is inspected on a worker (cancellable) and
+  // becomes a review item; the user's BIOS is chosen in that item and remembered as a local profile (verified identity + location, revalidated at every use).
+  struct ScdInspected { std::string path; scd::DiscInspection disc; std::vector<ScdReviewBios> options; };
+  std::future<std::vector<ScdInspected>> scd_inspect_job_;
+  std::atomic<bool> scd_inspect_cancel_{false};
+  std::atomic<int> scd_inspect_done_{0};
+  int scd_inspect_total_ = 0;
+  std::vector<scd::BiosProfile> bios_profiles_;
+  std::filesystem::path bios_profiles_file_;
+  void scd_start_inspect(std::vector<std::string> cue_paths);
+  void poll_scd_inspect();
+  void scd_review_choose_bios(std::size_t item, const std::filesystem::path &file, const std::string &expected_sha256);
+  void scd_review_use_profile(std::size_t item, std::size_t option);
+  bool scd_commit_review_item(ReviewItem &item, std::vector<std::string> &added_ids, std::vector<std::string> &prepare_ids);
+  void scd_remember_bios(const scd::BiosProfile &profile);
   std::future<scd::ImportResult> scd_import_job_;      // import / attach / re-verify on a worker (hashing a disc takes seconds)
   bool scd_import_reverify_ = false;                  // the running check is "Verify again" of the existing program
   std::string scd_import_target_;                      // entry id for attach / re-verify, empty for a new game
@@ -455,7 +497,6 @@ private:
   std::map<std::string, std::string> scd_last_outcome_;  // id -> the plain-language end of the last run of this session
   [[nodiscard]] std::filesystem::path scd_dir(const LibraryEntry &entry) const;
   [[nodiscard]] std::vector<std::filesystem::path> scd_recordings(const LibraryEntry &entry) const;
-  void draw_scd_import(float w);
   // The Sega CD games' extra Details section (input recording and replay): a product-specific feature, drawn as a section card after the shared ones.
   float draw_scd_recordings(LibraryEntry &entry, const StatusInfo &info, float w);
   // The fields of the shared Details cards that only a Sega CD game has (BIOS, disc, program, build mode, save data), drawn into the same card slots.

@@ -144,6 +144,7 @@ App::App() : catalog_(fs::path{}) {
   covers_dir_ = library_dir_ / "covers";
   catalog_file_ = library_dir_ / "library.json";
   settings_file_ = library_dir_ / "launcher-settings.json";
+  bios_profiles_file_ = library_dir_ / "sega-cd-bios.json";
   viewer_settings_file_ = library_dir_ / "viewer-settings.cfg";
   catalog_ = Catalog(catalog_file_);
 }
@@ -508,9 +509,9 @@ void App::poll_maintenance() {
 
 void App::browse_import() {
   if (use_builtin_picker()) { open_picker("import", ""); return; }
-  static const std::string all_games = rom_extension_pattern(";");   // the SDL filter keeps the pointer: the pattern outlives the dialog
-  static const SDL_DialogFileFilter filters[] = {{"Game files and zipped games", all_games.c_str()}, {"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"Zipped ROMs", "zip"}, {"All files", "*"}};
-  SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "import", ""}, window_, filters, 5, nullptr, true);
+  static const std::string all_games = import_extension_pattern(";");   // the SDL filter keeps the pointer: the pattern outlives the dialog
+  static const SDL_DialogFileFilter filters[] = {{"Game files, zipped games and Sega CD discs", all_games.c_str()}, {"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"Zipped ROMs", "zip"}, {"Sega CD discs (CUE)", "cue"}, {"All files", "*"}};
+  SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "import", ""}, window_, filters, 6, nullptr, true);
 }
 
 void App::browse_locate(const std::string &id) {
@@ -525,7 +526,7 @@ void App::scd_browse(const std::string &purpose, const std::string &id) {
   static const SDL_DialogFileFilter bios_filters[] = {{"BIOS images", "bin;md;rom"}, {"All files", "*"}};
   static const SDL_DialogFileFilter cue_filters[] = {{"CUE sheets", "cue"}, {"All files", "*"}};
   static const SDL_DialogFileFilter program_filters[] = {{"Programs and all files", "*"}};
-  const bool bios = purpose == "scd_bios" || purpose == "scd_locate_bios", cue = purpose == "scd_cue" || purpose == "scd_locate_cue";
+  const bool bios = purpose == "scd_review_bios" || purpose == "scd_locate_bios", cue = purpose == "scd_locate_cue";
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, purpose, id}, window_, bios ? bios_filters : (cue ? cue_filters : program_filters), bios || cue ? 2 : 1, nullptr, false);
 }
 
@@ -633,6 +634,16 @@ void App::poll_cover_download() {
 }
 
 void App::start_import(std::vector<std::string> paths) {
+  {   // SEG-150-T005: the .cue of a Sega CD disc takes its own (cancellable) disc check; the review below is the same
+    std::vector<std::string> discs, others;
+    for (auto &p : paths) {
+      std::string ext = u8s(from_u8(p).extension());
+      std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      (ext == ".cue" ? discs : others).push_back(std::move(p));
+    }
+    paths = std::move(others);
+    if (!discs.empty()) scd_start_inspect(std::move(discs));
+  }
   if (import_job_.valid()) { for (auto &p : paths) deferred_paths_.push_back(std::move(p)); return; }
   if (paths.empty()) return;
   import_total_ = static_cast<int>(paths.size());
@@ -704,14 +715,21 @@ int App::review_count(ReviewItem::Verdict v, bool selected_only) const {
 }
 
 std::string App::review_summary() const {
-  const int add = review_count(ReviewItem::Verdict::valid, true), choice = review_count(ReviewItem::Verdict::needs_choice, true);
+  const int add = review_count(ReviewItem::Verdict::valid, true), choice = static_cast<int>(std::count_if(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.selectable() && i.verdict == ReviewItem::Verdict::needs_choice && i.selected; }));
+  const int prep = review_preparable_count();
   const int dup = review_count(ReviewItem::Verdict::duplicate, false), bad = review_count(ReviewItem::Verdict::invalid, false);
+  const int bios = static_cast<int>(std::count_if(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.sega_cd && i.verdict == ReviewItem::Verdict::needs_choice; }));
   std::string text = std::to_string(add + choice) + " selected to add";
-  if (add + choice > 0) text += ": " + std::to_string(add) + " can be prepared" + (choice > 0 ? ", " + std::to_string(choice) + " need a choice first (added, not prepared)" : std::string());
+  if (add + choice > 0) text += ": " + std::to_string(prep) + " can be prepared" + (choice > 0 ? ", " + std::to_string(choice) + " need a choice first (added, not prepared)" : std::string()) + (add - prep > 0 ? ", " + std::to_string(add - prep) + " can only be added here" : std::string());
   text += ".";
+  if (bios > 0) text += " " + std::to_string(bios) + (bios == 1 ? " disc needs" : " discs need") + " your BIOS before it can be added.";
   if (dup > 0) text += " " + std::to_string(dup) + " already in your library (skipped).";
   if (bad > 0) text += " " + std::to_string(bad) + " cannot be added.";
   return text;
+}
+
+int App::review_preparable_count() const {
+  return static_cast<int>(std::count_if(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.preparable() && i.selected; }));
 }
 
 void App::discard_review() {
@@ -720,15 +738,20 @@ void App::discard_review() {
 }
 
 // The one place a review becomes library entries. Re-checks identity against the catalog at this moment (it may have changed since inspection):
-// an existing game is never overwritten, and only new, fully-determined games are prepared.
+// an existing game is never overwritten, and only new, fully-determined games are prepared. A Sega CD disc is measured again here (BIOS, CUE, tracks).
 void App::commit_review(bool prepare) {
   // The same rule as the buttons: nothing selectable selected means nothing to add, and Add & prepare needs at least one game that can be prepared.
   if (review_count(ReviewItem::Verdict::valid, true) + review_count(ReviewItem::Verdict::needs_choice, true) == 0) return;
-  if (prepare && review_count(ReviewItem::Verdict::valid, true) == 0) return;
+  if (prepare && review_preparable_count() == 0) return;
   std::vector<std::string> added_ids, prepare_ids;
+  std::vector<ReviewItem> kept;   // a Sega CD item whose BIOS or disc no longer verifies stays in the review with its new state
   int skipped = 0;
   for (ReviewItem &item : review_) {
     if (!item.selectable() || !item.selected) { ++skipped; continue; }
+    if (item.sega_cd) {
+      if (!scd_commit_review_item(item, added_ids, prepare_ids)) { kept.push_back(std::move(item)); continue; }
+      continue;
+    }
     if (catalog_.find(item.rom.platform_id, item.rom.sha256) != nullptr) { ++skipped; continue; }
     const auto result = catalog_.import_rom(item.rom, now_seconds());
     if (result.entry == nullptr) { toast("Could not add " + item.title + ": " + result.error, true); ++skipped; continue; }
@@ -739,6 +762,7 @@ void App::commit_review(bool prepare) {
   const int total = static_cast<int>(review_.size());
   const std::string first_added = added_ids.empty() ? std::string() : added_ids.front();
   review_.clear();
+  for (ReviewItem &k : kept) review_.push_back(std::move(k));
   save_catalog();
   request_status_refresh();
   request_scan();
@@ -746,9 +770,10 @@ void App::commit_review(bool prepare) {
   trace("import=done added=" + std::to_string(added_ids.size()) + " total=" + std::to_string(total) + " prepare=" + (prepare ? std::to_string(prepare_ids.size()) : std::string("0")));
   std::string note = std::to_string(added_ids.size()) + (added_ids.size() == 1 ? " game added" : " games added");
   if (skipped > 0) note += ", " + std::to_string(skipped) + " skipped";
+  if (!kept.empty()) note += ", " + std::to_string(kept.size()) + " need attention";
   if (prepare && !prepare_ids.empty()) note += "; preparing " + std::to_string(prepare_ids.size());
-  go(Page::library);
-  toast(note + ".");
+  if (review_.empty()) go(Page::library);
+  toast(note + ".", !kept.empty() && added_ids.empty());
   if (prepare) request_prepare(prepare_ids);
 }
 
@@ -953,7 +978,12 @@ std::string App::main_action_label(const LibraryEntry &entry, const StatusInfo &
   if (info.rom_missing && !info.runnable() && !info.sega_cd) return "Find game file";
   if (info.runnable()) return "Play";
   if (!info.sega_cd && entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty()) return "Choose mapper";   // required, never guessed: on the game's page
-  if (info.sega_cd || !can_build(entry, info)) return "Details";
+  if (info.sega_cd) {   // SEG-150-T005: the same state words as every other game; the BIOS / disc diagnostics and Locate actions live on the game's page
+    const bool program_problem = info.scd.state == scd::State::no_program || info.scd.state == scd::State::headless_only || info.scd.state == scd::State::stale || info.scd.state == scd::State::mismatched;
+    if (program_problem && can_build(entry, info)) return failures_.count(id) != 0 ? "Retry" : "Prepare";
+    return "Details";
+  }
+  if (!can_build(entry, info)) return "Details";
   switch (info.status) {
     case GameStatus::failed: return "Retry";
     case GameStatus::stale:
@@ -1247,6 +1277,7 @@ void App::update_jobs() {
   poll_status_refresh();
   poll_scan();
   poll_import();
+  poll_scd_inspect();
   scd_poll();
   poll_maintenance();
   poll_cover_download();
@@ -1505,19 +1536,24 @@ void App::run_script() {
     script_shot_ = arg;
   } else if (cmd == "page") {  // go to a page: library | import | storage | settings
     go(arg == "import" ? Page::import_page : arg == "storage" ? Page::storage : arg == "settings" ? Page::settings : Page::library);
-  } else if (cmd == "scd_form_open") {
-    scd_form_open_ = arg != "off";
-  } else if (cmd == "scd_form") {  // SEG-078-T002: fill the "Add a Sega CD game" form: <bios>|<cue>|<program or empty>
-    std::vector<std::string> parts;
-    std::size_t at = 0;
-    for (std::size_t bar; (bar = arg.find('|', at)) != std::string::npos; at = bar + 1) parts.push_back(arg.substr(at, bar - at));
-    parts.push_back(arg.substr(at));
-    parts.resize(3);
-    scd_form_.bios = parts[0]; scd_form_.cue = parts[1]; scd_form_.program = parts[2];
-    scd_form_open_ = true;
-  } else if (cmd == "scd_add") {  // press "Add Sega CD game"
-    if (!scd_form_.bios.empty() && !scd_form_.cue.empty() && !scd_import_job_.valid())
-      scd_start_import({}, from_u8(scd_form_.bios), from_u8(scd_form_.cue), scd_form_.program.empty() ? fs::path{} : from_u8(scd_form_.program));
+  } else if (cmd == "review_bios") {  // SEG-150-T005: `<n> <path>`: choose this BIOS file for review item n, exactly as the chooser's result would
+    const std::size_t sp = arg.find(' ');
+    if (sp != std::string::npos) scd_review_choose_bios(static_cast<std::size_t>(std::atoi(arg.c_str())), from_u8(arg.substr(sp + 1)), {});
+  } else if (cmd == "review_use_profile") {  // `<n> <k>`: use the k-th remembered BIOS for review item n (measured again first)
+    const std::size_t sp = arg.find(' ');
+    if (sp != std::string::npos) scd_review_use_profile(static_cast<std::size_t>(std::atoi(arg.c_str())), static_cast<std::size_t>(std::atoi(arg.c_str() + sp + 1)));
+  } else if (cmd == "review_locate_profile") {  // `<n> <k> <path>`: locate the k-th remembered BIOS at this path (it must be the same file)
+    std::size_t sp = arg.find(' '), sp2 = sp == std::string::npos ? sp : arg.find(' ', sp + 1);
+    if (sp2 != std::string::npos) {
+      const std::size_t n = static_cast<std::size_t>(std::atoi(arg.c_str())), k = static_cast<std::size_t>(std::atoi(arg.c_str() + sp + 1));
+      if (n < review_.size() && review_[n].sega_cd && k < review_[n].scd.options.size()) scd_review_choose_bios(n, from_u8(arg.substr(sp2 + 1)), review_[n].scd.options[k].profile.sha256);
+    }
+  } else if (cmd == "scd_cancel") {  // the Cancel check button of the open game's program verification
+    scd_cancel_ = true;
+  } else if (cmd == "scd_inspect_cancel") {  // the Cancel button of the disc check
+    scd_inspect_cancel_ = true;
+  } else if (cmd == "wait_scd_inspect") {  // hold the script until the disc check has finished
+    if (scd_inspect_job_.valid()) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "scd_attach") {  // "Import program..." for the open game, with this path
     if (!detail_id_.empty()) scd_start_import(detail_id_, {}, {}, from_u8(arg));
   } else if (cmd == "scd_verify") {  // "Verify again" for the open game
@@ -1705,7 +1741,18 @@ void App::run_script() {
     else if (key == "scd_built_inventory") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr && !catalog_.find_id(detail_id_)->sega_cd.program_file_first_inventory.empty() ? catalog_.find_id(detail_id_)->sega_cd.program_file_first_inventory : "-";
     else if (key == "scd_failure") actual = failures_.count(detail_id_) != 0 ? failures_.at(detail_id_) : "-";
     else if (key == "scd_recordings") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? std::to_string(scd_recordings(*catalog_.find_id(detail_id_)).size()) : "-";
-    else if (key == "scd_form_message") actual = scd_form_.message.empty() ? "-" : scd_form_.message;
+    else if (key.rfind("review_disc.", 0) == 0 || key.rfind("review_bios.", 0) == 0 || key.rfind("review_options.", 0) == 0) {   // SEG-150-T005: `<what>.<n>` for review item n
+      const std::size_t n = static_cast<std::size_t>(std::atoi(key.c_str() + key.find('.') + 1));
+      const bool item = n < review_.size() && review_[n].sega_cd;
+      if (!item) actual = "-";
+      else if (key[7] == 'd') actual = review_[n].scd.disc.reason;   // review_disc: the typed reason of the disc check
+      else if (key[7] == 'b') actual = review_[n].scd.chosen ? "chosen:" + (review_[n].scd.bios_region.empty() ? std::string("unknown") : review_[n].scd.bios_region) : "none";   // review_bios
+      else {   // review_options: the remembered BIOS profiles and their measured state, e.g. ok,bios_missing
+        for (const auto &o : review_[n].scd.options) actual += (actual.empty() ? "" : ",") + std::string(scd::bios_check_code(o.state));
+        if (actual.empty()) actual = "-";
+      }
+    }
+    else if (key == "scd_profiles") actual = std::to_string(bios_profiles_.size());
     else if (key == "hints") actual = gamepad_is_last_input() && modal_.kind == Modal::Kind::none && !picker_.open ? "1" : "0";
     else if (key == "want_text") actual = ImGui::GetIO().WantTextInput ? "1" : "0";
     else if (key == "settings_tab") actual = std::to_string(settings_tab_);
@@ -1789,6 +1836,7 @@ int App::run() {
   catalog_.load();
   catalog_notice_ = catalog_.notice();
   settings_ = load_launcher_settings(settings_file_);
+  bios_profiles_ = scd::load_bios_profiles(bios_profiles_file_);
   sv_settings_defaults(&viewer_settings_);
   (void)sv_settings_load(&viewer_settings_, u8s(viewer_settings_file_).c_str());
   if (settings_.adopt_cache_on_start && !catalog_.read_only()) {

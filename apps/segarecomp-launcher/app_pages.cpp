@@ -20,6 +20,8 @@ namespace {
 
 struct Slice { const char *name; ImU32 color; std::uintmax_t bytes; };
 
+fs::path from_u8(const std::string &text) { return fs::path(std::u8string(reinterpret_cast<const char8_t *>(text.c_str()))); }
+
 } // namespace
 
 // ---------------------------------------------------------------- import
@@ -32,20 +34,22 @@ void App::draw_import(float w, float h) {
 // The review of inspected files: what each is (valid / needs a choice / already in the library / cannot be added), then the explicit intent.
 void App::draw_review(float w) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const int preparable = review_count(ReviewItem::Verdict::valid, true);
-  const int addable = preparable + review_count(ReviewItem::Verdict::needs_choice, true);
+  const int preparable = review_preparable_count();
+  const int addable = review_count(ReviewItem::Verdict::valid, true) + static_cast<int>(std::count_if(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.selectable() && i.verdict == ReviewItem::Verdict::needs_choice && i.selected; }));
   heading(ctx_, "REVIEW");
   paragraph(ctx_, ctx_.bold, ctx_.u(13.0F), col::text, w, review_summary());
   paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w,
             "Add & prepare builds a playable version on this computer, one game at a time (several minutes each); you can cancel at any time. Add only keeps the game in your library to prepare later. Nothing starts playing by itself, and your original files are never changed.");
+  if (std::any_of(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.sega_cd; }))
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, w, "Sega CD support is experimental: a successful preparation does not mean the whole game is playable. Your BIOS and disc are only referenced by path, never copied, uploaded or shipped.");
   ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
   const float bh = ctx_.u(36.0F);
   const std::string prepare_label = preparable > 0 ? "Add & prepare (" + std::to_string(preparable) + ")" : std::string("Add & prepare");
   const std::string add_label = "Add only" + (addable > 0 ? " (" + std::to_string(addable) + ")" : std::string());
   const float pw = std::max(ctx_.u(170.0F), text_width(ctx_.bold, ctx_.u(13.0F), prepare_label.c_str()) + ctx_.u(56.0F)), aw = std::max(ctx_.u(120.0F), text_width(ctx_.bold, ctx_.u(13.0F), add_label.c_str()) + ctx_.u(40.0F));
-  if (button(ctx_, "review_prepare", prepare_label.c_str(), ImVec2(pw, bh), Style::primary, preparable > 0 && !import_job_.valid())) commit_review(true);
+  if (button(ctx_, "review_prepare", prepare_label.c_str(), ImVec2(pw, bh), Style::primary, preparable > 0 && !import_job_.valid() && !scd_inspect_job_.valid())) commit_review(true);
   ImGui::SameLine(0.0F, ctx_.u(8.0F));
-  if (button(ctx_, "review_add", add_label.c_str(), ImVec2(aw, bh), Style::secondary, addable > 0 && !import_job_.valid())) commit_review(false);
+  if (button(ctx_, "review_add", add_label.c_str(), ImVec2(aw, bh), Style::secondary, addable > 0 && !import_job_.valid() && !scd_inspect_job_.valid())) commit_review(false);
   ImGui::SameLine(0.0F, ctx_.u(8.0F));
   if (button(ctx_, "review_decline", "Cancel", ImVec2(ctx_.u(96.0F), bh), Style::ghost)) discard_review();
   ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
@@ -57,8 +61,18 @@ void App::draw_review(float w) {
     const ImU32 color = bad ? col::err : (choice ? col::warn : (dup ? col::info : col::ok));
     const char *verdict = bad ? "Cannot be added" : (choice ? "Needs a choice" : (dup ? "Already in library" : "Valid"));
     const float text_w = w - text_x - ctx_.u(14.0F) - (item.entry_id.empty() ? 0.0F : btn_w + ctx_.u(8.0F));
-    const auto lines = wrap(ctx_.regular, ctx_.u(11.5F), text_w, item.message + " " + item.next_action);
-    const float rh = ctx_.u(34.0F) + static_cast<float>(lines.size()) * ctx_.u(15.0F);
+    const auto lines = wrap(ctx_.regular, ctx_.u(11.5F), text_w, item.message + " " + item.next_action + (item.verdict == ReviewItem::Verdict::valid && !item.prepare_blocked.empty() ? " " + item.prepare_blocked : std::string()));
+    // SEG-150-T005: the BIOS step of a Sega CD disc whose tracks are complete: a note, the remembered BIOS (each with its measured state) and one chooser.
+    const bool bios_step = item.sega_cd && item.scd.disc.verdict == scd::DiscInspection::Verdict::ready && !dup;
+    const float ow = text_w, row_h = ctx_.u(30.0F);
+    std::vector<std::string> note_lines;
+    std::size_t shown = 0;
+    if (bios_step) {
+      note_lines = wrap(ctx_.regular, ctx_.u(11.5F), ow, item.scd.note);
+      shown = std::min<std::size_t>(item.scd.options.size(), 4U);
+    }
+    const float bios_h = bios_step ? ctx_.u(10.0F) + static_cast<float>(note_lines.size()) * ctx_.u(15.0F) + static_cast<float>(shown) * row_h + ctx_.u(40.0F) : 0.0F;
+    const float rh = ctx_.u(34.0F) + static_cast<float>(lines.size()) * ctx_.u(15.0F) + bios_h;
     card(ctx_, dl, a, ImVec2(a.x + w, a.y + rh));
     ImGui::PushID(static_cast<int>(i));
     if (item.selectable()) {
@@ -67,14 +81,40 @@ void App::draw_review(float w) {
     } else {
       tone_mark(ctx_, dl, ImVec2(a.x + ctx_.u(22.0F), a.y + ctx_.u(19.0F)), ctx_.u(16.0F), color);
     }
-    const float verdict_w = text_width(ctx_.bold, ctx_.u(11.5F), verdict);
+    const char *verdict_text = item.sega_cd && choice ? "Needs your BIOS" : verdict;
+    const float verdict_w = text_width(ctx_.bold, ctx_.u(11.5F), verdict_text);
     draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(a.x + text_x, a.y + ctx_.u(8.0F)), ellipsize(ctx_.bold, ctx_.u(13.0F), text_w - verdict_w - ctx_.u(14.0F), item.title).c_str());
-    draw_text(dl, ctx_.bold, ctx_.u(11.5F), color, ImVec2(a.x + text_x + text_w - verdict_w, a.y + ctx_.u(9.0F)), verdict);
+    draw_text(dl, ctx_.bold, ctx_.u(11.5F), color, ImVec2(a.x + text_x + text_w - verdict_w, a.y + ctx_.u(9.0F)), verdict_text);
     float ly = a.y + ctx_.u(29.0F);
     for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text2, ImVec2(a.x + text_x, ly), l.c_str()); ly += ctx_.u(15.0F); }
     if (!item.entry_id.empty()) {
       ImGui::SetCursorScreenPos(ImVec2(a.x + w - btn_w - ctx_.u(10.0F), a.y + ctx_.u(8.0F)));
       if (button(ctx_, "open", "Open", ImVec2(btn_w, ctx_.u(28.0F)), Style::secondary)) open_details(item.entry_id);
+    }
+    if (bios_step) {
+      ly += ctx_.u(6.0F);
+      dl->AddRectFilled(ImVec2(a.x + text_x, ly - ctx_.u(3.0F)), ImVec2(a.x + text_x + ow, ly - ctx_.u(2.0F)), rgba(34, 70, 140));
+      for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), item.scd.note_error ? col::err : (item.scd.chosen ? col::ok : col::warn), ImVec2(a.x + text_x, ly), l.c_str()); ly += ctx_.u(15.0F); }
+      for (std::size_t k = 0; k < shown; ++k) {
+        const ScdReviewBios &o = item.scd.options[k];
+        const bool in_use = item.scd.chosen && item.scd.bios_sha256 == o.profile.sha256;
+        const bool usable = o.state == scd::BiosCheckState::ok;
+        std::string line = (o.profile.region.empty() ? std::string("BIOS (region not stated)") : o.profile.region + " BIOS") + " - " + u8s(from_u8(o.profile.path).filename()) + ": ";
+        line += usable ? "verified just now" + std::string(o.region_conflict ? ", region differs from the disc" : "") : (o.state == scd::BiosCheckState::missing ? "not at its remembered location" : o.state == scd::BiosCheckState::changed ? "the file changed since it was verified" : "cannot be read");
+        const float bx = a.x + text_x + ow - btn_w;
+        draw_text(dl, ctx_.regular, ctx_.u(11.5F), usable ? col::text : col::warn, ImVec2(a.x + text_x, ly + ctx_.u(7.0F)), ellipsize(ctx_.regular, ctx_.u(11.5F), ow - btn_w - ctx_.u(10.0F), line).c_str());
+        ImGui::SetCursorScreenPos(ImVec2(bx, ly + ctx_.u(1.0F)));
+        ImGui::PushID(static_cast<int>(k) + 100);
+        if (in_use) draw_text(dl, ctx_.bold, ctx_.u(11.5F), col::ok, ImVec2(bx + ctx_.u(14.0F), ly + ctx_.u(7.0F)), "In use");
+        else if (usable) { if (button(ctx_, "use", "Use", ImVec2(btn_w, ctx_.u(26.0F)), Style::secondary)) scd_review_use_profile(i, k); }
+        else if (button(ctx_, "locate", "Locate...", ImVec2(btn_w, ctx_.u(26.0F)), Style::secondary)) scd_browse("scd_review_bios", o.profile.sha256 + ":" + item.path);
+        ImGui::PopID();
+        ly += row_h;
+      }
+      ImGui::SetCursorScreenPos(ImVec2(a.x + text_x, ly + ctx_.u(2.0F)));
+      const char *choose_label = item.scd.chosen || !item.scd.options.empty() ? "Choose another BIOS..." : "Choose BIOS...";
+      if (button(ctx_, "choose_bios", choose_label, ImVec2(std::max(ctx_.u(190.0F), text_width(ctx_.bold, ctx_.u(13.0F), choose_label) + ctx_.u(56.0F)), ctx_.u(30.0F)), item.scd.chosen ? Style::secondary : Style::primary, true, ctx_.icon("folder")))
+        scd_browse("scd_review_bios", ":" + item.path);
     }
     ImGui::PopID();
     ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(5.0F)));
@@ -86,7 +126,6 @@ void App::draw_import_body(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   if (!review_.empty()) draw_review(w);
   draw_drop_zone(w, h, true);
-  draw_scd_import(w);  // SEG-078-T002: Sega CD games are a BIOS + a disc + an imported program, never a single dropped file
   if (import_job_.valid()) {
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -94,7 +133,17 @@ void App::draw_import_body(float w, float h) {
     draw_text(dl, ctx_.regular, ctx_.u(13.0F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y), ("Checking files: " + std::to_string(import_done_.load()) + " of " + std::to_string(import_total_)).c_str());
     ImGui::Dummy(ImVec2(w, ctx_.u(24.0F)));
   }
-  if (review_.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "Files are added by reference: Segarecomp never modifies or uploads your originals. A ZIP archive is read without modification and its game is copied into your local library. The same game is recognised by its content, so adding it twice never creates a copy.");
+  if (scd_inspect_job_.valid()) {   // SEG-150-T005: the disc check reads and hashes the track files; Cancel is always available
+    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    spinner(ctx_, dl, ImVec2(p.x + ctx_.u(8.0F), p.y + ctx_.u(15.0F)), ctx_.u(7.0F), col::info);
+    draw_text(dl, ctx_.regular, ctx_.u(13.0F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y + ctx_.u(7.0F)), scd_inspect_cancel_.load() ? "Cancelling the disc check..." : "Checking the disc and its track files...");
+    ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(300.0F), p.y));
+    if (button(ctx_, "scd_inspect_cancel", "Cancel", ImVec2(ctx_.u(90.0F), ctx_.u(30.0F)), Style::ghost, !scd_inspect_cancel_.load())) scd_inspect_cancel_ = true;
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(34.0F)));
+    ImGui::Dummy(ImVec2(w, 1));
+  }
+  if (review_.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "Files are added by reference: Segarecomp never modifies or uploads your originals. A ZIP archive is read without modification and its game is copied into your local library. The same game is recognised by its content, so adding it twice never creates a copy. A Sega CD disc is added from its .cue (the track files stay beside it) together with your own BIOS image: both stay where they are.");
 }
 
 // ---------------------------------------------------------------- storage
