@@ -8,6 +8,7 @@ go back, and the page changes accordingly. Game Details is contextual (not in th
 usage: launcher_gui_navigation_test.py <path to the Segarecomp executable>
 """
 import os
+import shutil
 import pathlib
 import subprocess
 import struct
@@ -40,6 +41,10 @@ def main():
                     "runtime/libs/viewer/src/sv_host.c", "runtime/libs/viewer/src/sv_input_diag.c", "sdl3/include/SDL3/SDL.h"):
             (tmp / "package" / rel).parent.mkdir(parents=True, exist_ok=True)
             (tmp / "package" / rel).write_text("x")
+        # The CLI placeholder is the project's own fake_segarecomp (built next to the launcher), like the other GUI tests: a text file named segarecomp.exe is not something Windows can start.
+        fake_cli = pathlib.Path(exe).resolve().parent / ("fake_segarecomp" + suffix)
+        if fake_cli.is_file():
+            shutil.copy(fake_cli, tmp / "package" / "bin" / ("segarecomp" + suffix))
         # Fictional synthetic cartridges (distinct digests): enough cards that the library grid scrolls.
         titles = ["Fictional Nav Test"] + [f"Synthetic Card {i:02d}" for i in range(1, 13)]
         for index, title in enumerate(titles):
