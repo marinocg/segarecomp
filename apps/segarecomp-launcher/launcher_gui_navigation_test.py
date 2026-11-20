@@ -35,7 +35,8 @@ def main():
                    SEGARECOMP_HOME=str(tmp / "package"))
         # A complete (empty) installation layout: without it the Library carries the standing "Installation incomplete" notice (F8), which moves every card down and is not what this test
         # measures (scroll and focus restoration). The files are placeholders; nothing here is built.
-        for rel in ("bin/segarecomp", "toolchain/zig", "runtime/platforms/genesis/runtime/runtime.c", "runtime/platforms/genesis/viewer/viewer_sdl3.c", "runtime/platforms/master-system/viewer/sms_viewer_sdl3.c",
+        suffix = ".exe" if sys.platform == "win32" else ""  # locate_layout() requires segarecomp/zig with the platform's executable suffix; without it Windows shows the notice
+        for rel in ("bin/segarecomp" + suffix, "toolchain/zig" + suffix, "runtime/platforms/genesis/runtime/runtime.c", "runtime/platforms/genesis/viewer/viewer_sdl3.c", "runtime/platforms/master-system/viewer/sms_viewer_sdl3.c",
                     "runtime/libs/viewer/src/sv_host.c", "runtime/libs/viewer/src/sv_input_diag.c", "sdl3/include/SDL3/SDL.h"):
             (tmp / "package" / rel).parent.mkdir(parents=True, exist_ok=True)
             (tmp / "package" / rel).write_text("x")
