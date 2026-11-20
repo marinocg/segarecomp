@@ -397,37 +397,39 @@ void App::draw_sidebar(float x, float y, float w, float h) {
 void App::draw_drop_zone(float w, float h, bool compact_box) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 origin = ImGui::GetCursorScreenPos();
-  // once there are import results the drop zone shrinks so the results are visible without scrolling
-  const float bw = w, bh = compact_box ? ctx_.u(!import_results_.empty() || scd_form_open_ ? 150.0F : (win_h_ < ctx_.u(600.0F) ? 200.0F : 322.0F)) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
+  const float bw = w;
+  // The box is as tall as its content needs (icon, headline, file types, the Browse and Sega CD buttons) and never shorter: a fixed height let the Sega CD button
+  // spill over the dashed edge in a short window. With a review above it, or the Sega CD form below it, only the content height is used.
+  const bool slim = !review_.empty() || scd_form_open_ || win_h_ < ctx_.u(600.0F);
+  const bool with_icon = !slim;
+  const float isz = ctx_.u(compact_box ? 52.0F : 64.0F), hpx = ctx_.u(compact_box ? 18.0F : 21.0F), npx = ctx_.u(12.0F);
+  const float content_h = (with_icon ? isz + ctx_.u(10.0F) : 0.0F) + hpx + ctx_.u(8.0F) + npx + ctx_.u(6.0F) + npx + ctx_.u(14.0F) + ctx_.u(36.0F) + ctx_.u(8.0F) + ctx_.u(30.0F);
+  const float bh = compact_box ? std::max(content_h + ctx_.u(34.0F), ctx_.u(slim ? 0.0F : 300.0F)) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
   const ImVec2 a(origin.x, origin.y), b(a.x + bw, a.y + bh);
   const bool hover = ImGui::IsMouseHoveringRect(a, b, false);
   const bool active = dragging_;
   dl->AddRectFilled(a, b, active ? rgba(10, 34, 70) : (hover ? col::panel_hover : rgba(8, 18, 42)), ctx_.u(8.0F));
   dashed_rect(dl, ImVec2(a.x + ctx_.u(6.0F), a.y + ctx_.u(6.0F)), ImVec2(b.x - ctx_.u(6.0F), b.y - ctx_.u(6.0F)), active ? col::dash_hover : col::dash, std::max(1.0F, std::round(ctx_.u(2.0F))), ctx_.u(10.0F), ctx_.u(7.0F));
   const float cx = (a.x + b.x) * 0.5F;
-  const bool tiny = bh < ctx_.u(170.0F);
-  float cy = a.y + (bh - (tiny ? ctx_.u(108.0F) : (compact_box ? ctx_.u(170.0F) : ctx_.u(210.0F)))) * 0.5F;
-  if (SDL_Texture *drop = tiny ? nullptr : ctx_.asset("icon-drop.png")) { const float isz = ctx_.u(compact_box ? 52.0F : 64.0F); icon_image(dl, drop, ImVec2(cx - isz * 0.5F, cy), isz, active ? rgba(150, 235, 255) : IM_COL32_WHITE); cy += isz + ctx_.u(10.0F); }
-  const char *headline = active ? "Release to add the ROMs" : "Drag & drop ROM files here";
-  const float hpx = ctx_.u(compact_box ? 18.0F : 21.0F);
+  float cy = a.y + (bh - content_h) * 0.5F;
+  if (SDL_Texture *drop = with_icon ? ctx_.asset("icon-drop.png") : nullptr) { icon_image(dl, drop, ImVec2(cx - isz * 0.5F, cy), isz, active ? rgba(150, 235, 255) : IM_COL32_WHITE); }
+  if (with_icon) cy += isz + ctx_.u(10.0F);
+  const char *headline = active ? "Release to review these files" : (review_.empty() ? "Drag & drop game files here" : "Drop more files to review");
   draw_text(dl, ctx_.bold, hpx, col::text, ImVec2(cx - text_width(ctx_.bold, hpx, headline) * 0.5F, cy), headline);
   cy += hpx + ctx_.u(8.0F);
-  const char *note = "Genesis / Mega Drive and Master System ROMs, or ZIP archives";
-  const float npx = ctx_.u(12.0F);
+  const char *note = "Genesis / Mega Drive and Master System games, or ZIP archives";
   draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, note) * 0.5F, cy), note);
-  cy += npx + ctx_.u(16.0F);
+  cy += npx + ctx_.u(6.0F);
+  const std::string types = "File types: " + rom_extension_pattern("  ", ".");   // read from the same list the choosers use
+  draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, types.c_str()) * 0.5F, cy), types.c_str());
+  cy += npx + ctx_.u(14.0F);
   // SEG-078-T002: a Sega CD game is a BIOS plus a disc, not a dropped file: its own small form opens below, and the drop zone makes room for it.
-  const float bw1 = ctx_.u(180.0F), bw2 = ctx_.u(200.0F), gap2 = ctx_.u(10.0F);
+  const float bw1 = ctx_.u(180.0F), bw2 = ctx_.u(200.0F);
   const char *scd_label_text = scd_form_open_ ? "Hide Sega CD form" : "Add Sega CD game...";
-  if (tiny) {
-    ImGui::SetCursorScreenPos(ImVec2(cx - (bw1 + gap2 + bw2) * 0.5F, cy));
-  } else {
-    ImGui::SetCursorScreenPos(ImVec2(cx - bw1 * 0.5F, cy));
-  }
-  if (button(ctx_, "dz_browse", "Browse for ROMs...", ImVec2(bw1, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("folder"))) browse_import();
-  if (tiny) ImGui::SetCursorScreenPos(ImVec2(cx - (bw1 + gap2 + bw2) * 0.5F + bw1 + gap2, cy));
-  else ImGui::SetCursorScreenPos(ImVec2(cx - bw2 * 0.5F, cy + ctx_.u(44.0F)));
-  if (button(ctx_, "dz_scd", scd_label_text, ImVec2(bw2, tiny ? ctx_.u(36.0F) : ctx_.u(30.0F)), Style::ghost, true, ctx_.icon("controller"))) scd_form_open_ = !scd_form_open_;
+  ImGui::SetCursorScreenPos(ImVec2(cx - bw1 * 0.5F, cy));
+  if (button(ctx_, "dz_browse", "Choose files...", ImVec2(bw1, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("folder"))) browse_import();
+  ImGui::SetCursorScreenPos(ImVec2(cx - bw2 * 0.5F, cy + ctx_.u(44.0F)));
+  if (button(ctx_, "dz_scd", scd_label_text, ImVec2(bw2, ctx_.u(30.0F)), Style::ghost, true, ctx_.icon("controller"))) scd_form_open_ = !scd_form_open_;
   ImGui::SetCursorScreenPos(ImVec2(origin.x, b.y + ctx_.u(8.0F)));
   ImGui::Dummy(ImVec2(w, ctx_.u(2.0F)));
 }
@@ -455,6 +457,20 @@ static void card_focus_bookkeeping(const std::string &id, std::string &return_fo
     return_focus_id.clear();
     focus_request.clear();
   }
+}
+
+// The one main action of a game, drawn on its card or row. Pointer shortcut (not a D-pad stop, like the favorite star was): a controller reaches the same actions
+// through the card's menu (North) and the details page.
+void App::draw_main_action(const LibraryEntry &entry, const StatusInfo &info, ImVec2 pos, ImVec2 size) {
+  const std::string label = main_action_label(entry, info);
+  const bool play_action = label == "Play";
+  const bool enabled = label != "Stopping..." && (!play_action || can_play(info));
+  ImGui::SetCursorScreenPos(pos);
+  ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+  const bool pressed = button(ctx_, "main", label.c_str(), size, play_action ? Style::primary : Style::secondary, enabled);
+  ImGui::PopItemFlag();
+  if (play_action) play_rects_[entry.id()] = ImRect(pos, ImVec2(pos.x + size.x, pos.y + size.y));
+  if (pressed && !select_mode_) run_main_action(entry.id());
 }
 
 void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float h) {
@@ -490,8 +506,9 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     const Badge short_badge = badge_for(entry, info);
     if (short_badge.spinner) spinner(ctx_, dl, ImVec2(tx + ctx_.u(5.0F), y + ctx_.u(53.0F)), ctx_.u(4.5F), short_badge.color);
     else tone_mark(ctx_, dl, ImVec2(tx + ctx_.u(5.0F), y + ctx_.u(53.0F)), ctx_.u(11.0F), short_badge.color);
-    draw_text(dl, ctx_.bold, ctx_.u(12.0F), short_badge.color, ImVec2(tx + ctx_.u(13.0F), y + ctx_.u(46.0F)), short_badge.label.c_str());
+    draw_text(dl, ctx_.bold, ctx_.u(12.0F), short_badge.color, ImVec2(tx + ctx_.u(13.0F), y + ctx_.u(46.0F)), ellipsize(ctx_.bold, ctx_.u(12.0F), available - ctx_.u(13.0F) - (select_mode_ ? 0.0F : ctx_.u(112.0F)), short_badge.label).c_str());
     draw_text(dl, ctx_.regular, ctx_.u(11.0F), info.rom_missing ? col::warn : col::dim, ImVec2(tx, y + ctx_.u(64.0F)), info.rom_missing ? "ROM file missing" : activity_line(entry, now).c_str());
+    if (!select_mode_) draw_main_action(entry, info, ImVec2(b.x - pad - ctx_.u(104.0F), y + ctx_.u(40.0F)), ImVec2(ctx_.u(104.0F), ctx_.u(26.0F)));
     if (focused) focus_ring(ctx_, dl, a, b);
     ImGui::PopID();
     if (pressed) {
@@ -521,41 +538,23 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     ImGui::SetCursorScreenPos(ImVec2(ca.x + ctx_.u(5.0F), ca.y + ctx_.u(5.0F)));
     if (checkbox(ctx_, "sel", "", &on)) { if (on) selected_.insert(entry.id()); else selected_.erase(entry.id()); }
   }
-  // the build state sits on the art's lower edge, where a box-art library shows it
-  {
-    const Badge badge = badge_for(entry, info);
-    const std::string &label = badge.label;
-    const ImU32 c = badge.color;
-    const float px = ctx_.u(11.5F), bw = text_width(ctx_.bold, px, label.c_str()) + ctx_.u(26.0F), bh = px + ctx_.u(10.0F);
-    const ImVec2 p0(ca.x + ctx_.u(6.0F), cb.y - bh - ctx_.u(6.0F));
-    dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), rgba(4, 10, 26, 225), ctx_.u(4.0F));
-    dl->AddRect(p0, ImVec2(p0.x + bw, p0.y + bh), (c & 0x00FFFFFFU) | 0x90000000U, ctx_.u(4.0F));
-    if (badge.spinner) spinner(ctx_, dl, ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(4.0F), c);
-    else tone_mark(ctx_, dl, ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(11.0F), c);
-    draw_text(dl, ctx_.bold, px, c, ImVec2(p0.x + ctx_.u(18.0F), p0.y + (bh - px) * 0.5F - ctx_.u(1.0F)), label.c_str());
-  }
+  // name, platform, ONE state (symbol + color + text), and the game's one main action
   const float tpx = ctx_.u(14.0F), spx = ctx_.u(11.5F);
-  float ty = cb.y + ctx_.u(9.0F);
+  float ty = cb.y + ctx_.u(8.0F);
   const std::string shown_title = ellipsize(ctx_.bold, tpx, cw, entry.title());
   draw_text(dl, ctx_.bold, tpx, col::text, ImVec2(ca.x, ty), shown_title.c_str());
   if (shown_title != entry.title() && hovered) tooltip(ctx_, entry.title().c_str());
-  ty += tpx + ctx_.u(8.0F);
-  icon_image(dl, ctx_.icon("controller"), ImVec2(ca.x, ty - ctx_.u(1.0F)), ctx_.u(14.0F), col::info);
-  // The platform and region take what they need (they identify the game); the "last played / added" text uses what remains.
-  const std::string where = ellipsize(ctx_.regular, spx, cw - ctx_.u(19.0F), platform_region(entry));
-  const float where_w = text_width(ctx_.regular, spx, where.c_str());
-  const std::string act = activity_line(entry, now);
-  const std::string act_shown = ellipsize(ctx_.regular, spx, std::max(0.0F, cw - ctx_.u(19.0F) - where_w - ctx_.u(8.0F)), act);
-  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x + ctx_.u(19.0F), ty), where.c_str());
-  draw_text(dl, ctx_.regular, spx, col::dim, ImVec2(cb.x - text_width(ctx_.regular, spx, act_shown.c_str()), ty), act_shown.c_str());
-  if (info.runnable() && !select_mode_ && (pointer_over || focused)) {
-    const float ps = ctx_.u(40.0F);
-    ImGui::SetCursorScreenPos(ImVec2(ca.x + (cw - ps) * 0.5F, ca.y + (chh - ps) * 0.5F));
-    play_rects_[entry.id()] = ImRect(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + ps, ImGui::GetCursorScreenPos().y + ps));
-    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // pointer shortcut: a controller plays through Details or the card's menu
-    if (icon_button(ctx_, "play", ctx_.icon("play"), ps, true, can_play(info), "Play")) play(entry.id());
-    ImGui::PopItemFlag();
+  ty += tpx + ctx_.u(5.0F);
+  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x, ty), ellipsize(ctx_.regular, spx, cw, platform_region(entry)).c_str());
+  ty += spx + ctx_.u(7.0F);
+  {
+    const Badge badge = badge_for(entry, info);
+    if (badge.spinner) spinner(ctx_, dl, ImVec2(ca.x + ctx_.u(6.0F), ty + ctx_.u(7.0F)), ctx_.u(4.5F), badge.color);
+    else tone_mark(ctx_, dl, ImVec2(ca.x + ctx_.u(6.0F), ty + ctx_.u(7.0F)), ctx_.u(12.0F), badge.color);
+    draw_text(dl, ctx_.bold, ctx_.u(12.0F), badge.color, ImVec2(ca.x + ctx_.u(17.0F), ty), ellipsize(ctx_.bold, ctx_.u(12.0F), cw - ctx_.u(17.0F), badge.label).c_str());
   }
+  ty += ctx_.u(12.0F) + ctx_.u(7.0F);
+  if (!select_mode_) draw_main_action(entry, info, ImVec2(ca.x, ty), ImVec2(cw, ctx_.u(26.0F)));
   ImGui::PopID();
   if (pressed) {
     if (select_mode_) { if (selected) selected_.erase(entry.id()); else selected_.insert(entry.id()); }
@@ -590,7 +589,8 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   draw_cover(dl, entry, ImVec2(x, a.y + pad), ImVec2(x + tw, a.y + pad + th), ctx_.u(3.0F));
   x += tw + pad * 1.6F;
   const float px = ctx_.u(14.0F), spx = ctx_.u(11.5F);
-  const float actions_w = ctx_.u(info.runnable() && !select_mode_ ? 74.0F : 40.0F);
+  const float row_main_w = w > ctx_.u(640.0F) ? 128.0F : 104.0F;
+  const float actions_w = ctx_.u(select_mode_ ? 40.0F : 40.0F + row_main_w + 6.0F);
   const bool wide_row = w > ctx_.u(640.0F);
   const float title_w = std::max(ctx_.u(120.0F), w * (wide_row ? 0.32F : 0.38F));
   draw_text(dl, ctx_.bold, px, col::text, ImVec2(x, a.y + h * 0.5F - px * 1.1F), ellipsize(ctx_.bold, px, title_w - (entry.favorite ? ctx_.u(20.0F) : 0.0F), entry.title()).c_str());
@@ -619,11 +619,9 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
     ImGui::PopItemFlag();
     bx -= ps2 + ctx_.u(6.0F);
   }
-  if (info.runnable() && !select_mode_) {
-    ImGui::SetCursorScreenPos(ImVec2(bx, a.y + (h - ps2) * 0.5F));
-    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
-    if (icon_button(ctx_, "play", ctx_.icon("play"), ps2, true, can_play(info), "Play")) play(entry.id());
-    ImGui::PopItemFlag();
+  if (!select_mode_) {
+    const float mw = ctx_.u(row_main_w);
+    draw_main_action(entry, info, ImVec2(bx - mw + ps2, a.y + (h - ctx_.u(30.0F)) * 0.5F), ImVec2(mw, ctx_.u(30.0F)));
   }
   ImGui::PopID();
   ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + ctx_.u(6.0F)));
@@ -634,12 +632,82 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   }
 }
 
+// A new profile's first screen: what the product does, one primary action, and a way past it. It never appears for a profile that has a library or has
+// already answered the first-run question, and it stores nothing (skipping lasts for the session).
+void App::draw_welcome(float w, float h) {
+  (void)h;
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 a = ImGui::GetCursorScreenPos();
+  const float pad = ctx_.u(22.0F), iw = w - 2 * pad;
+  float y = a.y + pad;
+  const float top = a.y;
+  dl->ChannelsSplit(2);   // the card is painted last, behind the content
+  dl->ChannelsSetCurrent(1);
+  draw_text(dl, ctx_.display, ctx_.u(16.0F), rgba(120, 205, 255), ImVec2(a.x + pad, y), "WELCOME TO SEGARECOMP");
+  y += ctx_.u(34.0F);
+  const auto body = [&](ImFont *font, float px, ImU32 color, const std::string &text) {
+    for (const auto &l : wrap(font, px, iw, text)) { draw_text(dl, font, px, color, ImVec2(a.x + pad, y), l.c_str()); y += px + ctx_.u(4.0F); }
+    y += ctx_.u(6.0F);
+  };
+  body(ctx_.bold, ctx_.u(15.0F), col::text, "Turn your own Sega game files into native games for this computer.");
+  body(ctx_.regular, ctx_.u(12.5F), col::text2, "Add a game file, check what Segarecomp found, then prepare it. Preparing builds a playable version here; it can take a few minutes the first time. Your original files are never changed or uploaded.");
+  y += ctx_.u(4.0F);
+  const char *steps[] = {"Add a game file (Genesis / Mega Drive, Master System, or a ZIP)", "Review the result: valid, already added, or needs a choice", "Prepare and play, when you decide to"};
+  for (int i = 0; i < 3; ++i) {
+    step_circle(ctx_, dl, ImVec2(a.x + pad + ctx_.u(11.0F), y + ctx_.u(10.0F)), ctx_.u(11.0F), i + 1);
+    const auto lines = wrap(ctx_.regular, ctx_.u(12.5F), iw - ctx_.u(34.0F), steps[i]);
+    float ly = y + ctx_.u(3.0F);
+    for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text, ImVec2(a.x + pad + ctx_.u(30.0F), ly), l.c_str()); ly += ctx_.u(16.0F); }
+    y += std::max(ctx_.u(26.0F), ly - y + ctx_.u(6.0F));
+  }
+  y += ctx_.u(10.0F);
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+  if (button(ctx_, "welcome_add", "Add game", ImVec2(ctx_.u(170.0F), ctx_.u(40.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
+  ImGui::SameLine(0.0F, ctx_.u(10.0F));
+  if (button(ctx_, "welcome_skip", "Skip to Library", ImVec2(ctx_.u(160.0F), ctx_.u(40.0F)), Style::secondary)) { welcome_dismissed_ = true; trace("welcome=skipped"); }
+  y += ctx_.u(40.0F) + ctx_.u(8.0F);
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+  if (button(ctx_, "welcome_scd", "Add a Sega CD game...", ImVec2(ctx_.u(210.0F), ctx_.u(30.0F)), Style::ghost, true, ctx_.icon("controller"))) { scd_form_open_ = true; go(Page::import_page); }
+  y += ctx_.u(30.0F) + pad;
+  dl->ChannelsSetCurrent(0);
+  card(ctx_, dl, ImVec2(a.x, top), ImVec2(a.x + w, y), false, false, rgba(8, 19, 46, 240));
+  dl->ChannelsMerge();
+  ImGui::SetCursorScreenPos(ImVec2(a.x, y));
+  ImGui::Dummy(ImVec2(w, 1));
+}
+
+void App::draw_empty_library(float w, float h) {
+  (void)h;
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 a = ImGui::GetCursorScreenPos();
+  const float pad = ctx_.u(22.0F), iw = w - 2 * pad;
+  float y = a.y + pad;
+  dl->ChannelsSplit(2);
+  dl->ChannelsSetCurrent(1);
+  draw_text(dl, ctx_.bold, ctx_.u(17.0F), col::text, ImVec2(a.x + pad, y), "Your library is empty");
+  y += ctx_.u(30.0F);
+  const std::string text = "Add a game file to get started. You review it before anything is added. Accepted: " + rom_extension_pattern(" ", ".") + " (Genesis / Mega Drive, Master System, or a ZIP that contains one).";
+  for (const auto &l : wrap(ctx_.regular, ctx_.u(12.5F), iw, text)) { draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text2, ImVec2(a.x + pad, y), l.c_str()); y += ctx_.u(17.0F); }
+  y += ctx_.u(12.0F);
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+  if (button(ctx_, "empty_add", "Add game", ImVec2(ctx_.u(170.0F), ctx_.u(40.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
+  ImGui::SameLine(0.0F, ctx_.u(10.0F));
+  if (button(ctx_, "empty_scd", "Add a Sega CD game...", ImVec2(ctx_.u(210.0F), ctx_.u(40.0F)), Style::ghost, true, ctx_.icon("controller"))) { scd_form_open_ = true; go(Page::import_page); }
+  y += ctx_.u(40.0F) + pad;
+  dl->ChannelsSetCurrent(0);
+  card(ctx_, dl, a, ImVec2(a.x + w, y), false, false, rgba(8, 19, 46, 240));
+  dl->ChannelsMerge();
+  ImGui::SetCursorScreenPos(ImVec2(a.x, y));
+  ImGui::Dummy(ImVec2(w, 1));
+}
+
 void App::draw_library(float w, float h) {
   const auto &all = catalog_.entries();
-  page_header(ctx_, w, "LIBRARY HOME", "Browse, search and manage your recompiled games.");
+  const bool welcome = all.empty() && ask_intermediates_ && !welcome_dismissed_;
+  if (!welcome) page_header(ctx_, w, "LIBRARY HOME", "Browse, search and manage your recompiled games.");   // the welcome card carries its own title
   if (all.empty()) {
     if (!catalog_notice_.empty() || catalog_.read_only()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, catalog_.notice());
-    draw_import_body(w, h);
+    if (welcome) draw_welcome(w, h); else draw_empty_library(w, h);
     return;
   }
   // SEG-069-T004: the search row, the filters and the game grid live in ONE scrolling child. ImGui's directional navigation is scored per window, and a
@@ -729,7 +797,7 @@ void App::draw_library(float w, float h) {
     const float usable = w - ctx_.u(14.0F);
     const int columns = std::max(1, static_cast<int>((usable + gap) / (card_w + gap)));
     const float cw = card_w + (usable + gap - static_cast<float>(columns) * (card_w + gap)) / static_cast<float>(columns);
-    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) / kCoverAspect + ctx_.u(66.0F);
+    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) / kCoverAspect + ctx_.u(104.0F);
     const int rows = (static_cast<int>(visible.size()) + columns - 1) / columns;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGuiListClipper clipper;
@@ -945,10 +1013,21 @@ void App::draw_modal(float w, float h) {
   ImGui::End();
   if (modal_.kind == Modal::Kind::first_run_intermediates) {
     if (choose_keep || choose_remove) {
-      if (apply_intermediates_choice(choose_remove)) { modal_ = Modal{}; toast(choose_remove ? "Intermediates will be removed after successful builds." : "Intermediates will be kept."); }
+      if (apply_intermediates_choice(choose_remove)) {
+        modal_ = Modal{};
+        toast(choose_remove ? "Intermediates will be removed after successful builds." : "Intermediates will be kept.");
+        // the preparation that raised the question now runs (a Prepare & play keeps its single launch request)
+        std::vector<std::string> pending;
+        pending.swap(first_run_pending_);
+        const std::string play_id = std::exchange(first_run_play_, std::string());
+        for (const auto &id : pending) { if (id == play_id) prepare_and_play(id); else request_build(id); }
+      }
       else { modal_.lines = {"Your choice could not be saved. Try again."}; toast("Settings could not be saved.", true); }
     } else if (cancel) {
-      modal_ = Modal{};  // decide later: nothing is recorded; the question is asked again at the next start unless a setting or the library was saved meanwhile (then the profile is no longer new)
+      modal_ = Modal{};
+      first_run_pending_.clear();   // the request that raised the question is dropped with it: nothing starts, nothing is recorded
+      first_run_play_.clear();
+      // decide later: nothing is recorded; the question is asked again at the next start unless a setting or the library was saved meanwhile (then the profile is no longer new)
       trace("onboarding=intermediates_deferred");
     }
     return;

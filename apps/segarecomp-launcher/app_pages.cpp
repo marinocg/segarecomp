@@ -25,79 +25,76 @@ struct Slice { const char *name; ImU32 color; std::uintmax_t bytes; };
 // ---------------------------------------------------------------- import
 
 void App::draw_import(float w, float h) {
-  page_header(ctx_, w, "ADD GAME", "Drag and drop ROM files to add them to your library.");
+  page_header(ctx_, w, "ADD GAME", "Choose or drop your game files; you review them before anything is added.");
   draw_import_body(w, h);
+}
+
+// The review of inspected files: what each is (valid / needs a choice / already in the library / cannot be added), then the explicit intent.
+void App::draw_review(float w) {
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const int preparable = review_count(ReviewItem::Verdict::valid, true);
+  const int addable = preparable + review_count(ReviewItem::Verdict::needs_choice, true);
+  heading(ctx_, "REVIEW");
+  paragraph(ctx_, ctx_.bold, ctx_.u(13.0F), col::text, w, review_summary());
+  paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, w,
+            "Add & prepare builds a playable version on this computer, one game at a time (several minutes each); you can cancel at any time. Add only keeps the game in your library to prepare later. Nothing starts playing by itself, and your original files are never changed.");
+  ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
+  const float bh = ctx_.u(36.0F);
+  const std::string prepare_label = preparable > 0 ? "Add & prepare (" + std::to_string(preparable) + ")" : std::string("Add & prepare");
+  const std::string add_label = "Add only" + (addable > 0 ? " (" + std::to_string(addable) + ")" : std::string());
+  const float pw = std::max(ctx_.u(170.0F), text_width(ctx_.bold, ctx_.u(13.0F), prepare_label.c_str()) + ctx_.u(56.0F)), aw = std::max(ctx_.u(120.0F), text_width(ctx_.bold, ctx_.u(13.0F), add_label.c_str()) + ctx_.u(40.0F));
+  if (button(ctx_, "review_prepare", prepare_label.c_str(), ImVec2(pw, bh), Style::primary, preparable > 0 && !import_job_.valid())) commit_review(true);
+  ImGui::SameLine(0.0F, ctx_.u(8.0F));
+  if (button(ctx_, "review_add", add_label.c_str(), ImVec2(aw, bh), Style::secondary, addable > 0 && !import_job_.valid())) commit_review(false);
+  ImGui::SameLine(0.0F, ctx_.u(8.0F));
+  if (button(ctx_, "review_decline", "Cancel", ImVec2(ctx_.u(96.0F), bh), Style::ghost)) discard_review();
+  ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+  const float text_x = ctx_.u(46.0F), btn_w = ctx_.u(88.0F);
+  for (std::size_t i = 0; i < review_.size(); ++i) {
+    ReviewItem &item = review_[i];
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const bool dup = item.verdict == ReviewItem::Verdict::duplicate, bad = item.verdict == ReviewItem::Verdict::invalid, choice = item.verdict == ReviewItem::Verdict::needs_choice;
+    const ImU32 color = bad ? col::err : (choice ? col::warn : (dup ? col::info : col::ok));
+    const char *verdict = bad ? "Cannot be added" : (choice ? "Needs a choice" : (dup ? "Already in library" : "Valid"));
+    const float text_w = w - text_x - ctx_.u(14.0F) - (item.entry_id.empty() ? 0.0F : btn_w + ctx_.u(8.0F));
+    const auto lines = wrap(ctx_.regular, ctx_.u(11.5F), text_w, item.message + " " + item.next_action);
+    const float rh = ctx_.u(34.0F) + static_cast<float>(lines.size()) * ctx_.u(15.0F);
+    card(ctx_, dl, a, ImVec2(a.x + w, a.y + rh));
+    ImGui::PushID(static_cast<int>(i));
+    if (item.selectable()) {
+      ImGui::SetCursorScreenPos(ImVec2(a.x + ctx_.u(10.0F), a.y + ctx_.u(8.0F)));
+      checkbox(ctx_, "sel", "", &item.selected);
+    } else {
+      tone_mark(ctx_, dl, ImVec2(a.x + ctx_.u(22.0F), a.y + ctx_.u(19.0F)), ctx_.u(16.0F), color);
+    }
+    const float verdict_w = text_width(ctx_.bold, ctx_.u(11.5F), verdict);
+    draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(a.x + text_x, a.y + ctx_.u(8.0F)), ellipsize(ctx_.bold, ctx_.u(13.0F), text_w - verdict_w - ctx_.u(14.0F), item.title).c_str());
+    draw_text(dl, ctx_.bold, ctx_.u(11.5F), color, ImVec2(a.x + text_x + text_w - verdict_w, a.y + ctx_.u(9.0F)), verdict);
+    float ly = a.y + ctx_.u(29.0F);
+    for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text2, ImVec2(a.x + text_x, ly), l.c_str()); ly += ctx_.u(15.0F); }
+    if (!item.entry_id.empty()) {
+      ImGui::SetCursorScreenPos(ImVec2(a.x + w - btn_w - ctx_.u(10.0F), a.y + ctx_.u(8.0F)));
+      if (button(ctx_, "open", "Open", ImVec2(btn_w, ctx_.u(28.0F)), Style::secondary)) open_details(item.entry_id);
+    }
+    ImGui::PopID();
+    ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(5.0F)));
+    ImGui::Dummy(ImVec2(w, 1));
+  }
 }
 
 void App::draw_import_body(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool two = w > ctx_.u(700.0F) && import_results_.empty();  // once there are results they take the guide's place
-  const float steps_w = two ? ctx_.u(240.0F) : 0.0F, gap = ctx_.u(18.0F);
-  const float drop_w = two ? w - steps_w - gap : w;
-  const ImVec2 top = ImGui::GetCursorScreenPos();
-  draw_drop_zone(drop_w, h, true);
-  draw_scd_import(drop_w);  // SEG-078-T002: Sega CD games are a BIOS + a disc + an imported program, never a single dropped file
-  const float after_drop = ImGui::GetCursorScreenPos().y;
-  float side_bottom = top.y;
-  if (two) {
-    const ImVec2 a(top.x + drop_w + gap, top.y);
-    const char *titles[] = {"Add ROMs", "We identify the game", "Build and play"};
-    const char *texts[] = {"Drag and drop files here, or choose them manually. Several at once are fine.", "The platform comes from the ROM header; the same game is recognised by its SHA-256.", "Adding does not build. Open a game, choose Build, then Play."};
-    float y = a.y;
-    for (int i = 0; i < 3; ++i) {
-      const auto lines = wrap(ctx_.regular, ctx_.u(11.5F), steps_w - ctx_.u(70.0F), texts[i]);
-      const float ch = ctx_.u(42.0F) + static_cast<float>(lines.size()) * ctx_.u(15.0F);
-      card(ctx_, dl, ImVec2(a.x, y), ImVec2(a.x + steps_w, y + ch));
-      step_circle(ctx_, dl, ImVec2(a.x + ctx_.u(26.0F), y + ctx_.u(26.0F)), ctx_.u(13.0F), i + 1);
-      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(a.x + ctx_.u(52.0F), y + ctx_.u(10.0F)), titles[i]);
-      float ly = y + ctx_.u(28.0F);
-      for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text2, ImVec2(a.x + ctx_.u(52.0F), ly), l.c_str()); ly += ctx_.u(15.0F); }
-      y += ch + ctx_.u(8.0F);
-    }
-    const auto info_lines = wrap(ctx_.regular, ctx_.u(11.5F), steps_w - ctx_.u(52.0F), "ROM files are added by reference. Segarecomp doesn't modify or upload your original files.\n\nZIP archives are read without modification. Segarecomp extracts the ROM into your local library so it can be built and played.");
-    const float ih = static_cast<float>(info_lines.size()) * ctx_.u(15.0F) + ctx_.u(22.0F);
-    card(ctx_, dl, ImVec2(a.x, y), ImVec2(a.x + steps_w, y + ih), false, false, rgba(10, 30, 66));
-    icon_image(dl, ctx_.icon("info"), ImVec2(a.x + ctx_.u(12.0F), y + ctx_.u(12.0F)), ctx_.u(20.0F), col::info);
-    float ly = y + ctx_.u(11.0F);
-    for (const auto &l : info_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text, ImVec2(a.x + ctx_.u(42.0F), ly), l.c_str()); ly += ctx_.u(15.0F); }
-    side_bottom = y + ih;
-  }
-  ImGui::SetCursorScreenPos(ImVec2(top.x, std::max(after_drop, side_bottom) + ctx_.u(10.0F)));
-  if (!two) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "1. Add ROMs   2. Review the detected system   3. Choose Build, then Play. ROM files are added by reference and never modified or uploaded; from a ZIP archive the ROM is extracted into your local library.");
-  checkbox(ctx_, "import_build", "Also build each newly added game (can take several minutes per game)", &import_build_option_);
-  paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "Off by default. Duplicates are detected by the ROM's SHA-256: the same game found in another place only adds a second tracked location.");
+  if (!review_.empty()) draw_review(w);
+  draw_drop_zone(w, h, true);
+  draw_scd_import(w);  // SEG-078-T002: Sega CD games are a BIOS + a disc + an imported program, never a single dropped file
   if (import_job_.valid()) {
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     const ImVec2 p = ImGui::GetCursorScreenPos();
     spinner(ctx_, dl, ImVec2(p.x + ctx_.u(8.0F), p.y + ctx_.u(9.0F)), ctx_.u(7.0F), col::info);
-    draw_text(dl, ctx_.regular, ctx_.u(13.0F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y), ("Reading ROMs: " + std::to_string(import_done_.load()) + " of " + std::to_string(import_total_)).c_str());
+    draw_text(dl, ctx_.regular, ctx_.u(13.0F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y), ("Checking files: " + std::to_string(import_done_.load()) + " of " + std::to_string(import_total_)).c_str());
     ImGui::Dummy(ImVec2(w, ctx_.u(24.0F)));
   }
-  if (!import_results_.empty()) {
-    ImGui::Dummy(ImVec2(1, ctx_.u(10.0F)));
-    heading(ctx_, "RESULTS");
-    for (std::size_t i = 0; i < import_results_.size(); ++i) {
-      const ImportItem &item = import_results_[i];
-      const ImVec2 a = ImGui::GetCursorScreenPos();
-      const float rh = ctx_.u(46.0F);
-      const bool ok = item.outcome == "added", dup = item.outcome == "duplicate" || item.outcome == "location";
-      const ImU32 color = ok ? col::ok : (dup ? col::info : col::err);
-      card(ctx_, dl, a, ImVec2(a.x + w, a.y + rh));
-      icon_image(dl, ctx_.icon(ok ? "check" : (dup ? "info" : "warning")), ImVec2(a.x + ctx_.u(12.0F), a.y + (rh - ctx_.u(16.0F)) * 0.5F), ctx_.u(16.0F), color);
-      const std::string title = item.title.empty() ? fs::path(std::u8string(reinterpret_cast<const char8_t *>(item.path.c_str()))).filename().string() : item.title;
-      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(a.x + ctx_.u(40.0F), a.y + ctx_.u(7.0F)), ellipsize(ctx_.bold, ctx_.u(13.0F), w - ctx_.u(220.0F), title).c_str());
-      draw_text(dl, ctx_.regular, ctx_.u(11.5F), color, ImVec2(a.x + ctx_.u(40.0F), a.y + ctx_.u(25.0F)), ellipsize(ctx_.regular, ctx_.u(11.5F), w - ctx_.u(220.0F), item.message).c_str());
-      if (!item.entry_id.empty()) {
-        ImGui::SetCursorScreenPos(ImVec2(a.x + w - ctx_.u(114.0F), a.y + (rh - ctx_.u(28.0F)) * 0.5F));
-        ImGui::PushID(static_cast<int>(i));
-        if (button(ctx_, "open", "Open", ImVec2(ctx_.u(100.0F), ctx_.u(28.0F)), Style::secondary)) open_details(item.entry_id);
-        ImGui::PopID();
-      }
-      ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(5.0F)));
-      ImGui::Dummy(ImVec2(w, 1));
-    }
-    if (button(ctx_, "clear_results", "Clear results", ImVec2(ctx_.u(140.0F), ctx_.u(28.0F)), Style::ghost)) import_results_.clear();
-  }
+  if (review_.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "Files are added by reference: Segarecomp never modifies or uploads your originals. A ZIP archive is read without modification and its game is copied into your local library. The same game is recognised by its content, so adding it twice never creates a copy.");
 }
 
 // ---------------------------------------------------------------- storage

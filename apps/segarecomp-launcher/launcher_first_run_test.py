@@ -90,11 +90,16 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         tmp = pathlib.Path(d)
 
-        # 1. gamepad: the first button (Keep) has focus; South confirms. Persisted as the existing policy "never"; not asked again.
+        # SEG-150-T003: the question is asked when the user first prepares a game (the `build` command is the Build action of the open game), not at start-up;
+        # a fresh, empty profile gets the welcome instead. Choosing starts the preparation that raised the question; deferring drops that request.
+        ASK = ["pad_attach", "frames 20", "expect modal=0", "focus_card 0", "frames 4", "key Return", "frames 8", "build", "frames 8"]
+
+        # 1. gamepad: the first button (Keep) has focus; South confirms. Persisted as the existing policy "never"; not asked again; the preparation then runs.
         p = Profile(tmp, "keep", exe, fake_cli, fake_game)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=0", "expect cleanup_mode=never",
-                       "expect intermediates_choice=1", "quit"])
-        check_trace("keep", trace, 4)
+        p.add_game()
+        trace = p.run(ASK + ["expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=0", "expect cleanup_mode=never",
+                             "expect intermediates_choice=1", "wait_idle", "frames 60", "expect build_outcome=ok", "quit"])
+        check_trace("keep", trace, 6)
         s = p.settings()
         expect(s is not None and s["cleanup_mode"] == "never" and s["intermediates_choice_made"] is True, f"keep persisted: {s}")
         trace = p.run(["frames 20", "expect modal=0", "quit"])
@@ -102,56 +107,59 @@ def main():
 
         # 2. gamepad: D-pad moves to the second button; South removes. Policy "intermediates".
         p = Profile(tmp, "remove", exe, fake_cli, fake_game)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad dpad_right down", "pad dpad_right up", "frames 4", "pad south down", "pad south up", "frames 8",
-                       "expect modal=0", "expect cleanup_mode=intermediates", "quit"])
-        check_trace("remove", trace, 3)
+        p.add_game()
+        trace = p.run(ASK + ["expect modal=1", "pad dpad_right down", "pad dpad_right up", "frames 4", "pad south down", "pad south up", "frames 8",
+                             "expect modal=0", "expect cleanup_mode=intermediates", "wait_idle", "frames 60", "quit"])
+        check_trace("remove", trace, 4)
         s = p.settings()
         expect(s is not None and s["cleanup_mode"] == "intermediates" and s["intermediates_choice_made"] is True, f"remove persisted: {s}")
 
-        # 3. East / Escape defer: nothing is recorded and the question returns.
+        # 3. East / Escape defer: nothing is recorded, nothing starts, and the question returns at the next preparation.
         p = Profile(tmp, "defer", exe, fake_cli, fake_game)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad east down", "pad east up", "frames 8", "expect modal=0", "expect intermediates_choice=0", "quit"])
-        check_trace("defer east", trace, 3)
+        p.add_game()
+        trace = p.run(ASK + ["expect modal=1", "pad east down", "pad east up", "frames 8", "expect modal=0", "expect intermediates_choice=0", "expect build_count=0", "quit"])
+        check_trace("defer east", trace, 5)
         expect(p.settings() is None or p.settings().get("intermediates_choice_made") is not True, "a deferred question is not recorded")
-        trace = p.run(["frames 20", "expect modal=1", "key Escape", "frames 8", "expect modal=0", "quit"])
-        check_trace("defer escape", trace, 2)
+        trace = p.run(["frames 20", "expect modal=0", "focus_card 0", "frames 4", "key Return", "frames 8", "build", "frames 8", "expect modal=1", "key Escape", "frames 8", "expect modal=0", "expect build_count=0", "quit"])
+        check_trace("defer escape", trace, 4)
 
-        # 4. an existing profile is never asked and keeps its policy (a settings file written before the marker existed).
+        # 4. an existing profile is never asked and keeps its policy (a settings file written before the marker existed); it gets no welcome either.
         p = Profile(tmp, "existing", exe, fake_cli, fake_game)
         p.lib.mkdir(parents=True)
         p.settings_file.write_text(json.dumps({"schema": 1, "view": "grid", "cleanup_mode": "keep_last_n", "keep_last_n": 7}))
-        trace = p.run(["frames 20", "expect modal=0", "expect cleanup_mode=keep_last_n", "quit"], force="1")
-        check_trace("existing", trace, 2)
+        trace = p.run(["frames 20", "expect modal=0", "expect welcome=0", "expect cleanup_mode=keep_last_n", "quit"], force="1")
+        check_trace("existing", trace, 3)
         # ... and so is a profile that has a library but no settings file yet.
         p = Profile(tmp, "library-only", exe, fake_cli, fake_game)
         p.add_game()
-        trace = p.run(["frames 20", "expect modal=0", "quit"], force="1")
-        check_trace("library only", trace, 1)
-        # ... while a brand-new profile in an automated window is asked only when the test says so.
+        trace = p.run(["frames 20", "expect modal=0", "expect welcome=0", "quit"], force="1")
+        check_trace("library only", trace, 2)
+        # ... while a brand-new profile in an automated window sees the welcome only when the test says so, and the welcome never opens the question.
         p = Profile(tmp, "automated-fresh", exe, fake_cli, fake_game)
-        check_trace("automation skips", p.run(["frames 20", "expect modal=0", "quit"], force=None), 1)
-        check_trace("automation opt-in", p.run(["frames 20", "expect modal=1", "key Escape", "frames 6", "quit"], force="1"), 1)
+        check_trace("automation skips", p.run(["frames 20", "expect modal=0", "expect welcome=0", "quit"], force=None), 2)
+        check_trace("automation opt-in", p.run(["frames 20", "expect welcome=1", "expect modal=0", "expect intermediates_choice=0", "expect library_size=0", "quit"], force="1"), 4)
+        expect(p.settings() is None or p.settings().get("intermediates_choice_made") is not True, "the welcome records nothing")
 
         # 5. a failed save keeps the question open and records nothing; fixing the cause lets a retry succeed.
         p = Profile(tmp, "failed-save", exe, fake_cli, fake_game)
+        p.add_game()
         blocker = p.lib / "launcher-settings.json.tmp"
         (blocker / "x").mkdir(parents=True)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=1", "expect intermediates_choice=0", "quit"])
-        check_trace("failed save", trace, 3)
+        trace = p.run(ASK + ["expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=1", "expect intermediates_choice=0", "quit"])
+        check_trace("failed save", trace, 4)
         expect(not p.settings_file.exists(), "a failed save must not leave a settings file claiming success")
         shutil.rmtree(blocker)
-        trace = p.run(["pad_attach", "frames 20", "expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=0", "quit"])
-        check_trace("retry", trace, 2)
+        trace = p.run(ASK + ["expect modal=1", "pad south down", "pad south up", "frames 8", "expect modal=0", "wait_idle", "frames 40", "quit"])
+        check_trace("retry", trace, 3)
         expect(p.settings() is not None and p.settings()["intermediates_choice_made"] is True, "the retry is recorded")
 
         # 6. later builds obey the choice; the executable is always kept.
         for name, choose, expect_removed in (("build-remove", ["pad dpad_right down", "pad dpad_right up", "frames 4"], True), ("build-keep", [], False)):
             p = Profile(tmp, name, exe, fake_cli, fake_game)
             p.add_game()
-            script = ["pad_attach", "frames 20", "expect modal=1"] + choose + ["pad south down", "pad south up", "frames 8", "expect modal=0",
-                      "focus_card 0", "frames 4", "key Return", "frames 8", "build", "wait_idle", "frames 120", "expect build_outcome=ok", "quit"]
+            script = ASK + ["expect modal=1"] + choose + ["pad south down", "pad south up", "frames 8", "expect modal=0", "wait_idle", "frames 120", "expect build_outcome=ok", "quit"]
             trace = p.run(script)
-            check_trace(name, trace, 3)
+            check_trace(name, trace, 4)
             if not (p.cache / "games").exists():
                 failures.append(f"{name}: no build happened: {trace!r}")
                 continue

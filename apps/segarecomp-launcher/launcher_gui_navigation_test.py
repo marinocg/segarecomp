@@ -97,10 +97,10 @@ def main():
                  "expect page=details", "expect detail=Synthetic Card 03", "key Escape", "frames 8", "expect page=library", "expect search=Synthetic Card 0",
                  "expect platform_filter=1", "expect view=list", "expect visible=9", "expect focus=card:Synthetic Card 03", "quit"]
         assertions += check("details round trip (keyboard)", state, 11)
-        # the same with a gamepad: South opens the focused card, East goes back; the grid's scroll position is restored too
-        state = ["pad_attach", "frames 20", "scroll_library 270", "frames 6", "expect library_scroll=270", "focus_card 6", "frames 4", "expect focus=card:Synthetic Card 06",
+        # the same with a gamepad: South opens the focused card, East goes back; the grid's scroll position is restored too  # T003: the offset keeps the taller card 06 fully in view, so focusing it does not scroll and the restored offset is the one that was set
+        state = ["pad_attach", "frames 20", "scroll_library 330", "frames 6", "expect library_scroll=330", "focus_card 6", "frames 4", "expect focus=card:Synthetic Card 06",
                  "pad south down", "pad south up", "frames 10", "expect page=details", "expect detail=Synthetic Card 06", "pad east down", "pad east up", "frames 10",
-                 "expect page=library", "expect library_scroll=270", "expect focus=card:Synthetic Card 06", "quit"]
+                 "expect page=library", "expect library_scroll=330", "expect focus=card:Synthetic Card 06", "quit"]
         assertions += check("details round trip (gamepad)", state, 7)
         # Mouse: the buttons drawn over a card (favorite star, Play) stay put while the pointer moves onto them, and a click on them is theirs:
         # it must not fall through to the card (which would open Details).

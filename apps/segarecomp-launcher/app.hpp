@@ -77,12 +77,28 @@ struct StatusInfo {
   [[nodiscard]] bool runnable() const { return status == GameStatus::ready || older.playable; }
 };
 
-struct ImportItem {
-  std::string path;
-  std::string outcome;   // added | duplicate | location | unsupported | error
-  std::string title, message;
-  std::string entry_id;
-  bool needs_mapper = false;
+// The file types a game can be added from: the extensions rom_zip.cpp's rom_extension() recognises, plus ZIP archives (the content is still verified).
+// The single source of the file choosers, the built-in picker and the Add game page text.
+inline const std::vector<std::string> &rom_extensions() {
+  static const std::vector<std::string> list = {"md", "bin", "gen", "smd", "sms", "zip"};
+  return list;
+}
+inline std::string rom_extension_pattern(const char *separator, const char *prefix = "") {
+  std::string out;
+  for (const auto &e : rom_extensions()) out += (out.empty() ? "" : separator) + std::string(prefix) + e;
+  return out;
+}
+
+// SEG-150-T003: one inspected file waiting in the Add game review. Nothing is in the library until the user confirms (Add & prepare / Add only).
+// invalid: cannot be added (reason + next action); duplicate: the same game (platform + SHA-256) is already in the library, never overwritten;
+// needs_choice: addable, but a required choice (the Master System mapper) is open, so it is never prepared and never guessed.
+struct ReviewItem {
+  enum class Verdict { valid, needs_choice, duplicate, invalid } verdict = Verdict::invalid;
+  std::string path, title, message, next_action;
+  std::string entry_id;   // duplicate: the existing entry
+  RomView rom;
+  bool selected = false;  // valid / needs_choice items start selected
+  [[nodiscard]] bool selectable() const { return verdict == Verdict::valid || verdict == Verdict::needs_choice; }
 };
 
 struct Modal {
@@ -126,7 +142,7 @@ private:
   void draw_list_row(const LibraryEntry &entry, float w, float h);
   void draw_details(float w, float h);
   void draw_import(float w, float h);
-  void draw_import_body(float w, float h);  // drop zone, the three-step guide, results (also the empty library's page)
+  void draw_import_body(float w, float h);  // drop zone, accepted files, review
   void draw_storage(float w, float h);
   void draw_settings(float w, float h);
   void draw_input_diagnostics(float w);
@@ -165,8 +181,26 @@ private:
   void poll_status_refresh();
   void request_scan();
   void poll_scan();
-  void start_import(std::vector<std::string> paths, bool build_after);
+  void start_import(std::vector<std::string> paths);
   void poll_import();
+  // SEG-150-T003: the review's two explicit intents. `prepare` queues the selected, non-blocked new games; nothing is ever launched by either.
+  void commit_review(bool prepare);
+  void discard_review();
+  [[nodiscard]] static const char *verdict_name(ReviewItem::Verdict v);
+  [[nodiscard]] std::string review_summary() const;
+  [[nodiscard]] int review_count(ReviewItem::Verdict v, bool selected_only) const;
+  void draw_review(float w);
+  void draw_welcome(float w, float h);
+  void draw_empty_library(float w, float h);
+  // The one main action of a game on a card or row (Play / Prepare & play / Cancel / Unqueue / Find file / Retry / Details): returns its label.
+  [[nodiscard]] std::string main_action_label(const LibraryEntry &entry, const StatusInfo &info) const;
+  void run_main_action(const std::string &id);
+  void draw_main_action(const LibraryEntry &entry, const StatusInfo &info, ImVec2 pos, ImVec2 size);   // inside the card/row's PushID scope
+  // Prepare & play: an explicit request that builds (when needed) and then launches ONCE from the revalidated build of that exact request.
+  void prepare_and_play(const std::string &id);
+  // The first "Keep build intermediates?" question is asked when the user first prepares a game, not at start-up.
+  bool first_run_gate(std::vector<std::string> ids);
+  void request_prepare(const std::vector<std::string> &ids);
   void open_details(const std::string &id);
   // Leaves the contextual Details page for the page it was opened from; the library keeps its search, filters, sort, view, scroll and focus.
   void close_details();
@@ -422,9 +456,12 @@ private:
   std::future<std::vector<std::pair<std::string, RomView>>> import_job_;
   std::atomic<int> import_done_{0};
   int import_total_ = 0;
-  bool import_build_after_ = false;
-  std::vector<ImportItem> import_results_;
-  bool import_build_option_ = false;
+  std::vector<ReviewItem> review_;
+  bool welcome_dismissed_ = false;           // session only: a fresh profile's welcome is skipped for this session
+  bool ask_intermediates_ = false;           // the first-run question is armed (profile is new, or a test forced it) and not answered yet
+  std::vector<std::string> first_run_pending_;  // preparation requested before the question was answered; runs after the choice, dropped on defer
+  std::string first_run_play_;               // ... and the one of them that was a Prepare & play
+  std::string play_after_build_;             // Prepare & play in flight: launch this game once its own build succeeds and is revalidated
   // ---- dialog results ----
   struct DialogEvent { std::string purpose, key; std::vector<std::string> paths; std::string error; };
   std::mutex dialog_mutex_;

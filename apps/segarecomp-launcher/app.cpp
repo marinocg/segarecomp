@@ -508,13 +508,15 @@ void App::poll_maintenance() {
 
 void App::browse_import() {
   if (use_builtin_picker()) { open_picker("import", ""); return; }
-  static const SDL_DialogFileFilter filters[] = {{"ROMs and zipped ROMs", "md;bin;gen;smd;sms;zip"}, {"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"Zipped ROMs", "zip"}, {"All files", "*"}};
+  static const std::string all_games = rom_extension_pattern(";");   // the SDL filter keeps the pointer: the pattern outlives the dialog
+  static const SDL_DialogFileFilter filters[] = {{"Game files and zipped games", all_games.c_str()}, {"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"Zipped ROMs", "zip"}, {"All files", "*"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "import", ""}, window_, filters, 5, nullptr, true);
 }
 
 void App::browse_locate(const std::string &id) {
   if (use_builtin_picker()) { open_picker("locate", id); return; }
-  static const SDL_DialogFileFilter filters[] = {{"ROMs", "md;bin;gen;smd;sms;zip"}, {"All files", "*"}};
+  static const std::string all_games = rom_extension_pattern(";");
+  static const SDL_DialogFileFilter filters[] = {{"Game files", all_games.c_str()}, {"All files", "*"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "locate", id}, window_, filters, 2, nullptr, false);
 }
 
@@ -630,13 +632,11 @@ void App::poll_cover_download() {
   }
 }
 
-void App::start_import(std::vector<std::string> paths, bool build_after) {
+void App::start_import(std::vector<std::string> paths) {
   if (import_job_.valid()) { for (auto &p : paths) deferred_paths_.push_back(std::move(p)); return; }
   if (paths.empty()) return;
   import_total_ = static_cast<int>(paths.size());
   import_done_ = 0;
-  import_build_after_ = build_after;
-  import_results_.clear();
   import_job_ = std::async(std::launch::async, [paths = std::move(paths), lay = layout_, roms = library_dir_ / "roms", done = &import_done_] {
     std::vector<std::pair<std::string, RomView>> out;
     for (const auto &p : paths) {
@@ -647,46 +647,109 @@ void App::start_import(std::vector<std::string> paths, bool build_after) {
   });
 }
 
+const char *App::verdict_name(ReviewItem::Verdict v) {
+  switch (v) {
+    case ReviewItem::Verdict::valid: return "valid";
+    case ReviewItem::Verdict::needs_choice: return "needs_choice";
+    case ReviewItem::Verdict::duplicate: return "duplicate";
+    case ReviewItem::Verdict::invalid: return "invalid";
+  }
+  return "invalid";
+}
+
+// Inspected files become review items. The catalog is NOT touched here: a file is only added when the user confirms the review.
 void App::poll_import() {
   if (!import_job_.valid() || import_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
   auto inspected = import_job_.get();
-  std::vector<std::string> added_ids, buildable;
   for (auto &[path, rom] : inspected) {
-    ImportItem item;
+    ReviewItem item;
     item.path = path;
-    item.title = rom.title;
-    if (!rom.error.empty()) { item.outcome = "error"; item.message = "Could not be read: " + rom.error; }
-    else if (!rom.supported_platform) { item.outcome = "unsupported"; item.message = "Not a supported Genesis or Master System ROM."; }
-    else {
-      const bool existed = catalog_.find(rom.platform_id, rom.sha256) != nullptr;
-      const auto result = catalog_.import_rom(rom, now_seconds());
-      if (result.entry == nullptr) { item.outcome = "error"; item.message = result.error; }
-      else {
-        item.entry_id = result.entry->id();
-        item.title = result.entry->title();
-        item.needs_mapper = rom.platform_id == "master-system" && result.entry->mapper.empty() && rom.mapper_manifest.empty();
-        if (!existed) {
-          item.outcome = "added";
-          item.message = item.needs_mapper ? "Added. Declare the cartridge mapper before building." : "Added to the library (not built yet).";
-          if (const std::string cover = existing_cover_for(covers_dir_, rom.sha256); !cover.empty()) result.entry->cover = cover;
-          added_ids.push_back(item.entry_id);
-          if (!item.needs_mapper) buildable.push_back(item.entry_id);
-        } else if (result.path_added) { item.outcome = "location"; item.message = "Already in the library; this location was added."; }
-        else { item.outcome = "duplicate"; item.message = "Already in the library (same content)."; }
-      }
+    item.title = rom.title.empty() ? u8s(from_u8(path).filename()) : rom.title;
+    const auto same_in_review = [&](const ReviewItem &o) { return o.verdict != ReviewItem::Verdict::invalid && o.rom.platform_id == rom.platform_id && o.rom.sha256 == rom.sha256; };
+    if (!rom.error.empty()) {
+      item.message = "Could not be read: " + rom.error;
+      item.next_action = "Check that the file is not damaged, then add it again.";
+    } else if (!rom.supported_platform) {
+      item.message = "Not a Genesis / Mega Drive or Master System game file.";
+      item.next_action = "Choose a game file (.md .bin .gen .smd .sms) or a ZIP that contains one.";
+    } else if (const LibraryEntry *existing = catalog_.find(rom.platform_id, rom.sha256); existing != nullptr) {
+      item.verdict = ReviewItem::Verdict::duplicate;
+      item.entry_id = existing->id();
+      item.title = existing->title();
+      item.message = "Already in your library (same game). Nothing is added or replaced; its saves and settings stay as they are.";
+      item.next_action = "Open the game, or use Find game file on it if this is a moved copy.";
+    } else if (std::any_of(review_.begin(), review_.end(), same_in_review)) {
+      item.verdict = ReviewItem::Verdict::duplicate;
+      item.message = "The same game is already in this selection.";
+      item.next_action = "It will be added once.";
+    } else {
+      item.rom = rom;
+      const bool needs_mapper = rom.platform_id == "master-system" && rom.mapper_manifest.empty();
+      item.verdict = needs_mapper ? ReviewItem::Verdict::needs_choice : ReviewItem::Verdict::valid;
+      item.selected = true;
+      item.message = needs_mapper ? "Master System game: its cartridge mapper is not declared." : "Valid game file.";
+      item.next_action = needs_mapper ? "It can be added now; choose the mapper on the game's page before preparing it. It is never guessed." : "Ready to add.";
     }
-    import_results_.push_back(item);
+    if (std::any_of(review_.begin(), review_.end(), [&](const ReviewItem &o) { return o.path == item.path && o.verdict == item.verdict && o.message == item.message; })) continue;  // the same file dropped twice
+    review_.push_back(std::move(item));
   }
+  go(Page::import_page);
+  trace("import=reviewed total=" + std::to_string(review_.size()) + " valid=" + std::to_string(review_count(ReviewItem::Verdict::valid, false)) + " needs_choice=" + std::to_string(review_count(ReviewItem::Verdict::needs_choice, false)) +
+        " duplicate=" + std::to_string(review_count(ReviewItem::Verdict::duplicate, false)) + " invalid=" + std::to_string(review_count(ReviewItem::Verdict::invalid, false)));
+  if (!deferred_paths_.empty()) { auto next = std::move(deferred_paths_); deferred_paths_.clear(); start_import(std::move(next)); }
+}
+
+int App::review_count(ReviewItem::Verdict v, bool selected_only) const {
+  return static_cast<int>(std::count_if(review_.begin(), review_.end(), [&](const ReviewItem &i) { return i.verdict == v && (!selected_only || i.selected); }));
+}
+
+std::string App::review_summary() const {
+  const int add = review_count(ReviewItem::Verdict::valid, true), choice = review_count(ReviewItem::Verdict::needs_choice, true);
+  const int dup = review_count(ReviewItem::Verdict::duplicate, false), bad = review_count(ReviewItem::Verdict::invalid, false);
+  std::string text = std::to_string(add + choice) + " selected to add";
+  if (add + choice > 0) text += ": " + std::to_string(add) + " can be prepared" + (choice > 0 ? ", " + std::to_string(choice) + " need a choice first (added, not prepared)" : std::string());
+  text += ".";
+  if (dup > 0) text += " " + std::to_string(dup) + " already in your library (skipped).";
+  if (bad > 0) text += " " + std::to_string(bad) + " cannot be added.";
+  return text;
+}
+
+void App::discard_review() {
+  review_.clear();
+  trace("import=declined");
+}
+
+// The one place a review becomes library entries. Re-checks identity against the catalog at this moment (it may have changed since inspection):
+// an existing game is never overwritten, and only new, fully-determined games are prepared.
+void App::commit_review(bool prepare) {
+  // The same rule as the buttons: nothing selectable selected means nothing to add, and Add & prepare needs at least one game that can be prepared.
+  if (review_count(ReviewItem::Verdict::valid, true) + review_count(ReviewItem::Verdict::needs_choice, true) == 0) return;
+  if (prepare && review_count(ReviewItem::Verdict::valid, true) == 0) return;
+  std::vector<std::string> added_ids, prepare_ids;
+  int skipped = 0;
+  for (ReviewItem &item : review_) {
+    if (!item.selectable() || !item.selected) { ++skipped; continue; }
+    if (catalog_.find(item.rom.platform_id, item.rom.sha256) != nullptr) { ++skipped; continue; }
+    const auto result = catalog_.import_rom(item.rom, now_seconds());
+    if (result.entry == nullptr) { toast("Could not add " + item.title + ": " + result.error, true); ++skipped; continue; }
+    if (const std::string cover = existing_cover_for(covers_dir_, item.rom.sha256); !cover.empty()) result.entry->cover = cover;
+    added_ids.push_back(result.entry->id());
+    if (item.verdict == ReviewItem::Verdict::valid) prepare_ids.push_back(result.entry->id());
+  }
+  const int total = static_cast<int>(review_.size());
+  const std::string first_added = added_ids.empty() ? std::string() : added_ids.front();
+  review_.clear();
   save_catalog();
   request_status_refresh();
   request_scan();
-  if (import_build_after_) for (const auto &id : buildable) build_queue_.push(id);
   queue_auto_covers(added_ids);
-  const int ok = static_cast<int>(std::count_if(import_results_.begin(), import_results_.end(), [](const ImportItem &i) { return !i.entry_id.empty(); }));
-  if (import_results_.size() == 1 && ok == 1) { open_details(import_results_[0].entry_id); toast(import_results_[0].message); }
-  else { go(Page::import_page); toast(std::to_string(added_ids.size()) + " added, " + std::to_string(import_results_.size() - added_ids.size()) + " skipped or already present."); }
-  trace("import=done added=" + std::to_string(added_ids.size()) + " total=" + std::to_string(import_results_.size()));
-  if (!deferred_paths_.empty()) { auto next = std::move(deferred_paths_); deferred_paths_.clear(); start_import(std::move(next), false); }
+  trace("import=done added=" + std::to_string(added_ids.size()) + " total=" + std::to_string(total) + " prepare=" + (prepare ? std::to_string(prepare_ids.size()) : std::string("0")));
+  std::string note = std::to_string(added_ids.size()) + (added_ids.size() == 1 ? " game added" : " games added");
+  if (skipped > 0) note += ", " + std::to_string(skipped) + " skipped";
+  if (prepare && !prepare_ids.empty()) note += "; preparing " + std::to_string(prepare_ids.size());
+  go(Page::library);
+  toast(note + ".");
+  if (prepare) request_prepare(prepare_ids);
 }
 
 void App::open_details(const std::string &id) {
@@ -822,6 +885,7 @@ fs::path App::build_live_log(const std::string &id) const {
 void App::dequeue_build(const std::string &id) {
   // A queued entry owns nothing yet (no process, no folder), so removing it touches nothing but the FIFO.
   if (!build_queue_.remove(id)) return;
+  if (play_after_build_ == id) play_after_build_.clear();  // a withdrawn Prepare & play never launches
   if (const LibraryEntry *e = catalog_.find_id(id)) toast("Removed from the build queue: " + e->title() + ".");
   trace("build=dequeued");
 }
@@ -850,8 +914,68 @@ void App::stop_or_dequeue_build(const std::string &id) {
   else if (is_queued(id)) dequeue_build(id);
 }
 
+bool App::first_run_gate(std::vector<std::string> ids) {
+  if (!ask_intermediates_ || settings_.intermediates_choice_made) return false;
+  if (modal_.kind != Modal::Kind::none) return true;   // the question (or another sheet) is already open: the request waits for nothing and is dropped
+  first_run_pending_ = std::move(ids);
+  modal_ = Modal{};
+  modal_.kind = Modal::Kind::first_run_intermediates;
+  modal_.title = "Keep build intermediates?";
+  modal_.lines = {"Preparing starts right after you choose. Press Esc (or B) to cancel this request and decide later."};
+  trace("onboarding=intermediates_shown");
+  return true;
+}
+
+void App::request_prepare(const std::vector<std::string> &ids) {
+  if (first_run_gate(ids)) return;
+  for (const auto &id : ids) request_build(id);
+}
+
+void App::prepare_and_play(const std::string &id) {
+  const LibraryEntry *entry = catalog_.find_id(id);
+  if (entry == nullptr || entry->platform_id == "sega-cd") return;  // a Sega CD game keeps its own Play flow
+  if (first_run_gate({id})) { first_run_play_ = id; return; }
+  if (!can_build(*entry, status_of(id))) return;
+  play_after_build_ = id;
+  notices_.erase(id);
+  request_build(id);
+  trace("prepare_and_play=requested");
+}
+
+std::string App::main_action_label(const LibraryEntry &entry, const StatusInfo &info) const {
+  const std::string &id = entry.id();
+  if (is_stopping(id)) return "Stopping...";
+  if (is_building(id)) return "Cancel";
+  if (is_queued(id)) return "Unqueue";
+  if (info.rom_missing && !info.runnable() && !info.sega_cd) return "Find game file";
+  if (info.runnable()) return "Play";
+  if (!info.sega_cd && entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty()) return "Choose mapper";   // required, never guessed: on the game's page
+  if (info.sega_cd || !can_build(entry, info)) return "Details";
+  switch (info.status) {
+    case GameStatus::failed: return "Retry";
+    case GameStatus::stale:
+    case GameStatus::metadata_only:
+    case GameStatus::playable_older: return "Prepare";
+    default: return "Prepare & play";
+  }
+}
+
+void App::run_main_action(const std::string &id) {
+  const LibraryEntry *entry = catalog_.find_id(id);
+  if (entry == nullptr) return;
+  const StatusInfo &info = status_of(id);
+  const std::string label = main_action_label(*entry, info);
+  if (label == "Cancel" || label == "Unqueue") stop_or_dequeue_build(id);
+  else if (label == "Find game file") browse_locate(id);
+  else if (label == "Play") { if (can_play(info)) play(id); }
+  else if (label == "Retry" || label == "Prepare") { notices_.erase(id); request_build(id); }
+  else if (label == "Prepare & play") prepare_and_play(id);
+  else if (label == "Details" || label == "Choose mapper") open_details(id);
+}
+
 void App::request_build(const std::string &id) {
   if (is_building(id) || is_queued(id)) return;
+  if (first_run_gate({id})) return;
   if (build_running() || !build_queue_.empty() || maintenance_running_ || scd_import_job_.valid()) {
     build_queue_.push(id);
     if (const LibraryEntry *e = catalog_.find_id(id)) toast("Queued: " + e->title() + " (build " + std::to_string(build_count()) + ").");
@@ -861,10 +985,11 @@ void App::request_build(const std::string &id) {
 }
 
 App::Badge App::badge_for(const LibraryEntry &entry, const StatusInfo &info) const {
-  if (is_building(entry.id())) return {"Building", ui::col::warn, true};
+  if (is_building(entry.id())) return {is_stopping(entry.id()) ? "Stopping" : "Preparing", ui::col::warn, true};
   if (is_queued(entry.id())) return {"Queued", ui::col::info, false};
   if (info.sega_cd && game_ && game_id_ == entry.id()) return {"Running", ui::col::ok, false};
-  if (info.rom_missing && !info.runnable() && !info.sega_cd) return {"ROM missing", ui::col::warn, false};
+  if (info.rom_missing && !info.runnable() && !info.sega_cd) return {"Game file missing", ui::col::warn, false};
+  if (!info.runnable() && !info.sega_cd && entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty()) return {"Needs a mapper choice", ui::col::warn, false};
   return {status_label(info), status_color(info), false};
 }
 
@@ -883,6 +1008,7 @@ void App::finish_build() {
   if (outcome == BuildOutcome::cancelled) {
     // Neither a success nor a failure: no failure record, no diagnostics, no restart/autoplay continuation; the game keeps its prior state.
     restart_pending_ = false;
+    if (play_after_build_ == id) play_after_build_.clear();   // a cancelled Prepare & play never launches
     failures_.erase(id);
     diagnostics_.erase(id);
     last_build_outcome_ = "cancelled";
@@ -920,7 +1046,16 @@ void App::finish_build() {
     if (!settings_.keep_old_artifacts || settings_.cleanup.mode == "intermediates") pending_cleanup_ids_.insert(id);
     if (settings_.cleanup.mode == "keep_last_n" || settings_.cleanup.mode == "soft_limit") policy_eval_pending_ = true;
     if (restart) { restart_pending_ = false; launch(id, true); }
+    else if (play_after_build_ == id) {
+      // Prepare & play: one launch, and only from a build that is valid for the game's CURRENT identity right now (launch() would otherwise fall back to an older build).
+      play_after_build_.clear();
+      const LibraryEntry *again = catalog_.find_id(id);
+      const RomView now_view = again != nullptr ? view_for(*again) : RomView{};
+      if (again != nullptr && entry_ready_for(entry_dir(now_view, layout_), now_view, layout_) && !game_) { trace("prepare_and_play=launching"); launch(id, false); }
+      else { trace("prepare_and_play=not_launched"); toast("Prepared, but not launched: the build no longer matches this game or another game is running.", true); }
+    }
   } else {
+    if (play_after_build_ == id) play_after_build_.clear();   // a failed build never launches
     failures_[id] = message;
     const fs::path failed_dir = entry_path.parent_path() / (u8s(entry_path.filename()) + ".failed");
     diagnostics_[id] = (restart ? notices_[id] + "\nThe Compatibility build then failed:\n" : std::string()) + read_tail(failed_dir / "build.log", 24000);
@@ -1058,7 +1193,7 @@ void App::process_events(bool &running) {
     if (event.type == SDL_EVENT_DROP_COMPLETE) dragging_ = false;
     if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
       std::vector<std::string> one{event.drop.data};
-      if (modal_.kind == Modal::Kind::none) start_import(std::move(one), import_build_option_);
+      if (modal_.kind == Modal::Kind::none) start_import(std::move(one));
     }
   }
 }
@@ -1074,7 +1209,7 @@ void App::update_jobs() {
         show_message("The file picker could not be opened", {"SDL: " + e.error, "On Linux this usually means no file-chooser service (XDG Desktop Portal) is available - common under WSL/WSLg.", "Drop the file onto this window instead."});
         continue;
       }
-      if (e.purpose == "import") start_import(e.paths, import_build_option_);
+      if (e.purpose == "import") start_import(e.paths);
       else if (e.purpose == "patch" && !e.paths.empty()) patch_chosen(e.key, e.paths[0]);
       else if (e.purpose.rfind("scd_", 0) == 0) scd_dialog_result(e.purpose, e.key, e.paths);
       else if (e.purpose == "locate" && !e.paths.empty()) {
@@ -1401,6 +1536,31 @@ void App::run_script() {
     if (scd_import_job_.valid() || scd_launch_job_.valid() || scd_build_ || game_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "wait_play_end") {  // hold the script until no game is running
     if (game_) { --script_at_; script_wait_ = 2; }
+  } else if (cmd == "import_files") {  // SEG-150-T003: inspect these files (`;`-separated), exactly as a drop or the chooser's result would
+    std::vector<std::string> paths;
+    for (std::string rest = arg; !rest.empty();) {
+      const std::size_t cut = rest.find(';');
+      paths.push_back(rest.substr(0, cut));
+      rest = cut == std::string::npos ? std::string() : rest.substr(cut + 1);
+    }
+    start_import(std::move(paths));
+  } else if (cmd == "wait_import") {  // hold the script until the inspection has finished
+    if (import_job_.valid()) { --script_at_; script_wait_ = 2; }
+  } else if (cmd == "review_toggle") {  // flip the selection of review item <n> (selectable items only)
+    const std::size_t n = static_cast<std::size_t>(std::atoi(arg.c_str()));
+    if (n < review_.size() && review_[n].selectable()) review_[n].selected = !review_[n].selected;
+  } else if (cmd == "review_add") {      // the Add only button
+    commit_review(false);
+  } else if (cmd == "review_prepare") {  // the Add & prepare button
+    commit_review(true);
+  } else if (cmd == "review_decline") {  // Cancel on the review: nothing is added
+    discard_review();
+  } else if (cmd == "main_action") {     // the library card's main action of the game with this title (`n:<index>` = the n-th visible game)
+    const auto vis = visible_entries();
+    const LibraryEntry *target = nullptr;
+    if (arg.rfind("n:", 0) == 0) { const std::size_t n = static_cast<std::size_t>(std::atoi(arg.c_str() + 2)); if (n < vis.size()) target = vis[n]; }
+    else for (const auto *e : vis) if (e->title() == arg) target = e;
+    if (target != nullptr) { trace("main_action=" + main_action_label(*target, status_of(target->id()))); run_main_action(target->id()); }
   } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
     if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
   } else if (cmd == "wait_idle") {  // hold the script until no build is running or queued
@@ -1547,6 +1707,11 @@ void App::run_script() {
     else if (key == "picker_chosen") actual = std::to_string(picker_.chosen.size());
     else if (key == "picker_level") actual = !picker_.open ? "-" : (picker_.root.empty() ? "locations" : (picker_.dir == picker_.root ? "root" : "sub"));
     else if (key == "library_size") actual = std::to_string(catalog_.entries().size());
+    else if (key == "welcome") actual = page_ == Page::library && catalog_.entries().empty() && ask_intermediates_ && !welcome_dismissed_ ? "1" : "0";
+    else if (key == "review") { actual.clear(); for (const auto &i : review_) actual += (actual.empty() ? "" : ",") + std::string(verdict_name(i.verdict)); if (actual.empty()) actual = "-"; }
+    else if (key == "review_selected") actual = std::to_string(std::count_if(review_.begin(), review_.end(), [](const ReviewItem &i) { return i.selected; }));
+    else if (key == "main_action") { const auto vis = visible_entries(); actual = vis.empty() ? "-" : main_action_label(*vis.front(), status_of(vis.front()->id())); }
+    else if (key == "queue") actual = std::to_string(build_queue_.size());
     else if (key == "cleanup_mode") actual = settings_.cleanup.mode;
     else if (key == "intermediates_choice") actual = settings_.intermediates_choice_made ? "1" : "0";
     else if (key == "mode") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? selected_mode_label(*catalog_.find_id(detail_id_)) : "-";
@@ -1627,10 +1792,8 @@ int App::run() {
     const bool forced = onboarding_env != nullptr, always = forced && std::string(onboarding_env) == "always";
     if (!settings_.intermediates_choice_made) {
       if (always || (fresh_profile && (!automated || forced))) {
-        modal_ = Modal{};
-        modal_.kind = Modal::Kind::first_run_intermediates;
-        modal_.title = "Keep build intermediates?";
-        trace("onboarding=intermediates_shown");
+        ask_intermediates_ = true;   // the question itself waits for the first preparation (first_run_gate); the empty library shows the welcome meanwhile
+        trace("onboarding=armed");
       } else {
         settings_.intermediates_choice_made = true;
       }
@@ -1691,7 +1854,7 @@ int App::run() {
       paths.push_back(rest.substr(0, cut));
       rest = cut == std::string::npos ? std::string() : rest.substr(cut + 1);
     }
-    start_import(std::move(paths), false);
+    start_import(std::move(paths));
     go(Page::import_page);
   }
   if (SDL_getenv("SEGARECOMP_SHOT_MENU") != nullptr && page_ == Page::library)  // review aid: the context menu of the first game

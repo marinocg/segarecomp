@@ -123,20 +123,35 @@ class Runner:
 START = ["frames 10", "pad_attach", "frames 20"]
 
 
+def counted(script):
+    return sum(1 for step in script if step.startswith(("expect ", "pad_seek ")))
+
+
 def first_run(r, tmp, exe, fake_cli, fake_game, size):
-    p = Profile(tmp, "first-run", exe, fake_cli, fake_game)
-    script = START + expect(modal=1)
+    # SEG-150-T003: the question is asked when the user first prepares a game (not at start-up), and the empty fresh profile gets the skippable welcome.
+    always = {"SEGARECOMP_GUI_ONBOARDING": "always"}
+    p = Profile(tmp, "first-run", exe, fake_cli, fake_game, games=1)
+    open_game = press("dpad_down") + seek("card:game0", "dpad_right", 4) + press("south") + press("dpad_right") + expect(page="details")
+    ask = START + expect(modal=0, welcome=0, build_count=0) + open_game + seek("build", "dpad_down", 14) + press("south") + expect(modal=1)
+    script = list(ask)
     for d in DIRS:  # focus is trapped in the sheet: whatever the direction, it stays on one of its two choices
         script += press(d)
     script += expect(modal=1, focus_id="mod_remove")   # the last press was Right
     script += press("dpad_left") + expect(focus_id="mod_keep") + press("dpad_right") + expect(focus_id="mod_remove") + press("dpad_left") + expect(focus_id="mod_keep")
-    script += press("east") + expect(modal=0, intermediates_choice=0)          # East defers: nothing recorded
+    script += press("east") + expect(modal=0, intermediates_choice=0, build_count=0)          # East defers: nothing recorded, the preparation request is dropped
     script += ["quit"]
-    r.check("first run defer", p.run(script, {"SEGARECOMP_GUI_ONBOARDING": "always"}, size), 8)
-    script = START + expect(modal=1) + press("dpad_right") + press("south") + expect(modal=0, cleanup_mode="intermediates", intermediates_choice=1) + ["quit"]
-    r.check("first run choose", p.run(script, {"SEGARECOMP_GUI_ONBOARDING": "always"}, size), 4)
+    r.check("first run defer", p.run(script, always, size), counted(script))
+    script = list(ask) + press("dpad_right") + press("south") + expect(modal=0, cleanup_mode="intermediates", intermediates_choice=1) + ["wait_idle", "frames 60"] + expect(build_outcome="ok") + ["quit"]
+    r.check("first run choose", p.run(script, always, size), counted(script))   # the chosen answer starts the preparation that raised the question
     settings = json.loads((p.lib / "launcher-settings.json").read_text())
     r.expect(settings.get("cleanup_mode") == "intermediates" and settings.get("intermediates_choice_made") is True, f"first run persisted: {settings}")
+    # a brand-new profile: the welcome (no modal over it), skippable with the pad, and skipping records nothing
+    w = Profile(tmp, "welcome", exe, fake_cli, fake_game, games=0)
+    script = START + expect(welcome=1, modal=0, library_size=0, intermediates_choice=0) + seek("welcome_skip", "dpad_right", 8) + press("south") + expect(welcome=0, page="library", modal=0, intermediates_choice=0) + ["quit"]
+    r.check("welcome skip", w.run(script, always, size), counted(script))
+    script = START + expect(welcome=1) + seek("welcome_add", "dpad_right", 8) + press("south") + expect(picker=1, modal=0, intermediates_choice=0) + ["quit"]
+    r.check("welcome add", w.run(script, always, size), counted(script))
+    r.expect(not (w.lib / "launcher-settings.json").exists() or json.loads((w.lib / "launcher-settings.json").read_text()).get("intermediates_choice_made") is not True, "welcome never records the first-run choice")
 
 
 def import_journey(r, tmp, exe, fake_cli, fake_game, size):
@@ -149,12 +164,13 @@ def import_journey(r, tmp, exe, fake_cli, fake_game, size):
     (root / "notes.txt").write_text("not a rom")
     env = {"SEGARECOMP_PICKER_ROOT": str(root)}
     # empty library: Browse (controller) -> picker -> into the folder -> tick both ROMs -> Import
-    script = START + seek("dz_browse", "dpad_right", 6) + press("south") + expect(picker=1, focus_id="pkrow#0")
+    script = START + expect(welcome=0) + seek("empty_add", "dpad_right", 6) + press("south") + expect(picker=1, focus_id="pkrow#0")
     script += press("south") + expect(picker_level="root")
     script += seek("pkrow#2", "dpad_down", 4) + press("south") + expect(picker_chosen=1)
     script += seek("pkrow#3", "dpad_down", 2) + press("south") + expect(picker_chosen=2)
-    script += seek("pk_cancel", "dpad_down", 3) + seek("pk_ok", "dpad_right", 3) + press("south") + ["frames 90"] + expect(picker=0, library_size=2) + ["quit"]
-    r.check("import via picker", p.run(script, env, size), 12)
+    script += seek("pk_cancel", "dpad_down", 3) + seek("pk_ok", "dpad_right", 3) + press("south") + ["wait_import", "frames 10"] + expect(picker=0, library_size=0, page="import", review="valid,valid")   # inspected, not added yet
+    script += seek("review_add", "dpad_right", 8) + press("south") + ["frames 20"] + expect(library_size=2, page="library", build_count=0, playing=0) + ["quit"]   # Add only: no build, no launch
+    r.check("import via picker", p.run(script, env, size), counted(script))
     # back / cancel semantics and root confinement: East goes up, then to the locations, then closes; nothing is imported
     script = START + press("dpad_down") + seek("card:a", "dpad_right", 3) + seek("lib_import", "dpad_up", 8) + press("south") + expect(picker=1)
     script += press("south") + expect(picker_level="root")
