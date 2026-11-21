@@ -52,6 +52,7 @@ static PcmFile g_pcm;
  * bus-hold windows ('S' / 'U'), the 68000's stores into the driver's communication windows ('W') and the end of the observation ('E'). An opt-in
  * validation seam (reference comparison of a sound implementation); it observes the devices only. A failing file never changes the run. */
 static FILE *g_write_log;
+static int g_write_log_all_ram;   /* SEGARECOMP_AUDIO_WRITE_LOG_RAM=all: every 68000 store into the sound RAM (a replacement with its own mailbox, ADR 0317, is reconstructed from them) */
 
 static void write_log_tap(void *context, char kind, uint32_t port, uint8_t value, uint64_t master_ticks) {
   (void)context;
@@ -62,7 +63,7 @@ static void write_log_tap(void *context, char kind, uint32_t port, uint8_t value
  * It is what a game really wrote, observed at the bus and independent of whichever implementation reads it. */
 static void ram_write_tap(void *context, uint32_t offset, uint8_t value, uint64_t master_ticks) {
   (void)context;
-  if (g_write_log != NULL && (offset == 0x36U || offset == 0x37U || (offset >= 0x1B20U && offset < 0x1B80U)))
+  if (g_write_log != NULL && (g_write_log_all_ram || offset == 0x36U || offset == 0x37U || (offset >= 0x1B20U && offset < 0x1B80U)))
     fprintf(g_write_log, "W %u %02X %llu\n", (unsigned)offset, (unsigned)value, (unsigned long long)master_ticks);
 }
 
@@ -210,6 +211,7 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
     }
     if (getenv("SEGARECOMP_AUDIO_WRITE_LOG") != NULL && g_write_log == NULL && genesis_sound_audio_mutable() != NULL) {
       g_write_log = fopen(getenv("SEGARECOMP_AUDIO_WRITE_LOG"), "wb");
+      g_write_log_all_ram = getenv("SEGARECOMP_AUDIO_WRITE_LOG_RAM") != NULL && strcmp(getenv("SEGARECOMP_AUDIO_WRITE_LOG_RAM"), "all") == 0;
       if (g_write_log != NULL) {
         genesis_sound_audio_mutable()->write_tap = write_log_tap;
         genesis_sound_audio_mutable()->write_tap_context = NULL;
