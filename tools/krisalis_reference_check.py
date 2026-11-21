@@ -265,6 +265,9 @@ def make_script(lines, revision):
     horizon = next((l.ticks for l in lines if l.kind == "E"), None)
     if activation is None or horizon is None:
         raise CheckError("the log needs an activation (A) and an end marker (E)")
+    second = next((l.ticks for l in lines if l.kind == "A" and l.ticks > activation.ticks), None)
+    if second is not None:   # the driver was started again (the game reset the Z80 and re-uploaded it): this script is the first life only
+        horizon = min(horizon, second)
     out = ["A %d %d %d" % (revision, bank, activation.ticks)]
     image = {}
     transactions = []

@@ -21,3 +21,7 @@ ADR 0054 refuses to take an *operand width* (0..255) as a table extent. Here the
 ## Evidence
 
 `cpu_m68k_slot_run_discovery_tests` (synthetic): a three-slot table resolves to its three slots with index values 0/4/8; no scaling, the wrong register, one slot, an odd-displacement terminator (a run of two), a non-immutable environment and a non-slot table behave as before. The pre-existing discovery tests are unchanged. Real images: docs/testing/genesis-native-krisalis-validation.md.
+
+## Note: the VDP write-FIFO status bit
+
+Sensible Soccer's own blank screen was not a sound or discovery problem: its VDP helper polls status bit 9 (write FIFO empty) before control-port bursts and the runtime never reported it. Every VDP write is applied at once, so the FIFO is always empty: bit 9 is now always set (bit 8, full, stays clear). That game also checks the console region; with the Europe region (the launcher passes the header's) it runs.

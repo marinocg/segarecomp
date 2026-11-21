@@ -1238,6 +1238,9 @@ static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices, uint64_t ma
   uint16_t status = (uint16_t)(devices->vdp.status_register &
                                (uint16_t)~(UINT16_C(0x0008) | UINT16_C(0x0004) | UINT16_C(0x0010)));
   if (genesis_vdp_live_vblank_status_bit(master_ticks)) status |= UINT16_C(0x0008);
+  /* Bit 9 is "write FIFO empty": every VDP write is applied the moment it is made, so the FIFO is always empty (bit 8, full, stays 0). Guest code polls it before a
+     burst of control-port writes (Sensible Soccer's VDP helper waits for it forever without it). */
+  status |= UINT16_C(0x0200);
   /* SEG-055: bit 2 is the horizontal-blanking flag, a function of the position inside the current scanline (guest code
      polls it to wait for HBlank, e.g. the Sonic 2/3 split-screen handlers). The window is, in master ticks from the
      start of the line, 228-872 in H40 and 280-860 in H32 (the public Genesis Plus GX `core/vdp_ctrl.c` measurements,
