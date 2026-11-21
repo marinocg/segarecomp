@@ -370,6 +370,21 @@ int main(int argc, char **argv) {
                                "Original Z80 not executed for that driver", "Save states and rewind supported", "Timing is event-accurate rather than instruction-cycle-accurate",
                                "rewrites its own executable code", "this executable's playback has not itself been verified", "met no unsupported operation", "Implementation version 1"})
       expect(native_text.find(phrase) != std::string::npos, std::string("native detail states: ") + phrase + " in: " + native_text);
+    // ADR 0318: a Krisalis record is read by the same reader; its wording names the family and the published revision, never GEMS
+    {
+      std::string krisalis = native_status;
+      for (const auto &[from, to] : {std::pair<std::string, std::string>{"\"driver\":\"gems\",\"version\":\"2.5\",\"version_evidence\":\"address_map_and_tables\"", "\"driver\":\"krisalis\",\"version\":\"3\",\"version_evidence\":\"published_code_identity\""}})
+        krisalis.replace(krisalis.find(from), from.size(), to);
+      const auto k = read_audio_report(write_status(dir, "audio_krisalis", krisalis));
+      expect(k.state == AudioReport::State::known && k.driver == "krisalis" && k.version == "3" && k.commands == 17, "a native Krisalis record is read field by field");
+      expect(audio_headline(k) == "Native Krisalis (revision 3)", "the Krisalis headline names the family and the revision");
+      const std::string k_text = audio_detail(k);
+      expect(k_text.find("verified Krisalis driver image") != std::string::npos && k_text.find("published Krisalis revision 3") != std::string::npos && k_text.find("GEMS") == std::string::npos,
+             "the Krisalis detail never names GEMS: " + k_text);
+      std::string other = krisalis;
+      other.replace(other.find("\"driver\":\"krisalis\""), 18, "\"driver\":\"other\"");
+      expect(read_audio_report(write_status(dir, "audio_other_driver", other)).state == AudioReport::State::unknown, "an unknown native driver family is never interpreted");
+    }
     // build-qualified is worded differently from independently verified, and a fault in the start-up run is stated
     std::string qualified = native_status;
     qualified.replace(qualified.find("reference_checked"), 17, "build_qualified");

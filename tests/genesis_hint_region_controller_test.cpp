@@ -276,6 +276,7 @@ void test_status_hblank_and_field_bits() {
   // blanking window, clear again at the very end; the window differs between H40 and H32.
   r->scheduler.master_ticks = 10ull * line + 100u;
   check((read_status_word(*r) & 0x0004u) == 0u, "HBlank flag clear at the start of a line");
+  check((read_status_word(*r) & 0x0200u) != 0u && (read_status_word(*r) & 0x0100u) == 0u, "the write FIFO reads empty (bit 9 set, bit 8 clear): writes are applied at once, and guest code polls bit 9 before its control-port bursts");
   r->scheduler.master_ticks = 10ull * line + 500u;
   check((read_status_word(*r) & 0x0004u) != 0u, "HBlank flag set inside the H40 blanking window");
   r->scheduler.master_ticks = 10ull * line + 900u;

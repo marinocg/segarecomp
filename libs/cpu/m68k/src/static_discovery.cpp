@@ -2190,6 +2190,20 @@ class M68kStaticGraphWalker {
     const auto &ea = decoded.source_ea;
     // ADR-0009: An index and long index are initially unrepresentable.
     if (ea.index_is_address || ea.index_is_long) return false;
+    // The slot-run shape names the whole table, so it also covers a finite proof that only saw the callers discovered so far (the run is a superset of any in-table proof).
+    M68kIndirectTargetEaSet run_set{};
+    if (compute_slot_run_target_set(addr, decoded, run_set)) {
+      const auto proof = analyze_finite_index_values();
+      const auto at = proof.find(addr);
+      bool outside_run = false;
+      if (at != proof.end() && at->second.dn[ea.index_reg].finite)
+        for (const auto low_word : at->second.dn[ea.index_reg].values) {
+          const auto raw = static_cast<std::int64_t>(ea.pc_base_address) + static_cast<std::int64_t>(ea.displacement) +
+                           static_cast<std::int64_t>(static_cast<std::int32_t>(static_cast<std::int16_t>(low_word)));
+          if (std::none_of(run_set.candidates.begin(), run_set.candidates.end(), [&](const auto &c) { return static_cast<std::int64_t>(c.value) == raw; })) outside_run = true;
+        }
+      if (!outside_run) { out = std::move(run_set); return true; }
+    }
     const auto states = analyze_finite_index_values();
     const auto found = states.find(addr);
     if (found == states.end()) return false;
@@ -2220,6 +2234,53 @@ class M68kStaticGraphWalker {
   }
 
  private:
+
+  // SEG-151-T002 / ADR 0319: the index of a `JMP/JSR (d8,PC,Dn.w)` that no finite-value proof bounds, but whose shape names its own extent: the instruction right before it is
+  // `lsl.w #2,Dn` (the index is scaled to a 4-byte stride) and the table the jump enters is a run of `BRA.W` slots (`$6000, even non-zero displacement`) in immutable cartridge
+  // bytes. The candidate set is exactly that contiguous run (at most 64 slots, at least 2); every candidate still passes the target-admission rule and the generated code still
+  // checks the computed target against the set at run time (a target outside it is the typed unresolved-indirect stop). Anything else keeps the unproven (Tier-2) behaviour.
+  [[nodiscard]] bool compute_slot_run_target_set(Address addr, const M68kDecodedInstruction &decoded, M68kIndirectTargetEaSet &out) const {
+    const auto &ea = decoded.source_ea;
+    if (ea.mode != M68kEaMode::pc_index8 || ea.index_is_address || ea.index_is_long || addr < 2U) return false;
+    const auto word_at = [&](std::int64_t address) -> std::optional<std::uint16_t> {
+      if (address < 0 || address > static_cast<std::int64_t>(UINT32_C(0x00FFFFFE)) - 1) return std::nullopt;
+      const auto block = environment_.read_immutable_cartridge_bytes({TargetAddressSpace::m68k_program, static_cast<std::uint32_t>(address)}, 2U);
+      if (!block || block->bytes.size() != 2U) return std::nullopt;
+      return static_cast<std::uint16_t>((static_cast<std::uint16_t>(block->bytes[0]) << 8) | static_cast<std::uint16_t>(block->bytes[1]));
+    };
+    const auto scale = word_at(static_cast<std::int64_t>(addr) - 2);
+    if (!scale || *scale != static_cast<std::uint16_t>(UINT16_C(0xE548) + ea.index_reg)) return false;  // lsl.w #2,Dn
+    const auto base = static_cast<std::int64_t>(ea.pc_base_address) + static_cast<std::int64_t>(ea.displacement);
+    if (base < 0 || (base & 1) != 0) return false;
+    std::vector<Address> candidates;
+    std::vector<std::uint16_t> values;
+    // The run must be established completely: a terminator (a word that is not a slot) has to be READ after the last slot, including after the 64th. A table with a 65th slot, or one whose
+    // terminator is not readable from immutable bytes, is not a proven run.
+    bool terminated = false;
+    for (std::uint16_t slot = 0; slot <= 64U; ++slot) {
+      const auto at = base + 4 * static_cast<std::int64_t>(slot);
+      const auto opcode = word_at(at);
+      if (!opcode) return false;                                  // unreadable: the extent is not established
+      bool is_slot = false;
+      if (*opcode == UINT16_C(0x6000)) {
+        const auto displacement = word_at(at + 2);
+        if (!displacement) return false;
+        is_slot = *displacement != 0U && (*displacement & 1U) == 0U;   // BRA.W, even non-zero displacement
+      }
+      if (!is_slot) { terminated = true; break; }
+      if (slot == 64U) return false;                              // a 65th slot: more than the bounded run
+      candidates.push_back(static_cast<Address>(at));
+      values.push_back(static_cast<std::uint16_t>(4U * slot));
+    }
+    if (!terminated) return false;
+    if (candidates.size() < 2U) return false;
+    out.source_instruction = decoded.provenance;
+    out.control_ea = ea;
+    out.index_values = M68kFiniteIndexValueSet{decoded.provenance, static_cast<DataRegister>(ea.index_reg), values};
+    out.candidates.clear();
+    for (const auto value : candidates) out.candidates.push_back({TargetAddressSpace::m68k_program, value});
+    return true;
+  }
 
   // SEG-021-T028: single place that records the existing Tier-2 fact once per
   // source; `indirect_emitted_` guarantees a source never holds both tiers.

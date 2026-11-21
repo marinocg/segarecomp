@@ -7,6 +7,13 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Sound for the Krisalis driver family: Chuck Rock, Mickey Mania and The Lion King no longer wait forever on the sound handshake (ADR 0318)
+
+* Games that use the Krisalis (Shaun Hollingworth) Mega Drive driver ended with a degraded sound CPU and a 68000 spinning on the mailbox it never saw acknowledged (frozen title / blank screen). The build now selects, automatically, a native C11 replacement
+  of the driver for a **verified uploaded image** (revisions 1 and 3; one shared core), after the original generated-native Z80 has failed and with GEMS keeping precedence for its own images. No option, no interpreter, no fallback; unlisted images are never served.
+* Chuck Rock, Mickey Mania and The Lion King play (title, level 1, input, music and PCM, save states / rewind); revisions 1, 2 and 3 are covered (revision 2: Sensible Soccer, sound side verified; the game itself stalls on its own frontier).
+  Validated against the original driver executed by an independent emulator (tools/krisalis_reference_check.py; local). The 68000 discovery now resolves a `lsl.w #2,Dn` / `jmp table(pc,Dn.w)` over a run of `bra.w` slots to that run (ADR 0319), which unblocked The Lion King and moved Boogerman on.
+
 ### Sound for games whose own driver rewrites its code, when the structural alternatives close it (ADR 0291 Decision 6)
 
 * A Genesis build whose first pass isolates the sound CPU by a structural code mismatch, and for which no verified native GEMS replacement applies, now makes one more automatic pass with the compiled structural alternatives of the original driver (ADR 0259). A healthy result is the game's own driver as generated-native Z80 (`audio_implementation.reason = original_with_structural_alternatives`), shown in Build provenance; otherwise the build stays degraded as before. No option, no replacement driver, no title test; unknown GEMS images are not guessed compatible. Kid Chameleon plays this way (it uses an earlier GEMS 2.x build that the verified 2.5 implementation does not serve). The extra pass is skipped (degraded result kept, reason recorded) when the emitter itself reports no admissible alternative forms; otherwise such a game builds twice.

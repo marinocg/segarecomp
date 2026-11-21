@@ -268,7 +268,7 @@ int main(void) {
     value = UINT32_C(0xFFFFFFFF);
     assert(genesis_route_access(&clean, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
                                  GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
-    assert(value == 0U);
+    assert(value == UINT32_C(0x0200));
     assert(clean.devices.z80_bus.bus_requested == 0U &&
            clean.devices.z80_bus.bus_granted == 0U &&
            clean.devices.z80_bus.reset_released == 0U); /* power-on: held in reset */
