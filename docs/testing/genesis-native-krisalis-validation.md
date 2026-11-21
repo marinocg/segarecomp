@@ -47,15 +47,15 @@ The report keeps the strength of each comparison apart. **Exact** means equal wi
 **Not claimed:** cycle accuracy, the interleaving of DAC bytes with FM writes (the original polls the DAC from inside its row code in revision 3 and not at all during a row in revision 1; the replacement paces it by an event model), the order in which an SFX sample start and a tick that are both pending are served (a race of a few hundred Z80 cycles),
 revision 2's per-poll FM6 pan pair as a register-level comparison (an FM6 voice load's own pan write cannot be told from it), or real-hardware equivalence. The stimulus script follows the first life of the driver only (a game that resets and re-uploads it later is compared up to that point).
 
-## 3. Results (strict checker; exact numbers of the final run)
+## 3. Results (strict checker; the four games rebuilt with the default build after the review corrections and replayed with the final code; Boogerman's row is its strict-checker run before the host restart of that session and was not repeated)
 
 | Image (game, revision) | Commands written / consumed | YM2612 register writes (exact) | Sample activations native / original | DAC bytes compared | Samples exact / boundary-shifted / length-differing (max) / cut by the horizon | Bank-register bits (exact) | Skew p50 / p95 / p99 / max (ticks) | Verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Chuck Rock, rev 1 (about 65 s, title + level 1) | 3,712 / 3,712 | 18,072 | 265 / 265 | 454,057 | 181 / 0 / 83 (42 bytes) / 1 | 0 (fixed bank) | 3,409 / 14,795 / 32,429 / 45,781 | passed, bounded DAC cut lengths |
-| Mickey Mania, rev 3 (about 73 s) | 2,177 / 2,177 | 11,794 | 14 / 14 | 42,145 | 4 / 3 (1 byte) / 9 (51 bytes) / 0 | 126 | 14,266 / 55,804 / 167,646 / 300,590 | passed, bounded DAC cut lengths |
-| The Lion King, rev 3 (about 68 s, level 1) | 1,104 / 1,104 | 3,656 | 27 / 27 | 66,797 | 25 / 0 / 2 (10 bytes) / 0 | 243 | 15,144 / 53,346 / 65,328 / 120,140 | passed, bounded DAC cut lengths |
+| Chuck Rock, rev 1 (about 55 s, title + level 1; default build, rerun after the review corrections) | 3,362 / 3,362 | 15,873 | 237 / 237 | 406,835 | 166 / 0 / 71 (30 bytes) / 0 | 0 (fixed bank) | 3,350 / 14,795 / 32,429 / 45,781 | passed, bounded DAC cut lengths |
+| Mickey Mania, rev 3 (about 65 s; rerun) | 1,889 / 1,889 | 10,926 | 14 / 14 | 42,146 | 4 / 3 (1 byte) / 9 (51 bytes) / 0 | 126 | 14,351 / 57,544 / 171,450 / 299,807 | passed, bounded DAC cut lengths |
+| The Lion King, rev 3 (about 68 s, level 1; rerun) | 1,104 / 1,104 | 3,656 | 27 / 27 | 66,797 | 25 / 0 / 2 (10 bytes) / 0 | 243 | 15,144 / 53,346 / 65,328 / 120,140 | passed, bounded DAC cut lengths |
 | Boogerman, rev 3 (78 frames) | 52 / 52 | 477 | 7 / 7 | 11,345 | 6 / 0 / 0 / 1 | 63 | 16,257 / 59,859 / 60,459 / 61,434 | passed (one sample crosses the horizon) |
-| Sensible Soccer (E), rev 2 (own run, first life) | 2,304 / 2,303 (the last pending) | 7,239 | 96 / 96 | 133,839 | 50 / 0 / 45 (16 bytes) / 1 | 864 | 5,308 / 45,988 / 72,338 / 78,230 | passed, bounded DAC cut lengths |
+| Sensible Soccer (E), rev 2 (own run, first life, Europe region; rerun) | 2,256 / 2,255 (the last pending) | 7,239 | 96 / 96 | 133,839 | 50 / 0 / 45 (16 bytes) / 1 | 864 | 5,308 / 45,988 / 72,338 / 78,230 | passed, bounded DAC cut lengths |
 
 Nothing in these runs is called bit-identical: every run has cut samples whose length differs within the stated bound (the commands, the FM register writes, the sample activations, the DAC byte content and the bank-register bits are exact; only the length of cut samples and the timing are bounded). The earlier checker accepted these runs
 too but tolerated a missing sample and ignored the bank sequence; the stricter one found nothing the earlier one had missed, so no replacement behaviour changed in this round. A transplanted-stimulus run on the Sensible Soccer driver (2,182 commands from a revision-3 game: 11,952 register writes, 17,556 DAC bytes) is kept as additional revision-2 coverage.
