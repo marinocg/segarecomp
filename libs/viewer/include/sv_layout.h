@@ -100,6 +100,9 @@ typedef struct SvExtendedSurface {
   /* ADR 0315: the native picture starts at surface column `side + shift` (zero-initialised = centred): `side + shift` produced columns lie left of it, `side - shift` right of it; |shift| <= side. The total
    * width stays native + 2 * side. A non-zero shift is presented whole (a view narrower than the surface would reinterpret columns the producer did not make for it) or not at all. */
   int shift;
+  /* W04 (ADR 0318): the bottom `hud_rows` rows are a window-plane HUD band (0 = none; 0 <= hud_rows <= height). Whenever the extension is shown, the presenter draws those rows as the native-width picture row
+   * centred in the planned total (column `side`) with the backdrop (black) on both sides, whatever the picture's placement above the band. */
+  int hud_rows;
 } SvExtendedSurface;
 typedef enum SvActorStage {
   SV_ACT_NONE = 0,       /* no virtual-sprite contribution */

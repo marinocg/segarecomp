@@ -250,6 +250,7 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
       surface.pitch = (int)r->pitch;
       surface.side = (int)r->side;
       surface.shift = (int)r->shift;   /* ADR 0315: where the picture sits in the planned total; validated again by the host */
+      surface.hud_rows = (int)r->hud_rows;   /* ADR 0318: the window-plane HUD band at the bottom; the host keeps it centred and black-bordered */
       surface.sequence = r->sequence;
       /* the produced frame's own identity, never the saved preference */
       surface.mode = r->mode == GENESIS_EXT_MODE_SPRITES ? SV_WIDESCREEN_ENHANCED_GAMEPLAY

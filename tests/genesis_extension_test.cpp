@@ -226,6 +226,20 @@ bool ref_window(const Ref &r, const GenesisRasterLine &ln, unsigned x, unsigned 
   return horiz || vert;
 }
 
+// ADR 0318: the rows of a window-plane HUD band: the run of rows at the bottom of the picture on which the window owns BOTH picture edges. Written from the window rule alone.
+unsigned ref_hud_rows(const Ref &r) {
+  const unsigned W = r.width(), H = r.height();
+  unsigned n = 0;
+  while (n < H) {
+    const unsigned y = H - 1 - n;
+    const GenesisRasterLine &ln = r.sc->raster->lines[r.c.im2 ? y / 2 : y];
+    if (!(ref_window(r, ln, 0, y) && ref_window(r, ln, W - 1, y))) break;
+    ++n;
+  }
+  return n;
+}
+bool ref_hud_row(const Ref &r, unsigned row) { return row >= r.height() - ref_hud_rows(r); }
+
 // ---- SEG-121: the independent sprite-layer reference (written from the documented hardware rules, not from the production helpers) ----
 // Fills layer[x + side] for the screen columns -side .. W + side - 1 of one output row: SAT linked-list walk from sprite 0 (stops at link 0, a link
 // beyond the table, or a revisit), at most 20 (H40) / 16 (H32) sprites on the row (the next one ends the walk), 40 / 32 cells of sprite width per row in
@@ -279,7 +293,7 @@ unsigned ref_index(const Ref &r, const GenesisRasterLine &ln, const std::vector<
   const bool wedge = ref_window(r, ln, left ? 0u : r.width() - 1u, row);
   const unsigned g = left ? 0u : groups - 1u;
   Pix a = wedge ? Pix{false, 0, 0, 0} : ref_plane(r, ln, vram, false, x, row, g);
-  Pix b = ref_plane(r, ln, vram, true, x, row, g);
+  Pix b = ref_hud_row(r, row) ? Pix{false, 0, 0, 0} : ref_plane(r, ln, vram, true, x, row, g);   // ADR 0318: the backdrop beside a window-plane HUD band
   if (spr != nullptr && spr->opaque && spr->prio) return spr->pal * 16 + spr->idx;
   if (a.opaque && a.prio) return a.pal * 16 + a.idx;
   if (b.opaque && b.prio) return b.pal * 16 + b.idx;
@@ -295,7 +309,7 @@ unsigned ref_class(const Ref &r, const GenesisRasterLine &ln, const std::vector<
   const bool wedge = ref_window(r, ln, left ? 0u : r.width() - 1u, row);
   const unsigned g = left ? 0u : groups - 1u;
   const Pix a = wedge ? Pix{false, 0, 0, 0} : ref_plane(r, ln, vram, false, x, row, g);
-  const Pix b = ref_plane(r, ln, vram, true, x, row, g);
+  const Pix b = ref_hud_row(r, row) ? Pix{false, 0, 0, 0} : ref_plane(r, ln, vram, true, x, row, g);
   const bool s_hi = spr != nullptr && spr->opaque && spr->prio, s_lo = spr != nullptr && spr->opaque && !spr->prio;
   if (s_hi || (a.opaque && a.prio) || (b.opaque && b.prio)) return 2;
   if (s_lo || a.opaque || b.opaque) return 1;
@@ -385,7 +399,7 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true, u
         rgb_of(ln.cram, ref_index(ref, ln, vram, x, row, left != 0, groups, sp), want);
         if (sp != nullptr && sp->opaque) {
           const Pix a = ref_window(ref, ln, left ? 0u : W - 1u, row) ? Pix{false, 0, 0, 0} : ref_plane(ref, ln, vram, false, x, row, left ? 0u : groups - 1u);
-          const Pix b = ref_plane(ref, ln, vram, true, x, row, left ? 0u : groups - 1u);
+          const Pix b = ref_hud_row(ref, row) ? Pix{false, 0, 0, 0} : ref_plane(ref, ln, vram, true, x, row, left ? 0u : groups - 1u);
           if (sp->prio || !((a.opaque && a.prio) || (b.opaque && b.prio))) ++ref_sprite_pixels;
         }
         {
@@ -407,6 +421,7 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true, u
       if (std::memcmp(want, g_surface.data() + (size_t)row * pitch + (S + x) * 3, 3) != 0) ++bad_centre;
     }
   }
+  checkf(out.res.hud_rows == ref_hud_rows(ref), "ADR 0318: the reported HUD band is the bottom run of rows whose both picture edges are window-covered", out.res.hud_rows, ref_hud_rows(ref));
   checkf(bad == 0, name, bad);
   checkf(bad_centre == 0, "the surface centre equals the native picture", bad_centre);
   checkf(bad_class == 0, "ADR 0312: every extension pixel's recorded class equals the six-layer reference", bad_class);
@@ -474,6 +489,23 @@ void synthetic_fixtures() {
     if (failures != before) std::printf("  ^ seed %u h40 %d hmode %u colvs %d pw %u ph %u win %d im2 %d mid %d native_ok %d rc %d status %u\n", it.c.seed, it.c.h40, it.c.hmode, it.c.column_vscroll, it.c.plane_w_field, it.c.plane_h_field, it.c.window, it.c.im2, it.c.midframe, o.native_ok, o.rc, o.res.status);
   }
   // the specific caveats appear where the scene creates them
+  {   // ADR 0318: a bottom window-plane band owns both picture edges: the columns beside it are ONE flat backdrop colour per row (no Plane A or Plane B), the rows above it keep their tiles
+    Cfg c = base; c.window = 4; c.hmode = 3;
+    const Outcome o = run_and_compare(c, "window band: backdrop beside the bottom band");
+    const unsigned W = o.res.native_w, S = o.res.side, pitch = o.res.pitch;
+    checkf(o.res.hud_rows == 64, "the bottom 8 cell rows from cell row 20 are the HUD band", o.res.hud_rows);
+    bool flat = true, above_varies = false;
+    for (unsigned row = 0; row < o.res.native_h; ++row) {
+      const uint8_t *r0 = g_surface.data() + (size_t)row * pitch;
+      bool same = true;
+      for (unsigned i = 0; i < S; ++i) {
+        if (std::memcmp(r0 + i * 3, r0, 3) != 0 || std::memcmp(r0 + (S + W + i) * 3, r0, 3) != 0) same = false;
+      }
+      if (row + o.res.hud_rows >= o.res.native_h) flat = flat && same; else above_varies = above_varies || !same;
+    }
+    check(flat, "ADR 0318: both margins of every band row are the one backdrop colour");
+    check(above_varies, "ADR 0318: the rows above the band keep their scenery in the margins");
+  }
   { Cfg c = base; c.window = 1; const Outcome o = run_and_compare(c, "window left"); check(o.res.status == GENESIS_EXT_PARTIAL && (o.res.flags & GENESIS_EXT_FLAG_WINDOW_EDGE), "window over an edge is reported Partial"); }
   { Cfg c = base; const Outcome o = run_and_compare(c, "plain"); check(o.res.status == GENESIS_EXT_AVAILABLE && o.res.flags == 0, "a plain scene is Available"); }
   { Cfg c = base; c.hmode = 3; const Outcome o = run_and_compare(c, "line scroll"); check(o.res.status == GENESIS_EXT_AVAILABLE, "per-line scroll is derivable: Available"); }

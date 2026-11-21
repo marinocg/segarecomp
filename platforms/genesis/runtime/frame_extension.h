@@ -97,6 +97,9 @@ typedef struct GenesisExtensionResult {
    * edge in that row (a row whose cells are all generic by the provider's own declaration, ADR 0314, is not marked; a row that mixes an authored plane with a generic one is), and the frame as a whole
    * has no per-column vertical scroll and a VRAM journal. It never replaces `authored`, which stays the strict whole-frame verdict: a frame with some authored rows is still Partial. Zero without a provider. */
   uint16_t authored_row_count;
+  /* W04 (ADR 0318): the number of rows at the bottom of the picture on which the window plane owns BOTH picture edges (a window-plane status bar / HUD band); 0 = none. On those rows the producer leaves the
+   * columns beside the picture as the backdrop (no Plane A or Plane B), and the presenter keeps the band's native-width picture centred in the planned total whatever the picture's placement. */
+  uint16_t hud_rows;
   uint8_t authored_rows[(GENESIS_FRAME_MAX_HEIGHT + 7U) / 8U];
   uint16_t overlay_w, overlay_h; /* HUD overlay in the adapter's overlay buffer (0 = none) */
   uint16_t overlay_fx, overlay_fy; /* where the host draws it inside the native picture when the visible side cannot hold it */
