@@ -491,7 +491,7 @@ static void do_note_word(Build *b, unsigned channel, uint8_t lo, uint8_t hi) {
       chan_set16(k, channel, CH_PITCH, current);
     }
     chan_set16(k, channel, CH_SLIDE, 0u);
-    if (channel == 5u && jingle_state(k) == 0u && *mb(k, MB_SFXBUSY) == 0u && k->dac_active) push(b, OP_DAC_CUT, 0u, 0u, rev1 ? 0u : 1u);   /* an FM note on FM6 stops a music sample, at this point of the row */
+    if (channel == 5u && jingle_state(k) == 0u && *mb(k, MB_SFXBUSY) == 0u && k->dac_active) push(b, OP_DAC_CUT, 0u, 0u, (uint8_t)(rev1 ? 0u : 1u));   /* an FM note on FM6 stops a music sample, at this point of the row */
   }
   if ((lo & 0x0Fu) != 0u) {   /* effect nibble: slide step = +/-(E & 7) * 4 per tick, bit 3 = down */
     uint8_t magnitude = (uint8_t)(lo & 7u);
