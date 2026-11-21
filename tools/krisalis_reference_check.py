@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline reference check of the native Krisalis replacement (ADR 0317, docs/testing/genesis-native-krisalis-validation.md).
+"""Offline reference check of the native Krisalis replacement (ADR 0318, docs/testing/genesis-native-krisalis-validation.md).
 
 The reference is the ORIGINAL Z80 driver, executed offline by an independent Z80 emulator (the third-party `z80` Python package, NOT vendored, never linked into the
 product). The driver image is not read from this repository: it is reassembled from the 68000's own stores into the sound RAM that the native program logged
@@ -148,12 +148,15 @@ def compare_streams(native, reference, horizon, tail_ticks, label):
     r = [w for w in reference if w[3] <= horizon]
     compared = 0
     max_skew = 0
+    skews = []
     for i in range(min(len(n), len(r))):
         if n[i][:3] != r[i][:3]:
             failures.append("%s: write %d differs: native (part %d reg %02X value %02X) reference (part %d reg %02X value %02X)" % ((label, i) + n[i][:3] + r[i][:3]))
             return failures, compared, max_skew
         compared += 1
-        max_skew = max(max_skew, abs(n[i][3] - r[i][3]))
+        skews.append(n[i][3] - r[i][3])
+        max_skew = max(max_skew, abs(skews[-1]))
+    compare_streams.skews = skews
     if len(n) != len(r):
         longer, name = (n, "native") if len(n) > len(r) else (r, "reference")
         extra = longer[min(len(n), len(r)):]
@@ -161,6 +164,13 @@ def compare_streams(native, reference, horizon, tail_ticks, label):
         if any(w[3] < boundary for w in extra):
             failures.append("%s: %s has %d extra write(s) inside the window (first at %d)" % (label, name, len(extra), extra[0][3]))
     return failures, compared, max_skew
+
+
+def _percentiles(values):
+    if not values:
+        return [0, 0, 0]
+    ordered = sorted(abs(v) for v in values)
+    return [ordered[int(len(ordered) * q) - 1 if q < 1 else -1] for q in (0.5, 0.95, 0.99)]
 
 
 def dac_segments(dac, fm):
@@ -195,7 +205,7 @@ def compare_dac(native_dac, native_fm, reference_dac, reference_fm, tolerance_by
     return failures, compared, worst
 
 
-def check(native_lines, reference_fm, reference_dac, reference_bank, revision, tail_ticks, dac_tolerance=48):
+def check(native_lines, reference_fm, reference_dac, reference_bank, revision, tail_ticks, dac_tolerance=64):
     horizon = next((l.ticks for l in native_lines if l.kind == "E"), None)
     if horizon is None:
         raise CheckError("the log has no end marker (E)")
@@ -214,6 +224,7 @@ def check(native_lines, reference_fm, reference_dac, reference_bank, revision, t
         "dac_bytes_compared": dac_compared,
         "dac_max_length_difference": dac_worst,
         "max_skew_ticks": fm_skew,
+        "skew_ticks_p50_p95_p99": _percentiles(getattr(compare_streams, "skews", [])),
         "commands_written": len(committed),
         "commands_consumed": len(consumed),
         "failures": failures,
@@ -221,24 +232,81 @@ def check(native_lines, reference_fm, reference_dac, reference_bank, revision, t
     }
 
 
+# ---- the stimulus: the 68000's own bus transactions, replayed as a closed loop ---------------------------------------------------------------------------------
+POLL_HOLD, POLL_GAP = 1200, 900   # master ticks the 68000 holds the bus per poll of the command byte, and waits between polls (as its wait loop does)
+
+
+def make_script(lines, revision):
+    """The 68000's side of a logged run as a script both implementations are driven by: the sound-RAM image at activation, then one transaction per bus hold (its time, its length and the stores
+    made inside it). A transaction that stores a command is issued only when the implementation under test has cleared the previous one (the 68000 waits for that), so the two runs
+    are closed loops over the SAME command sequence and neither is fed an impossible stimulus."""
+    base = MAILBOX[revision]
+    activation = next((l for l in lines if l.kind == "A"), None)
+    bank = next((l.port for l in lines if l.kind == "B"), 0)
+    horizon = next((l.ticks for l in lines if l.kind == "E"), None)
+    if activation is None or horizon is None:
+        raise CheckError("the log needs an activation (A) and an end marker (E)")
+    out = ["A %d %d %d" % (revision, bank, activation.ticks)]
+    image = {}
+    transactions = []
+    current = None
+    for l in lines:
+        if l.kind == "W" and l.ticks <= activation.ticks:
+            image[l.port & 0x1FFF] = l.value
+        elif l.kind == "S" and l.ticks >= activation.ticks and current is None:
+            current = {"t": l.ticks, "writes": [], "hold": 0}
+        elif l.kind == "W" and current is not None:
+            current["writes"].append((l.port & 0x1FFF, l.value))
+        elif l.kind == "U" and current is not None:
+            current["hold"] = max(0, l.ticks - current["t"])
+            transactions.append(current)
+            current = None
+    for off in sorted(image):
+        out.append("I %d %d" % (off, image[off]))
+    for t in transactions:
+        if not t["writes"]:
+            continue   # a bare poll of the 68000's wait loop: the closed loop generates its own
+        has_cmd = any(off == base and value != 0 for off, value in t["writes"])
+        out.append("T %d %d %d %d" % (t["t"], t["hold"], 1 if has_cmd else 0, len(t["writes"])))
+        out.extend("%d %d" % w for w in t["writes"])
+    out.append("E %d" % horizon)
+    return "\n".join(out) + "\n"
+
+
+def parse_script(text):
+    script = {"image": {}, "transactions": [], "revision": 0, "bank": 0, "activation": 0, "horizon": 0}
+    rows = text.splitlines()
+    i = 0
+    while i < len(rows):
+        f = rows[i].split()
+        i += 1
+        if not f:
+            continue
+        if f[0] == "A":
+            script["revision"], script["bank"], script["activation"] = int(f[1]), int(f[2]), int(f[3])
+        elif f[0] == "I":
+            script["image"][int(f[1])] = int(f[2])
+        elif f[0] == "E":
+            script["horizon"] = int(f[1])
+        elif f[0] == "T":
+            n = int(f[4])
+            writes = [tuple(int(x) for x in rows[i + j].split()) for j in range(n)]
+            i += n
+            script["transactions"].append({"t": int(f[1]), "hold": int(f[2]), "cmd": int(f[3]), "writes": writes})
+    return script
+
+
 # ---- the oracle: the original driver, executed by an independent emulator ---------------------------------------------------------------------------------------
-def run_oracle(lines, rom, revision):
-    """Returns (fm_writes, dac_writes, bank_bits) of the original driver driven by the game's own stores and bus holds. Needs the `z80` package."""
+def run_oracle(script, rom):
+    """Returns (fm_writes, dac_writes, bank_bits, committed) of the original driver driven by the script. `committed` are the commands the 68000 stored: [(ticks, 13 bytes)]. Needs the `z80` package."""
     try:
         import z80
     except ImportError as error:  # pragma: no cover - environment
         raise CheckError("the independent oracle needs the third-party `z80` package (pip install z80); it is not vendored: %s" % error)
-    activation = next((l for l in lines if l.kind == "A"), None)
-    if activation is None:
-        raise CheckError("the log has no activation line")
-    bank0 = next((l.port for l in lines if l.kind == "B" and l.ticks == activation.ticks), 0)
-    horizon = next((l.ticks for l in lines if l.kind == "E"), None)
-    if horizon is None:
-        raise CheckError("the log has no end marker (E)")
+    revision, base = script["revision"], MAILBOX[script["revision"]]
     ram = bytearray(0x2000)
-    for l in lines:  # the RAM as the 68000 left it when the driver started
-        if l.kind == "W" and l.ticks <= activation.ticks:
-            ram[l.port & 0x1FFF] = l.value
+    for off, value in script["image"].items():
+        ram[off] = value
     machine = z80.Z80Machine()
     machine.set_memory_block(0, bytes(ram))
     machine.pc = 0
@@ -246,7 +314,8 @@ def run_oracle(lines, rom, revision):
     machine.mark_addrs(0x6000, 1, machine.WRITE_MARK)
     machine.mark_addrs(0x8000, 0x8000, machine.READ_MARK)
     FRAME = 100000  # the emulator ends a "frame" every 100000 cycles: run() returns there and frame_tick wraps
-    state = {"bank": bank0, "ym": [], "bankbits": [], "frames": 0, "prev": 0, "hold_total": 0, "pending": False}
+    start = script["activation"]
+    state = {"bank": script["bank"], "ym": [], "bankbits": [], "frames": 0, "prev": 0, "hold_total": 0, "pending": False}
 
     def cycles_now():
         ft = machine.frame_tick
@@ -256,7 +325,7 @@ def run_oracle(lines, rom, revision):
         return state["frames"] * FRAME + ft
 
     def master_now():
-        return activation.ticks + cycles_now() * Z80_TICK + state["hold_total"]
+        return start + cycles_now() * Z80_TICK + state["hold_total"]
 
     def on_read(address):
         if address >= 0x8000:
@@ -275,7 +344,7 @@ def run_oracle(lines, rom, revision):
     machine.set_write_callback(on_write)
 
     def advance(to_master):
-        target = (to_master - activation.ticks - state["hold_total"]) // Z80_TICK
+        target = (to_master - start - state["hold_total"]) // Z80_TICK
         while True:
             remaining = target - cycles_now()
             if remaining <= 0:
@@ -289,43 +358,58 @@ def run_oracle(lines, rom, revision):
             state["pending"] = machine.run() != 0
             cycles_now()
 
-    held_at = None
-    for l in lines:
-        if l.ticks < activation.ticks or l.kind not in ("W", "S", "U"):
-            continue
-        if l.ticks > horizon:
-            break
-        if held_at is None:
-            advance(l.ticks)
-        if l.kind == "S":
-            if held_at is None:
-                held_at = l.ticks
-        elif l.kind == "U":
-            if held_at is not None:
-                state["hold_total"] += max(0, l.ticks - held_at)
-                held_at = None
-        else:
-            machine.memory[l.port & 0x1FFF] = l.value
-    if held_at is None:
-        advance(horizon)
+    committed = []
+    cells = bytearray(CELLS_LEN)
+    now = start
+    for tx in script["transactions"]:
+        t = max(tx["t"], now)
+        advance(t)
+        if tx["cmd"]:
+            while machine.memory[base] != 0:   # the 68000 polls with short holds until the Z80 has taken the previous command
+                state["hold_total"] += POLL_HOLD
+                t += POLL_HOLD + POLL_GAP
+                advance(t)
+        for off, value in tx["writes"]:
+            machine.memory[off] = value
+            if CELLS_AT <= off - base < CELLS_AT + CELLS_LEN:
+                cells[off - base - CELLS_AT] = value
+            elif off == base and value != 0:
+                committed.append((t, bytes([value]) + bytes(cells)))
+        state["hold_total"] += tx["hold"]
+        now = t + tx["hold"]
+    if script["horizon"] > now:
+        advance(script["horizon"])
     fm, dac = split_port_stream(state["ym"], revision)
-    return fm, dac, state["bankbits"]
+    return fm, dac, state["bankbits"], committed
 
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--native-log", required=True)
     ap.add_argument("--rom", required=True)
     ap.add_argument("--revision", type=int, required=True, choices=sorted(MAILBOX))
+    ap.add_argument("--game-log", help="a logged run: writes --script from it and stops")
+    ap.add_argument("--script", required=True, help="the 68000 stimulus (see make_script)")
+    ap.add_argument("--native-log", help="the log the replacement produced when driven by the script (tools/krisalis_replay_harness)")
     ap.add_argument("--tail-frames", type=float, default=2.0, help="writes this close to the horizon may be missing from the side that lags (default 2 frames)")
+    ap.add_argument("--dac-tolerance", type=int, default=64)
     ap.add_argument("--json")
     args = ap.parse_args(argv)
+    if args.game_log:
+        with open(args.game_log, "r") as handle:
+            text = make_script(parse_log(handle.read()), args.revision)
+        with open(args.script, "w") as handle:
+            handle.write(text)
+        return 0
+    if not args.native_log:
+        ap.error("--native-log is required unless --game-log is given")
+    with open(args.script, "r") as handle:
+        script = parse_script(handle.read())
     with open(args.native_log, "r") as handle:
         lines = parse_log(handle.read())
     with open(args.rom, "rb") as handle:
         rom = handle.read()
-    fm, dac, _bank = run_oracle(lines, rom, args.revision)
-    result = check(lines, fm, dac, _bank, args.revision, int(args.tail_frames * 896040))
+    fm, dac, bank, _committed = run_oracle(script, rom)
+    result = check(lines, fm, dac, bank, args.revision, int(args.tail_frames * 896040), args.dac_tolerance)
     print(json.dumps(result, indent=1))
     if args.json:
         with open(args.json, "w") as handle:

@@ -1,5 +1,5 @@
 /*
- * Native Krisalis (Shaun Hollingworth) sound-driver replacement for the Genesis (ADR 0317).
+ * Native Krisalis (Shaun Hollingworth) sound-driver replacement for the Genesis (ADR 0318).
  *
  * An independently written, portable C11 re-implementation of the observable behaviour of the Krisalis Z80 player, identified by the
  * digest of the image the 68000 uploads (krisalis_driver_catalog.inc). It is NOT an interpreter, decoder or emulator of the original
@@ -66,13 +66,17 @@ typedef struct KrisalisNative {
   uint64_t floor_ticks;       /* nothing runs earlier than this (the bus was held / the driver was started) */
   uint64_t idle_since;        /* the Z80 is waiting for work since this guest time */
   uint64_t held_since;        /* UINT64_MAX while running, else the time the bus was taken */
+  uint32_t idle_phase;        /* where in its wait loop the Z80 stood (cycles) at `idle_since`: a loop interrupted by many short bus holds still reaches its command read */
   /* pending effects of the command in flight */
   KrisalisOp queue[KRISALIS_QUEUE_MAX];
   uint16_t queue_head, queue_count;
   uint64_t queue_base;        /* due time of queue[queue_head] */
   /* the DAC player (the alternate register set of the original) */
   uint8_t dac_active, dac_rate, dac_phase, dac_last_hi, dac_redirect;
+  uint8_t pair_open;          /* a YM2612 address write of the command in flight has been issued and its data write has not: the DAC player never splits a pair */
   uint16_t dac_pointer, dac_left;
+  uint16_t pend_pointer, pend_left;   /* a sample start of the command in flight (applied when its effect is due, like the original's register loads) */
+  uint8_t pend_phase, pend_rate;
   uint64_t dac_due;
   /* counters (aggregates only) */
   uint64_t count_commands, count_rows, count_ticks, count_dac_samples, count_samples_started, count_key_events;

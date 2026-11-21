@@ -1,5 +1,5 @@
 /*
- * Verified Krisalis driver images (ADR 0317). One line per uploaded Z80 image the native replacement may stand in for:
+ * Verified Krisalis driver images (ADR 0318). One line per uploaded Z80 image the native replacement may stand in for:
  *   KRISALIS_VERIFIED_IMAGE(driver, revision, verification, activation-signature)
  * `revision` is the published driver revision whose behaviour the image has (docs/architecture/genesis-native-krisalis.md section 3); `verification` is the strongest
  * evidence tier reached for THIS image and THIS replacement version: "build_qualified" (identity and address map checked; compiles and runs) or "reference_checked" (additionally

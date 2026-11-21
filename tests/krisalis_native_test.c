@@ -1,5 +1,5 @@
 /*
- * Unit tests of the native Krisalis replacement core (ADR 0317) against project-authored synthetic data: no commercial data and no original driver code is involved.
+ * Unit tests of the native Krisalis replacement core (ADR 0318) against project-authored synthetic data: no commercial data and no original driver code is involved.
  * Expected chip accesses are derived by hand from the published behaviour of the verified driver lineage (mailbox protocol, 32-byte voices written in register-table
  * order, block/F-number words, key-off-then-on re-trigger, carrier attenuation, the DAC player) - never from this implementation's output.
  */

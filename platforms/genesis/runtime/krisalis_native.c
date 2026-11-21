@@ -1,5 +1,5 @@
 /*
- * Native Krisalis sound-driver replacement (ADR 0317). See krisalis_native.h and docs/architecture/genesis-native-krisalis.md.
+ * Native Krisalis sound-driver replacement (ADR 0318). See krisalis_native.h and docs/architecture/genesis-native-krisalis.md.
  *
  * Structure: the 68000 writes a command byte and (for a row) six pattern cells into the mailbox in the sound RAM while it holds the Z80 bus. When the
  * bus is back, the driver notices the command, consumes it and turns it into a time-ordered list of effects (YM2612 writes, bank-register bits, RAM
@@ -17,7 +17,7 @@
  * independent execution of the original image, tools/krisalis_reference_check.py; it is not instruction-cycle-accurate). */
 #define CYC_YM_WRITE 69u        /* one YM2612 port write including the busy-wait call (generic) */
 #define CYC_BANK_BIT 38u        /* one serial write of the bank register */
-#define CYC_POLL_LATENCY 64u    /* the wait loop notices a command this long after the bus came back / the previous work ended */
+
 
 /* Per-revision spacing, measured on the original images run by an independent emulator (tools/krisalis_reference_check.py): the gaps between the YM2612 writes of a voice
  * load and of a frequency / key write, and the work around them. Revision 2 shares revision 3's figures until it is measured. */
@@ -37,7 +37,7 @@ static const Timing k_timing[4] = {
     {900, 320, 410, 572, 67, 183, 73, 99, 66, 217, 64, 259},    /* revision 3 */
 };
 
-enum { OP_YM = 1, OP_RAM = 2, OP_BANK = 3 };
+enum { OP_YM = 1, OP_RAM = 2, OP_BANK = 3, OP_DAC_CUT = 4, OP_DAC_START = 5 };   /* OP_DAC_CUT: an FM note on FM6 ends a music sample: the player's count becomes 1 (the sample ends at its next byte) */
 
 /* ---- the revision descriptors: the RAM layout the 68000 and the original share ---------------------------------------------------------------- */
 typedef struct Layout {
@@ -185,6 +185,9 @@ static void dac_end(KrisalisNative *k, uint64_t t) {
 /* The event-level pacing of the original's polling. Revisions 2 and 3 add the rate to an 8-bit phase on every poll of their wait loop and emit one byte
  * per carry; revision 1 writes the current byte on every poll and advances the pointer when the integer phase changes. */
 #define CYC_IDLE_ITERATION_R3 112u
+#ifndef CYC_BUSY_ITERATION_R3
+#define CYC_BUSY_ITERATION_R3 150u   /* while a row is being worked the DAC is polled between register writes: a poll every ~150 cycles on average instead of every 112 */
+#endif
 #define CYC_DAC_BYTE_R3 72u
 #define CYC_DAC_POLL_R1 284u
 #define CYC_DAC_ADVANCE_R1 7u
@@ -195,7 +198,7 @@ static void dac_schedule(KrisalisNative *k, uint64_t from) {
   {
     const unsigned need = 256u - k->dac_phase;
     const unsigned n = (need + k->dac_rate - 1u) / k->dac_rate;   /* loop iterations until the 8-bit phase carries */
-    k->dac_due = from + (uint64_t)n * CYC_IDLE_ITERATION_R3 * CYCLE_TICKS;
+    k->dac_due = from + (uint64_t)n * (k->queue_count != 0u ? CYC_BUSY_ITERATION_R3 : CYC_IDLE_ITERATION_R3) * CYCLE_TICKS;
   }
 }
 
@@ -368,16 +371,12 @@ static void start_sample(Build *b, uint8_t bank, int have_bank) {
   if (!rev1) {   /* revisions 2 and 3 skip the first eight and the last four bytes (whole sample when it is shorter than twelve) */
     if (length >= 12u) { address = (uint16_t)(address + 8u); length = (uint16_t)(length - 12u); }
   }
-  k->dac_pointer = address;
-  k->dac_left = length;
-  k->dac_phase = rate;                                  /* E' = the rate byte as loaded */
-  k->dac_rate = rev1 ? *mb(k, MB_SMPPHASE) : rate;      /* D': revision 1 the integer phase, 2/3 the rate */
-  k->dac_last_hi = 0u;
+  k->pend_pointer = address;
+  k->pend_left = length;
+  k->pend_phase = rate;                                 /* E' = the rate byte as loaded */
+  k->pend_rate = rev1 ? *mb(k, MB_SMPPHASE) : rate;     /* D': revision 1 the integer phase, 2/3 the rate */
   *mb(k, MB_TRIGGER) = 0u;
-  k->dac_redirect = 1u;
-  k->dac_active = length != 0u;   /* a zero-length sample is never polled by the original: nothing plays (the DAC is enabled, the SFX flag stays) */
-  ++k->count_samples_started;
-  if (k->dac_active) dac_schedule(k, b->t);
+  push(b, OP_DAC_START, 0u, 0u, 0u);                    /* the player's registers are loaded at this point of the command, not before */
 }
 
 static void start_sfx_sample(Build *b) {
@@ -492,10 +491,7 @@ static void do_note_word(Build *b, unsigned channel, uint8_t lo, uint8_t hi) {
       chan_set16(k, channel, CH_PITCH, current);
     }
     chan_set16(k, channel, CH_SLIDE, 0u);
-    if (channel == 5u && jingle_state(k) == 0u && *mb(k, MB_SFXBUSY) == 0u && k->dac_active) {   /* an FM note on FM6 stops a music sample */
-      k->dac_redirect = 0u;
-      k->dac_left = 1u;
-    }
+    if (channel == 5u && jingle_state(k) == 0u && *mb(k, MB_SFXBUSY) == 0u && k->dac_active) push(b, OP_DAC_CUT, 0u, 0u, rev1 ? 0u : 1u);   /* an FM note on FM6 stops a music sample, at this point of the row */
   }
   if ((lo & 0x0Fu) != 0u) {   /* effect nibble: slide step = +/-(E & 7) * 4 per tick, bit 3 = down */
     uint8_t magnitude = (uint8_t)(lo & 7u);
@@ -523,8 +519,8 @@ static void slide_channel(Build *b, unsigned channel) {
     pitch |= 0x4000u;
   } else {
     uint16_t hl = (uint16_t)((uint16_t)(slide * 2u) + pitch);
-    if ((hl & 0x0700u) < 0x0269u) hl = (uint16_t)(hl + 0x0269u - 0x0800u);   /* below $269: the previous block */
-    if ((hl & 0x0700u) >= 0x04D0u) hl = (uint16_t)(hl - 0x0269u + 0x0800u);  /* above $4D0: the next block */
+    if ((hl & 0x07FFu) < 0x0269u) hl = (uint16_t)(hl + 0x0269u - 0x0800u);   /* below $269: the previous block */
+    if ((hl & 0x07FFu) >= 0x04D0u) hl = (uint16_t)(hl - 0x0269u + 0x0800u);  /* above $4D0: the next block */
     pitch = (uint16_t)(hl | 0x4000u);
   }
   chan_set16(k, channel, CH_PITCH, pitch);
@@ -546,14 +542,14 @@ static void update_channel(Build *b, unsigned channel) {
   if (target == current) return;
   if (target > current) {
     uint16_t hl = (uint16_t)(current + speed);
-    if ((hl & 0x0700u) >= 0x04D0u) hl = (uint16_t)(hl - 0x0269u + 0x0800u);
+    if ((hl & 0x07FFu) >= 0x04D0u) hl = (uint16_t)(hl - 0x0269u + 0x0800u);
     if (hl >= target) hl = target;
     hl = (uint16_t)(hl | 0x4000u);
     chan_set16(k, channel, CH_PITCH, hl);
     write_freq_key(b, channel, hl, 0u);
   } else {
     uint16_t hl = (uint16_t)(current - speed);
-    if ((hl & 0x0700u) < 0x0269u) hl = (uint16_t)(hl + 0x0269u - 0x0800u);
+    if ((hl & 0x07FFu) < 0x0269u) hl = (uint16_t)(hl + 0x0269u - 0x0800u);
     if (hl < target) hl = target;
     hl = (uint16_t)(hl | 0x4000u);
     chan_set16(k, channel, CH_PITCH, hl);
@@ -698,6 +694,22 @@ static void consume_command(Build *b, uint8_t command) {
   if (rev1) ram_set(b, k_layout[k->revision].mailbox + MB_CMD, 0u);   /* revision 1 acknowledges when the work is done */
 }
 
+static uint64_t max_u64(uint64_t a, uint64_t b) { return a > b ? a : b; }
+
+/* The wait loop of the original, measured on the original images: one iteration (trigger check, DAC check, command read) takes this many cycles; the command byte is read
+ * near its end and the SFX trigger at its start. The 68000 takes the bus again and again for a few cycles while it waits for the acknowledge: the Z80 stands still in the middle of
+ * its loop during a hold, so the loop's phase (not the time since the last hold) decides when it reaches a command. */
+static unsigned loop_cycles(const KrisalisNative *k) {
+  if (k->revision == KRISALIS_REVISION_1) return k->dac_active ? CYC_DAC_POLL_R1 : 84u;
+  return CYC_IDLE_ITERATION_R3;
+}
+static uint64_t idle_reach(const KrisalisNative *k, unsigned target_phase) {   /* the time at which the loop stands at `target_phase` */
+  const unsigned l = loop_cycles(k);
+  const unsigned phase = k->idle_phase % l;
+  const unsigned wait = (target_phase % l + l - phase) % l;
+  return max_u64(k->idle_since, k->floor_ticks) + (uint64_t)(wait + 1u) * CYCLE_TICKS;
+}
+
 /* ---- start-up ------------------------------------------------------------------------------------------------------------------------------- */
 void krisalis_native_start(KrisalisNative *k, const KrisalisNativeHost *host, uint8_t revision, uint64_t at_ticks) {
   Build b;
@@ -732,7 +744,14 @@ void krisalis_native_start(KrisalisNative *k, const KrisalisNativeHost *host, ui
 }
 
 void krisalis_native_suspend(KrisalisNative *k, uint64_t at_ticks) {
-  if (k->held_since == UINT64_MAX) k->held_since = at_ticks;
+  if (k->held_since == UINT64_MAX) {
+    k->held_since = at_ticks;
+    if (k->started && k->queue_count == 0u) {   /* idle: remember where in its loop the Z80 stopped */
+      const uint64_t ref = max_u64(k->idle_since, k->floor_ticks);
+      if (at_ticks > ref) k->idle_phase = (uint32_t)((k->idle_phase + (at_ticks - ref) / CYCLE_TICKS) % loop_cycles(k));
+      k->idle_since = at_ticks;
+    }
+  }
 }
 
 void krisalis_native_resume(KrisalisNative *k, uint64_t at_ticks) {
@@ -746,28 +765,46 @@ void krisalis_native_resume(KrisalisNative *k, uint64_t at_ticks) {
 }
 
 /* ---- the scheduler -------------------------------------------------------------------------------------------------------------------------- */
-static uint64_t max_u64(uint64_t a, uint64_t b) { return a > b ? a : b; }
-
 static void apply_queue_head(KrisalisNative *k) {
   const KrisalisOp *op = &k->queue[k->queue_head];
   const uint64_t t = k->queue_base;
   switch (op->kind) {
-    case OP_YM: k->host.ym_write(k->host.context, op->a, op->c, t); break;
+    case OP_YM: k->host.ym_write(k->host.context, op->a, op->c, t); k->pair_open = (uint8_t)((op->a & 1u) == 0u); break;
     case OP_RAM: k->host.ram[((unsigned)op->a | ((unsigned)op->b << 8)) & RAM_MASK] = op->c; break;
     case OP_BANK: k->host.bank_write(k->host.context, op->c); break;
+    case OP_DAC_START:
+      k->dac_pointer = k->pend_pointer;
+      k->dac_left = k->pend_left;
+      k->dac_phase = k->pend_phase;
+      k->dac_rate = k->pend_rate;
+      k->dac_last_hi = 0u;
+      k->dac_redirect = 1u;
+      k->dac_active = k->pend_left != 0u;   /* a zero-length sample is never polled by the original: nothing plays (the DAC is enabled, the SFX flag stays) */
+      ++k->count_samples_started;
+      if (k->dac_active) dac_schedule(k, t);
+      break;
+    case OP_DAC_CUT:
+      if (k->dac_active) { k->dac_left = 1u; if (op->c) k->dac_redirect = 0u; }
+      break;
     default: break;
   }
   k->queue_head = (uint16_t)((k->queue_head + 1u) % KRISALIS_QUEUE_MAX);
   --k->queue_count;
+  if (op->kind == OP_BANK) k->pair_open = (uint8_t)(k->queue_count != 0u && k->queue[k->queue_head].kind == OP_BANK);   /* the nine bank-register writes are one tight loop: no DAC poll inside it */
   if (k->queue_count != 0u) {
     k->queue_base += (uint64_t)k->queue[k->queue_head].dt;
     k->queue[k->queue_head].dt = 0u;   /* the head's due time is queue_base: a canonical state has no gap in front of it */
   }
-  else k->idle_since = t + (uint64_t)CYC_YM_WRITE * CYCLE_TICKS;
+  else {
+    k->idle_since = t + (uint64_t)CYC_YM_WRITE * CYCLE_TICKS;
+    k->idle_phase = 0u;
+    if (k->revision == KRISALIS_REVISION_3 && k->dac_active && k->dac_rate != 0u) dac_schedule(k, t);   /* back to the idle loop's pace */
+  }
 }
 
 KrisalisFault krisalis_native_run_to(KrisalisNative *k, uint64_t master_ticks) {
   Build b;
+  uint64_t started_before = 0u;
   b.k = k;
   for (;;) {
     uint64_t best = UINT64_MAX;
@@ -775,12 +812,13 @@ KrisalisFault krisalis_native_run_to(KrisalisNative *k, uint64_t master_ticks) {
     if (k->fault != KRISALIS_FAULT_NONE) return k->fault;
     if (!k->started || k->held_since != UINT64_MAX) break;
     if (k->queue_count != 0u) { best = max_u64(k->queue_base, k->floor_ticks); kind = 1; }
-    if (k->dac_active && k->dac_due != UINT64_MAX) {
+    if (k->dac_active && k->dac_due != UINT64_MAX && !k->pair_open) {   /* the original polls the DAC between register pairs, never inside one */
       const uint64_t due = max_u64(k->dac_due, k->floor_ticks);
       if (due < best) { best = due; kind = 2; }
     }
     if (k->queue_count == 0u && (*mb(k, MB_CMD) != 0u || *mb(k, MB_TRIGGER) != 0u)) {
-      const uint64_t at = max_u64(max_u64(k->idle_since, k->floor_ticks), 0u) + (uint64_t)CYC_POLL_LATENCY * CYCLE_TICKS;
+      const unsigned l = loop_cycles(k);
+      const uint64_t at = *mb(k, MB_TRIGGER) != 0u ? idle_reach(k, 0u) : idle_reach(k, l - 20u);   /* the trigger is read first in the loop, the command last */
       if (at < best) { best = at; kind = 3; }
     }
     if (kind == 0 || best > master_ticks) break;
@@ -790,11 +828,13 @@ KrisalisFault krisalis_native_run_to(KrisalisNative *k, uint64_t master_ticks) {
       default: {
         b.t = best;
         b.last = best;
+        started_before = k->count_samples_started;
         if (*mb(k, MB_TRIGGER) != 0u) start_sfx_sample(&b);
         else consume_command(&b, *mb(k, MB_CMD));
         if (k->revision != KRISALIS_REVISION_3 && k->dac_active && k->dac_due != UINT64_MAX && k->queue_count != 0u)   /* revisions 1 and 2 do not poll the DAC while they work */
           k->dac_due = max_u64(k->dac_due, b.last + (uint64_t)CYC_YM_WRITE * CYCLE_TICKS);
-        if (k->queue_count == 0u) k->idle_since = best;
+        if (k->queue_count == 0u) { k->idle_since = best; k->idle_phase = 0u; }
+        else if (k->revision == KRISALIS_REVISION_3 && k->dac_active && k->dac_rate != 0u && k->count_samples_started == started_before) dac_schedule(k, best);   /* the row slows the polls of a sample that goes on */
         break;
       }
     }
@@ -827,13 +867,19 @@ uint32_t krisalis_native_state_put(const KrisalisNative *k, uint8_t *out, uint32
   w64(&w, k->floor_ticks);
   w64(&w, k->idle_since);
   w64(&w, k->held_since);
+  w32(&w, k->idle_phase);
   w8(&w, k->dac_active);
   w8(&w, k->dac_rate);
   w8(&w, k->dac_phase);
   w8(&w, k->dac_last_hi);
   w8(&w, k->dac_redirect);
+  w8(&w, k->pair_open);
   w16(&w, k->dac_pointer);
   w16(&w, k->dac_left);
+  w16(&w, k->pend_pointer);
+  w16(&w, k->pend_left);
+  w8(&w, k->pend_phase);
+  w8(&w, k->pend_rate);
   w64(&w, k->dac_due);
   w64(&w, k->count_commands);
   w64(&w, k->count_rows);
@@ -869,13 +915,19 @@ int krisalis_native_state_get(KrisalisNative *stage, const uint8_t *in, uint32_t
   s.floor_ticks = r64(&r);
   s.idle_since = r64(&r);
   s.held_since = r64(&r);
+  s.idle_phase = r32(&r);
   s.dac_active = r8(&r);
   s.dac_rate = r8(&r);
   s.dac_phase = r8(&r);
   s.dac_last_hi = r8(&r);
   s.dac_redirect = r8(&r);
+  s.pair_open = r8(&r);
   s.dac_pointer = r16(&r);
   s.dac_left = r16(&r);
+  s.pend_pointer = r16(&r);
+  s.pend_left = r16(&r);
+  s.pend_phase = r8(&r);
+  s.pend_rate = r8(&r);
   s.dac_due = r64(&r);
   s.count_commands = r64(&r);
   s.count_rows = r64(&r);
@@ -885,7 +937,7 @@ int krisalis_native_state_get(KrisalisNative *stage, const uint8_t *in, uint32_t
   s.count_key_events = r64(&r);
   base = r64(&r);
   count = r16(&r);
-  if (r.error || s.revision < KRISALIS_REVISION_1 || s.revision > KRISALIS_REVISION_3 || s.started > 1u || s.dac_active > 1u || s.dac_redirect > 1u) return 0;
+  if (r.error || s.revision < KRISALIS_REVISION_1 || s.revision > KRISALIS_REVISION_3 || s.started > 1u || s.dac_active > 1u || s.dac_redirect > 1u || s.pair_open > 1u) return 0;
   if (count > KRISALIS_QUEUE_MAX) return 0;
   s.queue_head = 0u;
   s.queue_count = count;
@@ -897,7 +949,7 @@ int krisalis_native_state_get(KrisalisNative *stage, const uint8_t *in, uint32_t
     op->a = r8(&r);
     op->b = r8(&r);
     op->c = r8(&r);
-    if (op->kind < OP_YM || op->kind > OP_BANK || (op->kind == OP_YM && op->a > 3u)) return 0;
+    if (op->kind < OP_YM || op->kind > OP_DAC_START || (op->kind == OP_YM && op->a > 3u)) return 0;
     if (i == 0u && op->dt != 0u) return 0;
   }
   if (r.error || r.offset != r.size) return 0;

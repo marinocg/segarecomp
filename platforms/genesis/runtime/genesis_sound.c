@@ -160,7 +160,7 @@ static const GenesisZ80NativeDriver g_gems_ops = {NULL, native_identify, native_
 #endif
 
 #ifdef SEGARECOMP_NATIVE_SOUND_KRISALIS
-/* ADR 0317: the verified Krisalis replacement. It serves only an uploaded image the catalog names; the binding, suspend / resume, state and report seams are the
+/* ADR 0318: the verified Krisalis replacement. It serves only an uploaded image the catalog names; the binding, suspend / resume, state and report seams are the
  * same ones GEMS uses (one replacement per program). */
 #include "krisalis_native.h"
 
