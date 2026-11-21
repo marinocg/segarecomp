@@ -63,7 +63,8 @@ def build(rom_bytes, out, jobs=None, keep=False, compiler=None):
     rom = out.parent / (out.name + ".md")
     rom.write_bytes(rom_bytes)
     command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", compiler or cc, "--cxx", cxx, "--runtime-dir",
-               str(root / "platforms" / "genesis"), "--optimize", "0", "--runtime-optimize", "1"]
+               str(root / "platforms" / "genesis"), "--optimize", "0", "--runtime-optimize", "1",
+               "--sound-driver", "original"]   # this test is about the Z80 pipeline's own outcome, not the automatic sound policy (ADR 0291 Decision 6)
     if jobs:
         command += ["--jobs", str(jobs)]
     if keep:

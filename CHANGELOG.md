@@ -7,6 +7,10 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Sound for games whose own driver rewrites its code, when the structural alternatives close it (ADR 0291 Decision 6)
+
+* A Genesis build whose first pass isolates the sound CPU by a structural code mismatch, and for which no verified native GEMS replacement applies, now makes one more automatic pass with the compiled structural alternatives of the original driver (ADR 0259). A healthy result is the game's own driver as generated-native Z80 (`audio_implementation.reason = original_with_structural_alternatives`), shown in Build provenance; otherwise the build stays degraded as before. No option, no replacement driver, no title test; unknown GEMS images are not guessed compatible. Kid Chameleon plays this way (it uses an earlier GEMS 2.x build that the verified 2.5 implementation does not serve). The extra pass is skipped (degraded result kept, reason recorded) when the emitter itself reports no admissible alternative forms; otherwise such a game builds twice.
+
 ### Authored offscreen scenery from a native ABI 2 provider (ADR 0309; combined delivery F29)
 
 * A native ABI 2 provider can now supply the offscreen scenery of a widescreen picture: `SegaGenesisRenderApi::scenery_window` submits a bounded name-table window per plane from `render` (capability `scenery.words`), served through the existing extension producer for exactly the frame it describes. Generic and synthetic-tested; no shipped package uses it yet, and nothing claims any game is covered.

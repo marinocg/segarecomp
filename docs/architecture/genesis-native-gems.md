@@ -51,6 +51,14 @@ implementation version, catalog revision, `save_states`, the original AOT's fail
 `original_z80_aot` with its audio status and any compiled structural alternatives. `genesis_audio` is `native` (or `degraded` if the start-up run met malformed data, with `z80_audio_outcome = native_driver_unsupported_operation`). The headless run summary (`SOUND_SUMMARY`) gains a `native` object, and
 `SEGARECOMP_AUDIO_WRITE_LOG=<file>` logs every chip access (validation seam). The launcher shows the record in Build provenance (there is no option to request or refuse the replacement); the shipped implementation version and catalog revision are part of a build's cache identity, a choice is not.
 
+## Games whose own driver the structural alternatives close (ADR 0291 Decision 6)
+
+Not every self-modifying driver is a verified GEMS image. When the first pass isolates the sound CPU (structural code mismatch) and no verified replacement applies, the build makes one more pass with the
+compiled structural alternatives of the original driver (ADR 0259, static analysis). A healthy start-up run makes that executable the result: `audio_implementation.kind = original_z80_aot`,
+`reason = original_with_structural_alternatives`, `original_aot` (the first pass's failure) and `structural_alternatives` (images / bytes / entries / forms) in the record, shown in Build provenance as
+"Original Z80 (generated-native, with structural alternatives)". A run that still faults stays `degraded / no_verified_replacement`. Unknown GEMS images are not guessed compatible: they either run as their own
+generated-native Z80 or stay degraded.
+
 ## Save states and rewind
 
 The driver's complete state is serialised by `gems_native_state_put` / `gems_native_state_get` (canonical, versioned, little-endian, no pointer or struct layout) and carried in a

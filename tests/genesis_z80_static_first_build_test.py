@@ -48,7 +48,8 @@ def build(rom_bytes, out, static, jobs=None):
     rom = out.parent / (out.name + ".md")
     rom.write_bytes(rom_bytes)
     command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", cc, "--cxx", cxx, "--runtime-dir", str(root / "platforms" / "genesis"),
-               "--optimize", "0", "--runtime-optimize", "1", "--z80-static", "1" if static else "0"]
+               "--optimize", "0", "--runtime-optimize", "1", "--z80-static", "1" if static else "0",
+               "--sound-driver", "original"]   # about static-first production, not the automatic sound policy (ADR 0291 Decision 6)
     if jobs:
         command += ["--jobs", str(jobs)]
     done = subprocess.run(command, text=True, capture_output=True, timeout=1800)
