@@ -76,7 +76,8 @@ typedef struct KrisalisNative {
   uint8_t pair_open;          /* a YM2612 address write of the command in flight has been issued and its data write has not: the DAC player never splits a pair */
   uint16_t dac_pointer, dac_left;
   uint16_t pend_pointer, pend_left;   /* a sample start of the command in flight (applied when its effect is due, like the original's register loads) */
-  uint8_t pend_phase, pend_rate;
+  uint8_t pend_phase, pend_rate, pend_pan;
+  uint8_t dac_pan;            /* revision 2: the FM6 pan the player rewrites on every poll */
   uint64_t dac_due;
   /* counters (aggregates only) */
   uint64_t count_commands, count_rows, count_ticks, count_dac_samples, count_samples_started, count_key_events;

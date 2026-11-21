@@ -71,6 +71,10 @@ def split_port_stream(port_writes, revision):
             latch[1] = 0xB6
             i += 4
             continue
+        if revision == 2 and port == 2 and value == 0xB6 and i + 1 < n and port_writes[i + 1][0] == 3:
+            latch[1] = 0xB6   # revision 2: every poll of the player rewrites the FM6 pan (an FM6 voice load's own pan write is indistinguishable and treated the same on both sides)
+            i += 2
+            continue
         if port == 0 and value == 0x2B and i + 1 < n and port_writes[i + 1][0] == 1:
             dac.append((0, 0x2B, port_writes[i + 1][1], ticks))   # the DAC enable: the player's start of a sample (its order against a tick the original and the model may serve in either order, see below)
             latch[0] = 0x2B
@@ -288,6 +292,38 @@ def make_script(lines, revision):
     return "\n".join(out) + "\n"
 
 
+def transplant(host, donor):
+    """A stimulus for a driver image whose own game stalls early (or does not exercise a feature): the host's own start-up transactions, then the donor's command and cell traffic with its mailbox
+    stores moved to the host's mailbox address. The donor's sample parameters, sample table and banks are not copied (they address the donor's ROM); the host's own voice bank and sample table stay.
+    Both implementations see the same stimulus, so the comparison is as strict as for a real run; it only is not a recording of the host game."""
+    hb, db = MAILBOX[host["revision"]], MAILBOX[donor["revision"]]
+    skip = set(range(0x10, 0x17)) | set(range(0x18, 0x38)) | {0x42, 0x43, 0x44, 0x45}
+    out = dict(host)
+    out["transactions"] = list(host["transactions"])
+    t0 = (host["transactions"][-1]["t"] + host["transactions"][-1]["hold"] if host["transactions"] else host["activation"]) + 1_000_000
+    shift = t0 - donor["transactions"][0]["t"]
+    for tx in donor["transactions"]:
+        writes = []
+        for off, value in tx["writes"]:
+            rel = off - db
+            if 0 <= rel < 0x48 and rel not in skip:
+                writes.append((hb + rel, value))
+        if writes:
+            out["transactions"].append({"t": tx["t"] + shift, "hold": tx["hold"], "cmd": 1 if any(o == hb and v != 0 for o, v in writes) else 0, "writes": writes})
+    out["horizon"] = donor["horizon"] + shift
+    return out
+
+
+def format_script(script):
+    out = ["A %d %d %d" % (script["revision"], script["bank"], script["activation"])]
+    out += ["I %d %d" % (off, script["image"][off]) for off in sorted(script["image"])]
+    for t in script["transactions"]:
+        out.append("T %d %d %d %d" % (t["t"], t["hold"], t["cmd"], len(t["writes"])))
+        out.extend("%d %d" % w for w in t["writes"])
+    out.append("E %d" % script["horizon"])
+    return "\n".join(out) + "\n"
+
+
 def parse_script(text):
     script = {"image": {}, "transactions": [], "revision": 0, "bank": 0, "activation": 0, "horizon": 0}
     rows = text.splitlines()
@@ -403,6 +439,7 @@ def main(argv):
     ap.add_argument("--rom", required=True)
     ap.add_argument("--revision", type=int, required=True, choices=sorted(MAILBOX))
     ap.add_argument("--game-log", help="a logged run: writes --script from it and stops")
+    ap.add_argument("--transplant-from", help="a donor script: --script (the host's) is rewritten as the host's start-up followed by the donor's command traffic, and the tool stops")
     ap.add_argument("--script", required=True, help="the 68000 stimulus (see make_script)")
     ap.add_argument("--native-log", help="the log the replacement produced when driven by the script (tools/krisalis_replay_harness)")
     ap.add_argument("--tail-frames", type=float, default=2.0, help="writes this close to the horizon may be missing from the side that lags (default 2 frames)")
@@ -414,6 +451,14 @@ def main(argv):
             text = make_script(parse_log(handle.read()), args.revision)
         with open(args.script, "w") as handle:
             handle.write(text)
+        return 0
+    if args.transplant_from:
+        with open(args.script, "r") as handle:
+            host = parse_script(handle.read())
+        with open(args.transplant_from, "r") as handle:
+            donor = parse_script(handle.read())
+        with open(args.script, "w") as handle:
+            handle.write(format_script(transplant(host, donor)))
         return 0
     if not args.native_log:
         ap.error("--native-log is required unless --game-log is given")

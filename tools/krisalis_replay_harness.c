@@ -129,5 +129,6 @@ int main(int argc, char **argv) {
   fprintf(stderr, "stalled_polls=%u fault=%s commands=%llu rows=%llu ticks=%llu dac=%llu samples=%llu keys=%llu\n", conflicts, krisalis_native_fault_name(x->driver.fault),
           (unsigned long long)x->driver.count_commands, (unsigned long long)x->driver.count_rows, (unsigned long long)x->driver.count_ticks,
           (unsigned long long)x->driver.count_dac_samples, (unsigned long long)x->driver.count_samples_started, (unsigned long long)x->driver.count_key_events);
+  if (getenv("KRISALIS_DUMP_MAILBOX")) { unsigned q; fprintf(stderr, "mailbox:"); for (q = 0; q < 0x48u; ++q) fprintf(stderr, " %02x", x->ram[(mailbox_cmd + q) & 0x1FFFu]); fprintf(stderr, "\n"); }
   return x->driver.fault == KRISALIS_FAULT_NONE ? 0 : 1;
 }

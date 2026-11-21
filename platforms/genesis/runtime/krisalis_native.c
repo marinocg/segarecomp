@@ -20,7 +20,7 @@
 
 
 /* Per-revision spacing, measured on the original images run by an independent emulator (tools/krisalis_reference_check.py): the gaps between the YM2612 writes of a voice
- * load and of a frequency / key write, and the work around them. Revision 2 shares revision 3's figures until it is measured. */
+ * load and of a frequency / key write, and the work around them. */
 typedef struct Timing {
   uint16_t dispatch;        /* command noticed -> first cell */
   uint16_t cell_gap;        /* an empty cell */
@@ -33,7 +33,7 @@ typedef struct Timing {
 static const Timing k_timing[4] = {
     {0},
     {420, 205, 378, 145, 67, 112, 73, 73, 66, 165, 64, 181},    /* revision 1 */
-    {900, 320, 410, 572, 67, 183, 73, 99, 66, 217, 64, 259},    /* revision 2 (provisional) */
+    {520, 220, 420, 187, 67, 131, 73, 73, 66, 165, 64, 181},    /* revision 2 */
     {900, 320, 410, 572, 67, 183, 73, 99, 66, 217, 64, 259},    /* revision 3 */
 };
 
@@ -191,9 +191,11 @@ static void dac_end(KrisalisNative *k, uint64_t t) {
 #define CYC_DAC_BYTE_R3 72u
 #define CYC_DAC_POLL_R1 284u
 #define CYC_DAC_ADVANCE_R1 7u
+#define CYC_DAC_ITERATION_R2 152u   /* revision 2: every poll of the wait loop rewrites the FM6 pan, then adds the rate to the phase */
 
 static void dac_schedule(KrisalisNative *k, uint64_t from) {
   if (k->revision == KRISALIS_REVISION_1) { k->dac_due = from + (uint64_t)CYC_DAC_POLL_R1 * CYCLE_TICKS; return; }   /* (a poll that advances the pointer adds a few cycles: dac_event) */
+  if (k->revision == KRISALIS_REVISION_2) { k->dac_due = from + (uint64_t)CYC_DAC_ITERATION_R2 * CYCLE_TICKS; return; }
   if (k->dac_rate == 0u) { k->dac_due = UINT64_MAX; return; }
   {
     const unsigned need = 256u - k->dac_phase;
@@ -229,7 +231,23 @@ static void dac_event(KrisalisNative *k, uint64_t t) {
     if (advanced) k->dac_due += (uint64_t)CYC_DAC_ADVANCE_R1 * CYCLE_TICKS;
     return;
   }
-  /* revisions 2 and 3: a byte per carry; the phase advanced by the iterations that led here */
+  if (k->revision == KRISALIS_REVISION_2) {   /* one poll: the pan registers, then the phase; a byte only on a carry */
+    const unsigned sum = (unsigned)k->dac_rate + k->dac_phase;
+    ym_now(k, 2u, 0xB6u, t);
+    ym_now(k, 3u, k->dac_pan, t);
+    k->dac_phase = (uint8_t)sum;
+    if (sum < 256u) { dac_schedule(k, t); return; }
+    if (!sample_byte(k, &value)) return;
+    ym_now(k, 0u, 0x2Au, t);
+    ym_now(k, 1u, value, t);
+    ++k->dac_pointer;
+    --k->dac_left;
+    ++k->count_dac_samples;
+    if (k->dac_left == 0u) { dac_end(k, t); return; }
+    dac_schedule(k, t + (uint64_t)CYC_DAC_BYTE_R3 * CYCLE_TICKS);
+    return;
+  }
+  /* revision 3: a byte per carry; the phase advanced by the iterations that led here */
   {
     const unsigned need = 256u - k->dac_phase;
     const unsigned n = (need + k->dac_rate - 1u) / k->dac_rate;
@@ -326,7 +344,7 @@ static void load_voice(Build *b, unsigned channel, uint8_t number, int jingle_vo
 static void load_channel_voice(Build *b, unsigned channel, uint8_t number, unsigned state) {
   KrisalisNative *k = b->k;
   if (k->revision == KRISALIS_REVISION_1) { load_voice(b, channel, number, 0, state); return; }
-  *chan(k, state, CH_LOADED) = number;
+  if (k->revision == KRISALIS_REVISION_3) *chan(k, state, CH_LOADED) = number;
   if (channel == 4u && jingle_state(k) != 0u) {
     const uint8_t pan = *mb(k, MB_JINGLEPAN);
     const uint8_t *voice = voice_pointer(k, number);
@@ -386,7 +404,8 @@ static void start_sfx_sample(Build *b) {
   if (rev1) { start_sample(b, 0u, 0); return; }
   {
     const uint8_t pan = *mb(k, MB_SFXPAN) ? *mb(k, MB_SFXPAN) : 0xC0u;
-    ym_pair(b, 2u, 0xB6u, pan);
+    if (k->revision == KRISALIS_REVISION_2) k->pend_pan = pan;   /* revision 2: the player writes it on every poll */
+    else ym_pair(b, 2u, 0xB6u, pan);
     start_sample(b, *mb(k, MB_SFXBANK), 1);
   }
 }
@@ -407,7 +426,8 @@ static void music_sample_note(Build *b, unsigned n, uint8_t rate, unsigned chann
   *mb(k, MB_SMPLEN) = entry[3];
   *mb(k, MB_SMPLEN + 1u) = entry[2];
   if (rev1) { start_sample(b, 0u, 0); return; }
-  ym_pair(b, 2u, 0xB6u, 0xC0u);                            /* a music drum is always centred */
+  if (k->revision == KRISALIS_REVISION_2) k->pend_pan = 0xC0u;
+  else ym_pair(b, 2u, 0xB6u, 0xC0u);                       /* a music drum is always centred */
   if (*mb(k, MB_MUSICVOL) != 0u) return;                   /* drums are dropped while the music fades */
   start_sample(b, *mb(k, MB_MUSICBANK), 1);
 }
@@ -428,20 +448,20 @@ static void command_note(Build *b, unsigned n, uint8_t lo, unsigned channel) {
   if (n == 0x7Cu) {
     *chan(k, channel, CH_FMS) = (uint8_t)(lo & 7u);
     load_channel_voice(b, channel, *chan(k, channel, CH_VOICE8), channel);
-    *chan(k, channel, CH_LOADED) = 0xFFu;
+    if (k->revision == KRISALIS_REVISION_3) *chan(k, channel, CH_LOADED) = 0xFFu;
     return;
   }
   if (n == 0x7Bu) {
     *chan(k, channel, CH_PAN) = (uint8_t)((lo & 3u) << 6);
     load_channel_voice(b, channel, *chan(k, channel, CH_VOICE8), channel);
-    *chan(k, channel, CH_LOADED) = 0xFFu;
+    if (k->revision == KRISALIS_REVISION_3) *chan(k, channel, CH_LOADED) = 0xFFu;
   }
 }
 
 static uint8_t apply_voice_bank(KrisalisNative *k, unsigned channel, uint8_t voice) {
   const int rev1 = k->revision == KRISALIS_REVISION_1;
   if (jingle_state(k) != 0u && channel == 4u) {
-    if (!rev1) { *chan(k, 4u, CH_VOICE8) = 0xFFu; *chan(k, 4u, CH_LOADED) = 0xFFu; }
+    if (!rev1) { *chan(k, 4u, CH_VOICE8) = 0xFFu; if (k->revision == KRISALIS_REVISION_3) *chan(k, 4u, CH_LOADED) = 0xFFu; }
     return *mb(k, MB_JBANKHI) != 0u ? (uint8_t)(voice | 0x20u) : voice;
   }
   return *mb(k, MB_BANKHI) != 0u ? (uint8_t)(voice | 0x20u) : voice;
@@ -473,7 +493,7 @@ static void do_note_word(Build *b, unsigned channel, uint8_t lo, uint8_t hi) {
       }
       if (load) {
         *chan(k, channel, CH_FMS) = 0u;
-        if (*chan(k, channel, CH_VOICE8) != *chan(k, channel, CH_LOADED)) load_channel_voice(b, channel, *chan(k, channel, CH_VOICE8), channel);
+        if (k->revision == KRISALIS_REVISION_2 || *chan(k, channel, CH_VOICE8) != *chan(k, channel, CH_LOADED)) load_channel_voice(b, channel, *chan(k, channel, CH_VOICE8), channel);
       }
     }
   }
@@ -491,7 +511,7 @@ static void do_note_word(Build *b, unsigned channel, uint8_t lo, uint8_t hi) {
       chan_set16(k, channel, CH_PITCH, current);
     }
     chan_set16(k, channel, CH_SLIDE, 0u);
-    if (channel == 5u && jingle_state(k) == 0u && *mb(k, MB_SFXBUSY) == 0u && k->dac_active) push(b, OP_DAC_CUT, 0u, 0u, (uint8_t)(rev1 ? 0u : 1u));   /* an FM note on FM6 stops a music sample, at this point of the row */
+    if (channel == 5u && jingle_state(k) == 0u && *mb(k, MB_SFXBUSY) == 0u && k->dac_active) push(b, OP_DAC_CUT, 0u, 0u, (uint8_t)(k->revision == KRISALIS_REVISION_3 ? 1u : 0u));   /* an FM note on FM6 stops a music sample, at this point of the row */
   }
   if ((lo & 0x0Fu) != 0u) {   /* effect nibble: slide step = +/-(E & 7) * 4 per tick, bit 3 = down */
     uint8_t magnitude = (uint8_t)(lo & 7u);
@@ -605,7 +625,7 @@ static void cmd_reset(Build *b) {
   }
   if (!rev1 && !jingle) {
     *chan(k, 4u, CH_PORTA) = 0u;
-    for (c = 0; c < 6u; ++c) *chan(k, c, CH_LOADED) = 0xFFu;
+    if (k->revision == KRISALIS_REVISION_3) for (c = 0; c < 6u; ++c) *chan(k, c, CH_LOADED) = 0xFFu;
   }
 }
 
@@ -614,20 +634,20 @@ static void cmd_silence(Build *b) {
   const int rev1 = k->revision == KRISALIS_REVISION_1;
   const uint8_t jingle = jingle_state(k);
   unsigned c;
-  if (!rev1) {
-    *mb(k, MB_MUSICVOL) = 0u;
+  if (!rev1) *mb(k, MB_MUSICVOL) = 0u;
+  if (k->revision == KRISALIS_REVISION_3) {
     if (*mb(k, MB_SFXBUSY) == 0u && k->dac_active) k->dac_left = 1u;   /* stop a music sample (not an SFX sample) */
   } else if (k->dac_active) {
     k->dac_left = 1u;
   }
   for (c = 0; c < 6u; ++c) {
-    if (!rev1) *chan(k, c, CH_LOADED) = 0xFFu;
+    if (k->revision == KRISALIS_REVISION_3) *chan(k, c, CH_LOADED) = 0xFFu;
     if (!(c == 4u && jingle != 0u)) load_channel_voice(b, c, 0x80u, c);
     if (!rev1) {
       *chan(k, c, CH_PAN) = 0u;
       *chan(k, c, CH_FMS) = 0u;
       *chan(k, c, CH_PORTA) = 0u;
-      *chan(k, c, CH_LOADED) = 0xFFu;
+      if (k->revision == KRISALIS_REVISION_3) *chan(k, c, CH_LOADED) = 0xFFu;
     }
   }
 }
@@ -640,9 +660,9 @@ static void cmd_reload(Build *b) {
     const uint8_t number = *chan_voice(k, c);
     if (!rev1) { *chan(k, c, CH_FMS) = 0u; *chan(k, c, CH_PAN) = 0u; }
     load_channel_voice(b, c, number, c);
-    if (!rev1) *chan(k, c, CH_LOADED) = 0xFFu;
+    if (k->revision == KRISALIS_REVISION_3) *chan(k, c, CH_LOADED) = 0xFFu;
   }
-  if (!rev1) { ram_set(b, k_layout[k->revision].mailbox + MB_CMD, 0u); }
+  if (k->revision == KRISALIS_REVISION_3) ram_set(b, k_layout[k->revision].mailbox + MB_CMD, 0u);
 }
 
 /* one full command from the mailbox (the wait loop's dispatch) */
@@ -659,7 +679,7 @@ static void consume_command(Build *b, uint8_t command) {
     k->host.command_tap(k->host.context, bytes, 13u, b->t);
   }
   ++k->count_commands;
-  if (!rev1) *mb(k, MB_CMD) = 0u;   /* revisions 2 and 3 acknowledge when they read the command */
+  if (k->revision == KRISALIS_REVISION_3) *mb(k, MB_CMD) = 0u;   /* revision 3 acknowledges when it reads the command */
   switch (command) {
     case 1: ++k->count_ticks; update_all_channels(b); break;
     case 2: cmd_reset(b); break;
@@ -691,7 +711,7 @@ static void consume_command(Build *b, uint8_t command) {
     }
   }
   main_loop_refresh(b);
-  if (rev1) ram_set(b, k_layout[k->revision].mailbox + MB_CMD, 0u);   /* revision 1 acknowledges when the work is done */
+  if (k->revision != KRISALIS_REVISION_3) ram_set(b, k_layout[k->revision].mailbox + MB_CMD, 0u);   /* revisions 1 and 2 acknowledge when the work is done */
 }
 
 static uint64_t max_u64(uint64_t a, uint64_t b) { return a > b ? a : b; }
@@ -701,6 +721,7 @@ static uint64_t max_u64(uint64_t a, uint64_t b) { return a > b ? a : b; }
  * its loop during a hold, so the loop's phase (not the time since the last hold) decides when it reaches a command. */
 static unsigned loop_cycles(const KrisalisNative *k) {
   if (k->revision == KRISALIS_REVISION_1) return k->dac_active ? CYC_DAC_POLL_R1 : 84u;
+  if (k->revision == KRISALIS_REVISION_2) return k->dac_active ? CYC_DAC_ITERATION_R2 : 84u;
   return CYC_IDLE_ITERATION_R3;
 }
 static uint64_t idle_reach(const KrisalisNative *k, unsigned target_phase) {   /* the time at which the loop stands at `target_phase` */
@@ -722,7 +743,7 @@ void krisalis_native_start(KrisalisNative *k, const KrisalisNativeHost *host, ui
   k->floor_ticks = at_ticks;
   k->idle_since = at_ticks;
   b.k = k;
-  b.t = at_ticks + (uint64_t)(revision == KRISALIS_REVISION_1 ? 868u : 1536u) * CYCLE_TICKS;   /* the original's block copies (vectors, mailbox address) take this long */
+  b.t = at_ticks + (uint64_t)(revision == KRISALIS_REVISION_1 ? 799u : revision == KRISALIS_REVISION_2 ? 795u : 1467u) * CYCLE_TICKS;   /* the original's block copies (vectors, mailbox address) take this long */
   b.last = b.t;
   {   /* "nop / jp $0C00 / dw mailbox": the mailbox address the 68000 reads at $0004 */
     const uint16_t mailbox = k_layout[revision].mailbox;
@@ -736,7 +757,7 @@ void krisalis_native_start(KrisalisNative *k, const KrisalisNativeHost *host, ui
   adv(&b, 60u);
   ym_pair(&b, 0u, 0x22u, 0x0Cu);   /* LFO on (6.02 Hz) */
   ym_pair(&b, 0u, 0x27u, 0x00u);   /* timers and channel-3 mode off */
-  if (revision != KRISALIS_REVISION_1)
+  if (revision == KRISALIS_REVISION_3)
     for (c = 0; c < 6u; ++c) *chan(k, c, CH_LOADED) = 0xB6u;   /* invalid: forces a voice reload */
   k->started = 1u;
   k->idle_since = b.t;
@@ -778,6 +799,7 @@ static void apply_queue_head(KrisalisNative *k) {
       k->dac_phase = k->pend_phase;
       k->dac_rate = k->pend_rate;
       k->dac_last_hi = 0u;
+      k->dac_pan = k->pend_pan;
       k->dac_redirect = 1u;
       k->dac_active = k->pend_left != 0u;   /* a zero-length sample is never polled by the original: nothing plays (the DAC is enabled, the SFX flag stays) */
       ++k->count_samples_started;
@@ -884,6 +906,8 @@ uint32_t krisalis_native_state_put(const KrisalisNative *k, uint8_t *out, uint32
   w16(&w, k->pend_left);
   w8(&w, k->pend_phase);
   w8(&w, k->pend_rate);
+  w8(&w, k->dac_pan);
+  w8(&w, k->pend_pan);
   w64(&w, k->dac_due);
   w64(&w, k->count_commands);
   w64(&w, k->count_rows);
@@ -932,6 +956,8 @@ int krisalis_native_state_get(KrisalisNative *stage, const uint8_t *in, uint32_t
   s.pend_left = r16(&r);
   s.pend_phase = r8(&r);
   s.pend_rate = r8(&r);
+  s.dac_pan = r8(&r);
+  s.pend_pan = r8(&r);
   s.dac_due = r64(&r);
   s.count_commands = r64(&r);
   s.count_rows = r64(&r);
