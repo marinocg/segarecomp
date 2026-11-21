@@ -67,7 +67,7 @@ typedef struct GenesisZ80NativeDriver {
   uint32_t implementation_version;  /* the replacement's behaviour version (part of the build identity and of a state's identity) */
   uint32_t state_schema;            /* the layout of the payload `state_put` writes */
 } GenesisZ80NativeDriver;
-#define GENESIS_Z80_NATIVE_STATE_MAX 4096U
+#define GENESIS_Z80_NATIVE_STATE_MAX 6144U
 
 typedef struct GenesisZ80Machine {
   Z80Runtime cpu;

@@ -72,3 +72,5 @@ Evidence and limits: `docs/testing/genesis-native-gems-validation.md`.
 
 Add the next driver images / versions as catalog lines with their own validation; if a game needs behaviour the reference comparison cannot reach (cycle-exact DAC / FM timing), extend the model
 with evidence. Reuse the module's scheduler for another driver family only when a concrete second driver needs it.
+
+Sibling replacement for the Krisalis driver family (ADR 0318): `docs/architecture/genesis-native-krisalis.md`. The two share the machine seam, the automatic selection (GEMS first) and the save-state contract, and nothing else.

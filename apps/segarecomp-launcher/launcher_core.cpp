@@ -402,7 +402,11 @@ std::string native_audio_identity(const Layout &layout) {
   const std::string impl = number_after(runtime / "gems_native.h", "#define GEMS_NATIVE_IMPLEMENTATION_VERSION ");
   const std::string catalog = number_after(runtime / "gems_driver_catalog.inc", "GEMS_CATALOG_REVISION(");
   // "/alt1": the build's automatic structural-alternatives policy (ADR 0291 Decision 6); a build made before it is never reused for a game it now serves.
-  return "impl" + (impl.empty() ? std::string("-") : impl) + "/cat" + (catalog.empty() ? std::string("-") : catalog) + "/alt1";
+  // "/kr<impl>.<cat>": the same two facts of the Krisalis replacement (ADR 0318), so a shipped change of either never reuses an older program
+  const std::string k_impl = number_after(runtime / "krisalis_native.h", "#define KRISALIS_NATIVE_IMPLEMENTATION_VERSION ");
+  const std::string k_catalog = number_after(runtime / "krisalis_driver_catalog.inc", "KRISALIS_CATALOG_REVISION(");
+  return "impl" + (impl.empty() ? std::string("-") : impl) + "/cat" + (catalog.empty() ? std::string("-") : catalog) + "/alt1" + "/kr" + (k_impl.empty() ? std::string("-") : k_impl) + "." +
+         (k_catalog.empty() ? std::string("-") : k_catalog);
 }
 }  // namespace
 
@@ -556,7 +560,7 @@ AudioReport read_audio_report(const fs::path &entry) {
   }
   if (kind == "native_driver") {
     const std::string driver = policy_field(object, "driver"), verification = policy_field(object, "verification");
-    if (driver != "gems" || !one_of(verification, {"build_qualified", "reference_checked"}) || !one_of(audio_status, {"supported", "degraded"}) ||
+    if (!one_of(driver, {"gems", "krisalis"}) || !one_of(verification, {"build_qualified", "reference_checked"}) || !one_of(audio_status, {"supported", "degraded"}) ||
         policy_field(object, "coverage") != "complete")
       return report;
     report.driver = driver;
@@ -592,7 +596,7 @@ AudioReport read_audio_report(const fs::path &entry) {
 std::string audio_headline(const AudioReport &report) {
   if (report.state == AudioReport::State::unknown) return "Unknown";
   if (report.state == AudioReport::State::not_recorded) return "Not recorded";
-  if (report.kind == "native_driver") return "Native GEMS " + report.version;   // the version is the verified catalog's text ("unknown" when it was not recorded in a form this reader accepts)
+  if (report.kind == "native_driver") return report.driver == "krisalis" ? "Native Krisalis (revision " + report.version + ")" : "Native GEMS " + report.version;   // the version is the verified catalog's text ("unknown" when it was not recorded in a form this reader accepts)
   if (report.schema == 2 && report.reason == "original_with_structural_alternatives") return "Original Z80 (generated-native, with structural alternatives)";
   return "Original Z80 (generated-native)";
 }
@@ -602,22 +606,25 @@ std::string audio_detail(const AudioReport &report) {
   if (report.state == AudioReport::State::not_recorded) return "No audio details were recorded for this build; nothing is inferred.";
   if (report.kind == "native_driver") {
     std::string text;
-    if (report.selection == "automatic") text += "- Automatically selected for a verified GEMS driver image" + std::string(report.rewrites_own_code_known && report.rewrites_own_code ? " (the original driver rewrites its own executable code, which the generated-native Z80 path cannot run).\n" : ".\n");
-    else if (report.selection == "developer_override") text += "- Selected by a developer override for a verified GEMS driver image.\n";
-    else text += "- Selected explicitly for a verified GEMS driver image (an earlier build).\n";
+    const std::string family = report.driver == "krisalis" ? "Krisalis" : "GEMS";
+    if (report.selection == "automatic") text += "- Automatically selected for a verified " + family + " driver image" + std::string(report.rewrites_own_code_known && report.rewrites_own_code ? " (the original driver rewrites its own executable code, which the generated-native Z80 path cannot run).\n" : ".\n");
+    else if (report.selection == "developer_override") text += "- Selected by a developer override for a verified " + family + " driver image.\n";
+    else text += "- Selected explicitly for a verified " + family + " driver image (an earlier build).\n";
     text += "- Independently reimplemented in native C11";
-    text += report.version == "unknown" ? " (driver version not recorded).\n" : "; matched to the published GEMS " + report.version + " layout and tables.\n";
+    text += report.version == "unknown" ? " (driver version not recorded).\n"
+            : report.driver == "krisalis" ? "; the uploaded driver code is the published Krisalis revision " + report.version + ".\n" : "; matched to the published GEMS " + report.version + " layout and tables.\n";
     text += report.verification == "reference_checked"
                 ? "- Verified against the original driver's command and chip-access behavior for this driver image (compared operation by operation with an independent implementation); this executable's playback has not itself been verified.\n"
                 : "- Build-qualified only (identity, address map and protocol checked), not independently audio-verified.\n";
     text += "- Original Z80 not executed for that driver.\n";
     text += report.save_states == "supported" ? "- Save states and rewind supported.\n" : "- Save states are not available in this older build; rebuild to get them.\n";
     text += "- Timing is event-accurate rather than instruction-cycle-accurate.\n";
-    text += "- Coverage: the driver's complete command and sequence-event set (FM, PSG, noise and digital patches, envelopes, tempo, loops).";
+    text += report.driver == "krisalis" ? "- Coverage: the driver's complete command set (row and tick cells, voices, pitch slides and portamento, volume, pan, FMS, drum and SFX samples on the DAC)."
+                                        : "- Coverage: the driver's complete command and sequence-event set (FM, PSG, noise and digital patches, envelopes, tempo, loops).";
     if (report.implementation_version >= 0) text += " Implementation version " + std::to_string(report.implementation_version) + ".";
     text += "\n";
     if (report.observed_fault == "none") text += "- The build's start-up run met no unsupported operation";
-    else text += "- The build's start-up run stopped the replacement at a malformed or unreadable resource (" + report.observed_fault + "); the rest of that run was silent";
+    else text += "- The build's start-up run stopped the replacement at a malformed or unreadable resource (" + report.observed_fault + "); the rest of that run was silent";   // Krisalis: an unmapped sample read or an invalid state
     if (report.commands >= 0 && report.sequences >= 0) text += " (" + std::to_string(report.commands) + " commands, " + std::to_string(report.sequences) + " sequences";
     if (report.commands >= 0 && report.sequences >= 0) text += report.dac_samples >= 0 ? ", " + std::to_string(report.dac_samples) + " DAC samples)." : ").";
     else text += ".";

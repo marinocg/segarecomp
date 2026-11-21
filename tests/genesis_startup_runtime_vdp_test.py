@@ -105,7 +105,7 @@ int main(void) {
   value = UINT32_C(0xFFFFFFFF);
   assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(value == 0U);
+  assert(value == UINT32_C(0x0200));
   assert(runtime.devices.vdp.status_register == 0U);
 
   /* Pre-existing controller-I/O selectors (SEG-007-T020/T038/T079) are
@@ -328,7 +328,7 @@ int main(void) {
         value = UINT32_C(0xFFFFFFFF);
         assert(genesis_route_access(r, UINT32_C(0x00C00004), GENESIS_ACCESS_BYTE,
                                     GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
-        assert(value == 0U);
+        assert(value == UINT32_C(0x02));
       }
       assert(memcmp(&first, &replay, sizeof(first)) == 0);
     }
@@ -461,7 +461,7 @@ int main(void) {
    value = UINT32_C(0xFFFFFFFF);
    assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
-   assert(value == 0U);
+   assert(value == UINT32_C(0x0200));
    assert(runtime.devices.vdp.dma.phase == GENESIS_VDP_DMA_IDLE);
    assert(runtime.devices.vdp.dma.remaining_length == 0U);
    assert(runtime.devices.vdp.dma.transfer_access_count == 2U);

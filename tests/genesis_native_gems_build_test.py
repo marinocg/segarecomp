@@ -3,7 +3,7 @@
 
   * every Genesis build records WHICH audio implementation the executable has (`audio_implementation`, schema 2, in status.json): by default (`--sound-driver auto`) the
     original generated-native Z80 ("original_z80_aot", supported, or degraded by a structural code mutation with no verified replacement) - selection `automatic`;
-  * `--sound-driver gems` (developer override) is refused (exit 6, stage `sound-driver`, `sound_driver_unverified`, no executable) when no uploaded Z80 image is a verified
+  * `--sound-driver gems` and `--sound-driver krisalis` (developer overrides) are refused (exit 6, stage `sound-driver`, `sound_driver_unverified`, no executable) when no uploaded Z80 image is a verified
     GEMS image - an unknown driver identity is never accepted silently, and there is no fallback build; `--sound-driver original` is recorded as a developer override;
   * the AUTOMATIC selection of the replacement: a self-modifying driver whose image signature is in the catalog is built a second time with the replacement and recorded as
     `native_driver` / `automatic` / `original_aot_failure_verified_replacement` with the original AOT's failure evidence (the catalog of a temporary copy of the runtime tree is
@@ -76,7 +76,7 @@ def main():
         multi, smc, dyn = fx.build("sound_multi_epoch"), fx.build("sound_smc"), fx.build("sound_smc_dynamic")
         jobs = {"multi": (multi, ()), "multi_again": (multi, ()), "smc": (smc, ()), "smc_gems": (smc, ("--sound-driver", "gems")),
                 "multi_gems": (multi, ("--sound-driver", "gems")), "multi_alt": (multi, ("--z80-alternatives", "1")),
-                "smc_original": (smc, ("--sound-driver", "original")),
+                "smc_original": (smc, ("--sound-driver", "original")), "smc_krisalis": (smc, ("--sound-driver", "krisalis")), "multi_krisalis": (multi, ("--sound-driver", "krisalis")),
                 "dyn": (dyn, ()), "dyn_original": (dyn, ("--sound-driver", "original"))}
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             futures = {name: pool.submit(build, rom, tmp / name, *extra) for name, (rom, extra) in jobs.items()}
@@ -135,13 +135,13 @@ def main():
         done_original, status_original = results["smc_original"]
         check(done_original.returncode == 0 and status_original.get("genesis_audio") == "degraded", "--sound-driver original on the closable driver stays the plain original path (degraded)")
 
-        for name in ("smc_gems", "multi_gems"):
+        for name in ("smc_gems", "multi_gems", "smc_krisalis", "multi_krisalis"):
             done, status = results[name]
             audio = status.get("audio_implementation", {})
             check(done.returncode == 6 and "stage=sound-driver" in done.stdout and "sound_driver_unverified" in done.stdout and status.get("status") == "failed" and
                   status.get("diagnostic") == "sound_driver_unverified" and executable(tmp / name) is None,
                   "%s: an unverified driver identity is refused with a typed failure and no executable" % name)
-            check(audio.get("requested") == "gems" and audio.get("kind") == "none" and audio.get("reason") == "sound_driver_unverified" and audio.get("selection") == "developer_override",
+            check(audio.get("requested") == name.split("_")[1] and audio.get("kind") == "none" and audio.get("reason") == "sound_driver_unverified" and audio.get("selection") == "developer_override",
                   "%s: the failure record says gems was required by a developer override and nothing was built" % name)
 
         done, status = results["multi_alt"]
@@ -196,8 +196,36 @@ def main():
         check(done.returncode == 0 and audio.get("kind") == "original_z80_aot" and audio.get("reason") == "original_supported",
               "a verified identity alone changes nothing: the original path that works stays (the replacement needs the original's recorded failure)")
 
+        # ADR 0318: the Krisalis family. The same mechanism with its own catalog: a verified line for the FAULTING image selects it; GEMS keeps precedence for an image both catalogs name;
+        # a verified identity alone (no recorded failure) changes nothing; an unlisted image is never served.
+        ktree = tmp / "ktree"
+        shutil.copytree(root / "libs", ktree / "libs")
+        shutil.copytree(root / "platforms" / "genesis", ktree / "platforms" / "genesis")
+        kfile = ktree / "platforms" / "genesis" / "runtime" / "krisalis_driver_catalog.inc"
+        kfile.write_text(kfile.read_text() + "".join('KRISALIS_VERIFIED_IMAGE("krisalis", "3", "build_qualified", "%s")\n' % sig for sig in signatures))
+        done, status = build(smc, tmp / "auto_krisalis", runtime=ktree / "platforms" / "genesis")
+        audio = status.get("audio_implementation", {})
+        check(done.returncode == 0 and audio.get("kind") == "native_driver" and audio.get("driver") == "krisalis" and audio.get("version") == "3" and audio.get("requested") == "auto" and
+              audio.get("selection") == "automatic" and audio.get("reason") == "original_aot_failure_verified_replacement" and audio.get("version_evidence") == "published_code_identity" and
+              audio.get("verification") == "build_qualified" and audio.get("save_states") == "supported" and audio.get("original_aot", {}).get("outcome") == "structural_code_mismatch" and
+              audio.get("identity") == signatures[0][:16] and status.get("genesis_audio") in ("native", "degraded"),
+              "a self-modifying driver whose faulting image is a verified Krisalis image is built a second time with the Krisalis replacement, automatically, naming the revision and the image")
+        check("sound_driver=krisalis" in done.stdout and executable(tmp / "auto_krisalis") is not None, "the build result names the Krisalis replacement and produced an executable")
+        both = tmp / "both"
+        shutil.copytree(tree, both)
+        bfile = both / "platforms" / "genesis" / "runtime" / "krisalis_driver_catalog.inc"
+        bfile.write_text(bfile.read_text() + "".join('KRISALIS_VERIFIED_IMAGE("krisalis", "3", "build_qualified", "%s")\n' % sig for sig in signatures))
+        done, status = build(smc, tmp / "auto_both", runtime=both / "platforms" / "genesis")
+        audio = status.get("audio_implementation", {})
+        check(done.returncode == 0 and audio.get("driver") == "gems" and "sound_driver=gems" in done.stdout,
+              "an image both catalogs name is served by GEMS: the existing precedence is unchanged and only one replacement is ever compiled in")
+        done, status = build(multi, tmp / "auto_krisalis_original", runtime=ktree / "platforms" / "genesis")
+        audio = status.get("audio_implementation", {})
+        check(done.returncode == 0 and audio.get("kind") == "original_z80_aot" and audio.get("reason") == "original_supported",
+              "a verified Krisalis identity alone changes nothing: the working original path stays")
+
         bad = tmp / "bad"
-        for argument in (("--sound-driver", "other"), ("--sound-driver", ""), ("--platform", "master-system", "--sound-driver", "gems")):
+        for argument in (("--sound-driver", "other"), ("--sound-driver", ""), ("--platform", "master-system", "--sound-driver", "gems"), ("--platform", "master-system", "--sound-driver", "krisalis")):
             done, _ = build(multi, bad, *argument)
             check(done.returncode != 0 and executable(bad) is None, "rejected: %s" % " ".join(argument))
 

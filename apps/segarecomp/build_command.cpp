@@ -123,6 +123,7 @@ struct Options {
   // deterministic pass builds the same program with the native replacement. "original" and "gems" are developer overrides (never offered by the launcher): "original" never
   // selects the replacement, "gems" requires it and fails when the uploaded image is not a verified GEMS image. There is no runtime fallback in any mode.
   std::string sound_driver = "auto";
+  std::string sound_retry_driver;       // set by the first pass of the automatic policy: the native family its evidence selected ("gems" | "krisalis")
   bool sound_auto_second_pass = false;   // set by the build itself when the automatic policy re-runs as "gems" (the evidence below is why)
   // ADR 0291 Decision 6: set by the build itself when the automatic policy re-runs the ORIGINAL driver with its compiled structural alternatives (first pass: the original AOT isolated
   // the sound CPU and no verified replacement applies). A failure of that pass is the build's failure (typed, propagated): it is never retried or replaced by another configuration.
@@ -264,7 +265,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
     else if (key == "--z80-static" && (value == "0" || value == "1")) options.z80_static = value == "1";
     else if (key == "--z80-alternatives" && (value == "0" || value == "1")) options.z80_alternatives = value == "1";
-    else if (key == "--sound-driver" && (value == "auto" || value == "original" || value == "gems")) options.sound_driver = value;
+    else if (key == "--sound-driver" && (value == "auto" || value == "original" || value == "gems" || value == "krisalis")) options.sound_driver = value;
     else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
     else if (key == "--test-frame-seam" && value == "1") options.frame_seam = true;
@@ -285,7 +286,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (options.aot_model == "gen2" && options.aot_policy != "optimized") return std::nullopt;  // gen2 is an opt-in of Optimized, never a policy
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
-  if (options.sound_driver == "gems" && options.platform == "master-system") return std::nullopt;   // a Genesis sound driver
+  if ((options.sound_driver == "gems" || options.sound_driver == "krisalis") && options.platform == "master-system") return std::nullopt;   // a Genesis sound driver
   if (options.patch_package.empty() != options.patch_identity.empty()) return std::nullopt;   // a package reference and the identity the user approved travel together
   if (!options.patch_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
@@ -1028,11 +1029,29 @@ struct VerifiedImage {
   std::string driver, version, verification, signature;
 };
 
-std::vector<VerifiedImage> read_verified_images(const fs::path &catalog) {
+// One native replacement family: its catalog, the header that carries its implementation version, its source and the compile-time selector. The automatic policy
+// consults the families in this order (GEMS first: its precedence is unchanged); only one replacement may serve a program.
+struct NativeFamily {
+  const char *name, *catalog, *header, *source, *define, *image_macro, *revision_macro, *version_macro, *object;
+};
+constexpr NativeFamily kNativeFamilies[] = {
+    {"gems", "gems_driver_catalog.inc", "gems_native.h", "gems_native.c", "-DSEGARECOMP_NATIVE_SOUND_GEMS=1", "GEMS_VERIFIED_IMAGE(", "GEMS_CATALOG_REVISION(",
+     "#define GEMS_NATIVE_IMPLEMENTATION_VERSION ", "rt-gems_native"},
+    {"krisalis", "krisalis_driver_catalog.inc", "krisalis_native.h", "krisalis_native.c", "-DSEGARECOMP_NATIVE_SOUND_KRISALIS=1", "KRISALIS_VERIFIED_IMAGE(",
+     "KRISALIS_CATALOG_REVISION(", "#define KRISALIS_NATIVE_IMPLEMENTATION_VERSION ", "rt-krisalis_native"},
+};
+
+const NativeFamily *native_family(const std::string &name) {
+  for (const NativeFamily &family : kNativeFamilies)
+    if (name == family.name) return &family;
+  return nullptr;
+}
+
+std::vector<VerifiedImage> read_verified_images(const fs::path &catalog, const NativeFamily &family) {
   std::vector<VerifiedImage> images;
   std::ifstream in(catalog);
   for (std::string line; std::getline(in, line);) {
-    if (line.rfind("GEMS_VERIFIED_IMAGE(", 0) != 0) continue;
+    if (line.rfind(family.image_macro, 0) != 0) continue;
     std::vector<std::string> fields;
     for (std::size_t at = 0; (at = line.find('"', at)) != std::string::npos;) {
       const std::size_t end = line.find('"', at + 1);
@@ -1045,20 +1064,20 @@ std::vector<VerifiedImage> read_verified_images(const fs::path &catalog) {
   return images;
 }
 
-// The catalog's revision (GEMS_CATALOG_REVISION(n)): part of the build's audio identity, so a changed set of verified images or of their evidence can never be mistaken for the old one.
-unsigned read_catalog_revision(const fs::path &catalog) {
+// The catalog's revision (<FAMILY>_CATALOG_REVISION(n)): part of the build's audio identity, so a changed set of verified images or of their evidence can never be mistaken for the old one.
+unsigned read_catalog_revision(const fs::path &catalog, const NativeFamily &family) {
   std::ifstream in(catalog);
   for (std::string line; std::getline(in, line);) {
-    const std::string key = "GEMS_CATALOG_REVISION(";
+    const std::string key = family.revision_macro;
     if (line.rfind(key, 0) == 0) return static_cast<unsigned>(std::strtoul(line.c_str() + key.size(), nullptr, 10));
   }
   return 0;
 }
 
-unsigned read_native_implementation_version(const fs::path &header) {
+unsigned read_native_implementation_version(const fs::path &header, const NativeFamily &family) {
   std::ifstream in(header);
   for (std::string line; std::getline(in, line);) {
-    const std::string key = "#define GEMS_NATIVE_IMPLEMENTATION_VERSION ";
+    const std::string key = family.version_macro;
     if (line.rfind(key, 0) == 0) return static_cast<unsigned>(std::strtoul(line.c_str() + key.size(), nullptr, 10));
   }
   return 0;
@@ -1094,7 +1113,7 @@ std::string audio_implementation_json(const Options &options, const GenesisSound
       << ",\"save_states\":\"supported\"";
   if (native) {
     out << ",\"driver\":\"" << record.driver << "\",\"version\":\"" << (record.version.empty() ? "unknown" : record.version)
-        << "\",\"version_evidence\":\"address_map_and_tables\",\"implementation_version\":" << record.implementation_version
+        << "\",\"version_evidence\":\"" << (record.driver == "krisalis" ? "published_code_identity" : "address_map_and_tables") << "\",\"implementation_version\":" << record.implementation_version
         << ",\"coverage\":\"complete\",\"verification\":\"" << record.verification << "\",\"identity\":\"" << record.signature_prefix
         << "\",\"native_images\":" << record.native_images << ",\"original_images\":" << record.original_images;
     if (record.analysed) out << ",\"original_driver_rewrites_own_code\":" << (record.structural_candidates > 0 ? "true" : "false") << ",\"static_code_write_candidates\":" << record.structural_candidates;
@@ -1201,7 +1220,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   fs::path platform_dir = options.runtime_dir;
   if (!platform_dir.has_filename()) platform_dir = platform_dir.parent_path();  // tolerate a trailing separator
   GenesisSoundBuild build(options, log);
-  const bool native_gems = options.sound_driver == "gems";   // ADR 0291
+  const NativeFamily *const native_selected = native_family(options.sound_driver);   // ADR 0291 / 0317: the replacement this pass compiles in (nullptr: the original)
   build.pass_region = genesis_pass_region(*route.rom);
   build.root = platform_dir.parent_path().parent_path();
   build.runtime = options.runtime_dir / "runtime";
@@ -1268,8 +1287,8 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   };
   for (const char *name : {"runtime.c", "z80_machine.c", "genesis_audio.c", "genesis_mixer.c", "genesis_audio_present.c", "genesis_sound.c"})
     add(common, build.runtime / name, std::string("rt-") + std::string(name).substr(0, std::string(name).size() - 2),
-        native_gems && std::string_view(name) == "genesis_sound.c" ? std::vector<std::string>{"-DSEGARECOMP_NATIVE_SOUND_GEMS=1"} : std::vector<std::string>{});
-  if (native_gems) add(common, build.runtime / "gems_native.c", "rt-gems_native");   // the replacement exists only in a program that selected it
+        native_selected != nullptr && std::string_view(name) == "genesis_sound.c" ? std::vector<std::string>{native_selected->define} : std::vector<std::string>{});
+  if (native_selected != nullptr) add(common, build.runtime / native_selected->source, native_selected->object);   // the replacement exists only in a program that selected it
   add(common, build.psg / "src" / "sn76489.c", "psg");
   add(common, build.ym / "src" / "cxx_runtime_shim.c", "ym-shim");
   for (const char *name : {"ymfm_opn.cpp", "ymfm_adpcm.cpp", "ymfm_ssg.cpp"})
@@ -1501,23 +1520,57 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   AudioRecord audio_record;
   audio_record.requested = options.sound_auto_second_pass ? "auto" : options.sound_driver;
   audio_record.automatic = options.sound_auto_second_pass || options.sound_driver == "auto";
-  audio_record.implementation_version = read_native_implementation_version(build.runtime / "gems_native.h");
-  audio_record.catalog_revision = read_catalog_revision(build.runtime / "gems_driver_catalog.inc");
+  // ADR 0317: the record describes the compiled-in replacement; before a replacement is selected it carries GEMS's (the legacy identity, so existing cache keys and records are unchanged).
+  const NativeFamily &record_family = native_selected != nullptr ? *native_selected : kNativeFamilies[0];
+  audio_record.implementation_version = read_native_implementation_version(build.runtime / record_family.header, record_family);
+  audio_record.catalog_revision = read_catalog_revision(build.runtime / record_family.catalog, record_family);
   if (options.sound_driver != "original") {
-    const std::vector<VerifiedImage> catalog = read_verified_images(build.runtime / "gems_driver_catalog.inc");
-    const VerifiedImage *first_verified = nullptr;
-    const gz80::Image *first_image = nullptr;
-    for (const auto &image : registry.images()) {
-      const std::string hex = gz80::to_hex(image.signature);
-      const auto verified = std::find_if(catalog.begin(), catalog.end(), [&](const VerifiedImage &entry) { return entry.signature == hex; });
-      if (verified == catalog.end()) { ++audio_record.original_images; continue; }
-      if (audio_record.native_images++ == 0) { first_verified = &*verified; first_image = &image; audio_record.signature_prefix = hex.substr(0, 16); }
+    // The families this pass may bind: every family in the automatic first pass (GEMS first), only the selected one afterwards or under a developer override.
+    struct FamilyMatch {
+      const NativeFamily *family = nullptr;
+      std::vector<VerifiedImage> catalog;
+      const VerifiedImage *first_verified = nullptr;
+      const gz80::Image *first_image = nullptr;
+      std::size_t native_images = 0, original_images = 0;
+      std::string signature_prefix;
+    };
+    std::vector<FamilyMatch> matches;
+    for (const NativeFamily &family : kNativeFamilies) {
+      if (native_selected != nullptr && &family != native_selected) continue;
+      FamilyMatch match;
+      match.family = &family;
+      match.catalog = read_verified_images(build.runtime / family.catalog, family);
+      for (const auto &image : registry.images()) {
+        const std::string hex = gz80::to_hex(image.signature);
+        const auto verified = std::find_if(match.catalog.begin(), match.catalog.end(), [&](const VerifiedImage &entry) { return entry.signature == hex; });
+        if (verified == match.catalog.end()) { ++match.original_images; continue; }
+        if (match.native_images++ == 0) { match.first_verified = &*verified; match.first_image = &image; match.signature_prefix = hex.substr(0, 16); }
+      }
+      matches.push_back(std::move(match));
     }
+    // The family reported for the record and the one a faulting verified image selects: the first (in precedence order) with a verified image.
+    FamilyMatch *chosen = &matches.front();
+    for (auto &match : matches)
+      if (match.native_images != 0) { chosen = &match; break; }
+        const VerifiedImage *first_verified = chosen->first_verified;
+    const gz80::Image *first_image = chosen->first_image;
+    audio_record.native_images = chosen->native_images;
+    audio_record.original_images = chosen->original_images;
+    audio_record.signature_prefix = chosen->signature_prefix;
     if (summary.sound_fault_image && options.sound_driver == "auto") {   // describe (and later analyse) the image that actually faulted when it is a verified one
       const std::string faulting = gz80::to_hex(*summary.sound_fault_image);
-      for (const auto &image : registry.images()) {
-        const auto verified = std::find_if(catalog.begin(), catalog.end(), [&](const VerifiedImage &entry) { return entry.signature == faulting; });
-        if (verified != catalog.end() && gz80::to_hex(image.signature) == faulting) { first_verified = &*verified; first_image = &image; audio_record.signature_prefix = faulting.substr(0, 16); break; }
+      bool found = false;
+      for (auto &match : matches) {
+        for (const auto &image : registry.images()) {
+          const auto verified = std::find_if(match.catalog.begin(), match.catalog.end(), [&](const VerifiedImage &entry) { return entry.signature == faulting; });
+          if (verified != match.catalog.end() && gz80::to_hex(image.signature) == faulting) {
+            first_verified = &*verified; first_image = &image; audio_record.signature_prefix = faulting.substr(0, 16); chosen = &match;
+            audio_record.native_images = match.native_images; audio_record.original_images = match.original_images;
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
       }
     }
     audio_record.replacement_available = audio_record.native_images != 0;
@@ -1527,10 +1580,12 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       audio_record.verification = first_verified->verification;
       audio_record.analysed = true;
       audio_record.structural_candidates = gz80::structural_code_write_candidates(*first_image);
+      audio_record.implementation_version = read_native_implementation_version(build.runtime / chosen->family->header, *chosen->family);
+      audio_record.catalog_revision = read_catalog_revision(build.runtime / chosen->family->catalog, *chosen->family);
     }
     if (options.sound_driver == "auto") {
       // The fault must come from the catalog-qualified image itself: a program with several Z80 images, one of them verified and a different one faulting, is not evidence for it.
-      const bool fault_from_verified_image = summary.sound_fault_image.has_value() && std::any_of(catalog.begin(), catalog.end(), [&](const VerifiedImage &entry) {
+      const bool fault_from_verified_image = summary.sound_fault_image.has_value() && std::any_of(chosen->catalog.begin(), chosen->catalog.end(), [&](const VerifiedImage &entry) {
         return entry.signature == gz80::to_hex(*summary.sound_fault_image);
       });
       if (summary.sound_fault && !summary.sound_fault->native_driver && first_verified != nullptr && fault_from_verified_image) {
@@ -1539,6 +1594,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
         options.sound_auto_evidence.original_outcome = "structural_code_mismatch";
         options.sound_auto_evidence.fault_frame = summary.sound_fault->master_ticks / (3420U * 262U /* NTSC master ticks per frame */);
         options.sound_auto_evidence.static_candidates = audio_record.structural_candidates;
+        options.sound_retry_driver = chosen->family->name;
         log.line("sound driver: the original AOT isolated the sound CPU (structural_code_mismatch) and the uploaded image is a verified " + audio_record.driver + " " + audio_record.version +
                  " image: second pass with the native replacement");
         return kRetryWithNativeSound;
@@ -1569,10 +1625,10 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       }
       if (options.sound_alt_second_pass && !summary.sound_fault) audio_record.reason = "original_with_structural_alternatives";
       else audio_record.reason = summary.sound_fault ? "no_verified_replacement" : "original_supported";
-    } else if (options.sound_driver == "gems") {
+    } else if (native_selected != nullptr) {
       if (audio_record.native_images == 0 || (options.sound_auto_second_pass && !options.sound_auto_evidence.present)) {
-        log.line("sound driver: the native replacement was required but no uploaded Z80 image is a verified GEMS image");
-        write_status(options, sha, "failed", "sound-driver", "The Z80 sound driver of this game is not a verified GEMS image, so the native GEMS replacement was not used.",
+        log.line("sound driver: the native replacement was required but no uploaded Z80 image is a verified " + std::string(chosen->family->name) + " image");
+        write_status(options, sha, "failed", "sound-driver", "The Z80 sound driver of this game is not a verified " + std::string(chosen->family->name) + " image, so the native replacement was not used.",
                      std::string(",\"audio_implementation\":{\"schema\":2,\"requested\":\"") + audio_record.requested + "\",\"kind\":\"none\",\"selection\":\"" +
                          (audio_record.automatic ? "automatic" : "developer_override") + "\",\"reason\":\"sound_driver_unverified\",\"original_images\":" +
                          std::to_string(audio_record.original_images) + "},\"diagnostic\":\"sound_driver_unverified\"");
@@ -1679,7 +1735,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (summary.sound_fault) status_extra += std::string(",\"z80_audio_outcome\":\"") + (native_fault ? "native_driver_unsupported_operation" : "structural_code_mismatch") + "\"";
   status_extra += audio_implementation_json(options, build, audio_record, summary.sound_fault);
   sound_result = std::string(" genesis_audio=") + audio_state + (summary.sound_fault ? std::string(" z80_audio_outcome=") + (native_fault ? "native_driver_unsupported_operation" : "structural_code_mismatch") : std::string());
-  if (audio_record.kind == "native_driver") sound_result += " sound_driver=gems";
+  if (audio_record.kind == "native_driver") sound_result += " sound_driver=" + audio_record.driver;
   status_extra += ",\"z80\":{\"outcome\":\"converged\",\"end\":\"" + std::string(gz80::pass_outcome_name(summary.end)) +
                  "\",\"observed_region\":\"" + build.pass_region + "\",\"images\":" + std::to_string(summary.images) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
                  ",\"runs\":" + std::to_string(summary.total_runs) + ",\"epochs\":" + std::to_string(summary.epochs) +
@@ -2155,7 +2211,7 @@ int run_build(Options options) {
       int rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
                                      m68k_images, executable, status_extra, sound_degraded, sound_result);
       if (rc == kRetryWithNativeSound) {   // the bounded, deterministic second pass: the same program with the replacement the first pass's evidence selected
-        options.sound_driver = "gems";
+        options.sound_driver = options.sound_retry_driver;
         options.sound_auto_second_pass = true;
         status_extra.clear(); sound_result.clear(); sound_degraded = false;
         rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
@@ -2189,7 +2245,7 @@ int run_build(Options options) {
       stage("link", "done");
       write_status(options, sha, "ok", "done", "", sms_provenance + status_extra);   // ADR 0268: a Genesis board declaration (lock_on) is recorded too
       std::cout << "@result ok executable=" << executable.string()
-                << (sound_degraded || sound_result.find("sound_driver=gems") != std::string::npos ? sound_result : std::string()) << std::endl;
+                << (sound_degraded || sound_result.find("sound_driver=") != std::string::npos ? sound_result : std::string()) << std::endl;
       return 0;
     }
     const fs::path runtime = options.runtime_dir / "runtime";
