@@ -11,8 +11,10 @@ What is compared (each a failure, never a tolerance):
      commands the native driver reports consuming ('C' lines): none missed, none invented, same bytes, same order.
   2. The register-level YM2612 write sequence (everything except the DAC data register $2A) of the native driver against the original's, up to one shared horizon. Neither side
      may have an extra or a missing write inside the window.
-  3. The DAC data byte sequence against the original's (identical bytes in identical order; the count may differ only at the horizon).
-  4. The bank-register bits of the PCM bank selection.
+  3. The sample activations (DAC enables): the same count and order, a final one missing only if it lies within the horizon's tail; the DAC data bytes of every sample (identical bytes in
+     identical order); the pan each sample restores. Only two bounded, REPORTED differences are tolerated and the verdict then says so ("not bit-identical"): a sample cut by a new sample / a
+     silence / an FM6 note may differ in length by at most 64 bytes and 5 % of its length, and its first bytes may shift by at most 6 across the start marker.
+  4. The bank-register bit sequence of the PCM bank selection (the native driver's own writes, 'K' lines, against the original's): identical, in order.
 Time is reported (the bounded skew of each compared write), never folded into identity. Not claimed: cycle accuracy, an identical interleaving of DAC bytes with FM writes
 (the original polls the DAC from inside its row code; the native model paces it by an event model).
 
@@ -69,6 +71,8 @@ def split_port_stream(port_writes, revision):
         if (port == 2 and value == 0xB6 and i + 3 < n and port_writes[i + 1][0] == 3 and port_writes[i + 2][:2] == (0, 0x2B) and port_writes[i + 3][:2] == (1, 0x00)):
             latch[0] = 0x2B   # the end of a sample (FM6's pan comes back from its voice, the DAC goes off): the player's own group, not row work
             latch[1] = 0xB6
+            dac.append((1, 0xB6, port_writes[i + 1][1], ticks))   # the pan it restores (compared exactly), then the end marker
+            dac.append((0, 0x2B, 0x00, ticks))
             i += 4
             continue
         if revision == 2 and port == 2 and value == 0xB6 and i + 1 < n and port_writes[i + 1][0] == 3:
@@ -183,71 +187,135 @@ def _percentiles(values):
     return [ordered[int(len(ordered) * q) - 1 if q < 1 else -1] for q in (0.5, 0.95, 0.99)]
 
 
-def dac_segments(dac, fm=None):
-    """DAC data bytes grouped by sample: a segment starts at each DAC-enable write ($2B <- $80) of the same side's player stream (it is part of `dac`)."""
-    segments = {}
-    index = 0
-    for _part, reg, value, _ticks in dac:
-        if reg == 0x2B:
-            if value == 0x80:
-                index += 1
-            continue
-        segments.setdefault(index, []).append(value)
+def dac_segments(dac):
+    """The player's stream grouped by sample. A segment starts at each DAC-enable ($2B <- $80) and holds the data bytes, the time of its last byte and whether its end group was seen.
+    Returns [{"bytes": [...], "start": t, "last": t, "ended": bool, "pan": value|None}]."""
+    segments = []
+    for _part, reg, value, ticks in dac:
+        if reg == 0x2B and value == 0x80:
+            segments.append({"bytes": [], "start": ticks, "last": ticks, "ended": False, "pan": None})
+        elif reg == 0x2B and segments:
+            segments[-1]["ended"] = True
+        elif reg == 0xB6 and segments:
+            segments[-1]["pan"] = value
+        elif reg == 0x2A:
+            if not segments:
+                segments.append({"bytes": [], "start": ticks, "last": ticks, "ended": False, "pan": None})   # bytes of a sample started before the observation
+            segments[-1]["bytes"].append(value)
+            segments[-1]["last"] = ticks
     return segments
 
 
-def compare_dac(native_dac, native_fm, reference_dac, reference_fm, tolerance_bytes):
-    """Per sample: the bytes both sides wrote must be the same stream; the original polls the DAC between pieces of its row work, so where a sample is cut (a new sample, a
-    silence, a note on FM6) the two may differ in LENGTH by the polls the timing skew moves across the cut: at most `tolerance_bytes`. Returns (failures, bytes_compared, max_length_difference)."""
+# Documented timing tolerances (each is REPORTED, never folded into the exact verdicts):
+#  * a sample that is cut (a new sample, a silence, a note on FM6) is cut at the same point of the command in both implementations, but the polls the event-level model fits before the cut differ
+#    by the timing skew: at most DAC_CUT_BYTES bytes and at most DAC_CUT_FRACTION of the sample (so a short sample must agree almost exactly);
+#  * the first bytes of a sample may fall on either side of its start marker (the previous sample is still polled while the next one starts): at most BOUNDARY_SPILL bytes, only for samples
+#    longer than twice that.
+DAC_CUT_BYTES = 64
+DAC_CUT_FRACTION = 0.05
+
+
+def compare_activations_and_dac(native_dac, reference_dac, horizon, tail_ticks):
+    """Exact sample activation count/order (the only tolerated difference is a final activation that genuinely lies within the horizon's tail), the DAC byte content of every sample, the
+    restored pans, and the bounded differences reported separately. Returns (failures, report)."""
     failures = []
     n, r = dac_segments(native_dac), dac_segments(reference_dac)
-    starts_n = sum(1 for w in native_dac if w[1] == 0x2B and w[2] == 0x80)
-    starts_r = sum(1 for w in reference_dac if w[1] == 0x2B and w[2] == 0x80)
-    if abs(starts_n - starts_r) > 1:   # at most the sample the horizon cuts
-        failures.append("dac: %d samples started natively, %d by the original" % (starts_n, starts_r))
-    compared, worst = 0, 0
-    for key in sorted(set(n) | set(r)):
-        a, b = n.get(key, []), r.get(key, [])
-        # the bytes of the previous sample that are still being polled while a new one is started may fall on either side of the start marker: the first bytes may be shifted by a few
-        spill = BOUNDARY_SPILL if min(len(a), len(b)) > 2 * BOUNDARY_SPILL else 0   # a short sample is compared exactly
-        shift = next((d for d in sorted(range(-spill, spill + 1), key=abs)
-                      if a[max(0, d):][:min(len(a) - max(0, d), len(b) - max(0, -d))] == b[max(0, -d):][:min(len(a) - max(0, d), len(b) - max(0, -d))]), None)
-        if shift is None:
-            m = min(len(a), len(b))
-            first = next((i for i in range(m) if a[i] != b[i]), 0)
-            failures.append("dac: sample %d byte %d differs: native %02X reference %02X" % (key, first, a[first] if a else 0, b[first] if b else 0))
+    boundary = horizon - tail_ticks
+    report = {"activations_native": len(n), "activations_reference": len(r), "samples_exact": 0, "samples_boundary_shifted": 0, "boundary_shift_max": 0, "samples_length_differing": 0,
+              "length_difference_max": 0, "samples_truncated_by_horizon": 0, "bytes_compared": 0}
+    common = min(len(n), len(r))
+    for longer, name in ((n, "native"), (r, "reference")):
+        for extra in longer[common:]:
+            if extra["start"] < boundary:   # an activation that is not within the horizon's tail is a missing/extra activation, wherever it falls
+                failures.append("dac: %s has an activation at %d that the other side lacks (a missing or extra sample activation, %d vs %d in all)" % (name, extra["start"], len(n), len(r)))
+                break
+    for index in range(common):
+        a, b = n[index], r[index]
+        last = index == common - 1 and len(n) == len(r)
+        if a["ended"] and b["ended"] and a["pan"] != b["pan"]:
+            failures.append("dac: sample %d restores pan %s natively and %s in the original" % (index, a["pan"], b["pan"]))
+        shift = 0
+        spill = BOUNDARY_SPILL if min(len(a["bytes"]), len(b["bytes"])) > 2 * BOUNDARY_SPILL else 0
+        for d in sorted(range(-spill, spill + 1), key=abs):
+            x, y = a["bytes"][max(0, d):], b["bytes"][max(0, -d):]
+            m = min(len(x), len(y))
+            if x[:m] == y[:m]:
+                shift = d
+                break
+        else:
+            m = min(len(a["bytes"]), len(b["bytes"]))
+            first = next((i for i in range(m) if a["bytes"][i] != b["bytes"][i]), 0)
+            failures.append("dac: sample %d byte %d differs: native %02X reference %02X" % (index, first, a["bytes"][first] if a["bytes"] else 0, b["bytes"][first] if b["bytes"] else 0))
             continue
-        compared += min(len(a) - max(0, shift), len(b) - max(0, -shift))
-        worst = max(worst, abs((len(a) - max(0, shift)) - (len(b) - max(0, -shift))))
-        if abs((len(a) - max(0, shift)) - (len(b) - max(0, -shift))) > tolerance_bytes:
-            failures.append("dac: sample %d length differs by %d bytes (native %d, reference %d)" % (key, abs(len(a) - len(b)), len(a), len(b)))
-    return failures, compared, worst
+        la, lb = len(a["bytes"]) - max(0, shift), len(b["bytes"]) - max(0, -shift)
+        report["bytes_compared"] += min(la, lb)
+        diff = abs(la - lb)
+        if shift:
+            report["samples_boundary_shifted"] += 1
+            report["boundary_shift_max"] = max(report["boundary_shift_max"], abs(shift))
+        if diff == 0:
+            if not shift:
+                report["samples_exact"] += 1
+            continue
+        # an unfinished final sample is tolerated only when the evidence says it crosses the horizon: its sample had not ended on the longer side and its last byte lies within the tail
+        crossing = last and ((la > lb and not a["ended"] and a["last"] >= boundary) or (lb > la and not b["ended"] and b["last"] >= boundary))
+        if crossing:
+            report["samples_truncated_by_horizon"] += 1
+            continue
+        allowed = min(DAC_CUT_BYTES, int(DAC_CUT_FRACTION * max(la, lb)))
+        report["samples_length_differing"] += 1
+        report["length_difference_max"] = max(report["length_difference_max"], diff)
+        if diff > allowed:
+            failures.append("dac: sample %d length differs by %d bytes (native %d, reference %d; at most %d allowed for a cut sample of this length)" % (index, diff, len(a["bytes"]), len(b["bytes"]), allowed))
+    return failures, report
 
 
-def check(native_lines, reference_fm, reference_dac, reference_bank, revision, tail_ticks, dac_tolerance=64):
+def compare_banks(native_bank, reference_bank, horizon, tail_ticks):
+    """The bank-register bit sequences ([(bit, ticks)]) must be identical, in order. Only a trailing group that genuinely lies within the horizon's tail on the longer side may be absent."""
+    failures = []
+    boundary = horizon - tail_ticks
+    n, r = [b for b, _t in native_bank], [b for b, _t in reference_bank]
+    m = min(len(n), len(r))
+    for i in range(m):
+        if n[i] != r[i]:
+            failures.append("bank: bit %d differs (native %d, reference %d)" % (i, n[i], r[i]))
+            return failures, m
+    longer, name = (native_bank, "native") if len(n) > len(r) else (reference_bank, "reference")
+    if len(n) != len(r) and any(t < boundary for _b, t in longer[m:]):
+        failures.append("bank: %s has %d bank-register bits the other side lacks (inside the window)" % (name, abs(len(n) - len(r))))
+    return failures, m
+
+
+def check(native_lines, reference_fm, reference_dac, reference_bank, revision, tail_ticks):
     horizon = next((l.ticks for l in native_lines if l.kind == "E"), None)
     if horizon is None:
         raise CheckError("the log has no end marker (E)")
     native_port_writes = [(l.port, l.value, l.ticks) for l in native_lines if l.kind == "y"]
     native_fm, native_dac = split_port_stream(native_port_writes, revision)
+    native_bank = [(l.port & 1, l.ticks) for l in native_lines if l.kind == "K"]
     failures = []
-    f, fm_compared, fm_skew = compare_streams(native_fm, reference_fm, horizon, tail_ticks, "fm")
+    fm_failures, fm_compared, fm_skew = compare_streams(native_fm, reference_fm, horizon, tail_ticks, "fm")
+    failures += fm_failures
+    f, dac = compare_activations_and_dac([w for w in native_dac if w[3] <= horizon], [w for w in reference_dac if w[3] <= horizon], horizon, tail_ticks)
     failures += f
-    f, dac_compared, dac_worst = compare_dac([w for w in native_dac if w[3] <= horizon], native_fm, [w for w in reference_dac if w[3] <= horizon], reference_fm, dac_tolerance)
+    f, banks = compare_banks([b for b in native_bank if b[1] <= horizon], [b for b in reference_bank if b[1] <= horizon], horizon, tail_ticks)
     failures += f
     committed, consumed = committed_commands(native_lines, revision), consumed_commands(native_lines)
-    failures += compare_commands(committed, consumed, horizon, tail_ticks)
+    cf = compare_commands(committed, consumed, horizon, tail_ticks)
+    failures += cf
+    bounded = bool(dac["samples_boundary_shifted"] or dac["samples_length_differing"] or dac["samples_truncated_by_horizon"])
     return {
         "horizon": horizon,
-        "fm_writes_compared": fm_compared,
-        "dac_bytes_compared": dac_compared,
-        "dac_max_length_difference": dac_worst,
-        "max_skew_ticks": fm_skew,
+        "commands": {"written": len(committed), "consumed": len(consumed), "exact": not cf},
+        "fm_register_writes": {"compared": fm_compared, "exact": not fm_failures},
+        "sample_activations": {"native": dac["activations_native"], "reference": dac["activations_reference"]},
+        "dac": dac,
+        "bank_register_bits_compared": banks,
+        "skew_ticks_max": fm_skew,
         "skew_ticks_p50_p95_p99": _percentiles(getattr(compare_streams, "skews", [])),
-        "commands_written": len(committed),
-        "commands_consumed": len(consumed),
         "failures": failures,
-        "identical": not failures,
+        "passed": not failures,
+        "verdict": ("FAILED" if failures else "exact" if not bounded else "passed with bounded DAC differences (reported, not bit-identical)"),
     }
 
 
@@ -392,7 +460,7 @@ def run_oracle(script, rom):
             state["ym"].append((address - 0x4000, value, master_now()))
         elif address == 0x6000:
             state["bank"] = ((value & 1) << 8) | (state["bank"] >> 1)
-            state["bankbits"].append(value & 1)
+            state["bankbits"].append((value & 1, master_now()))
 
     machine.set_read_callback(on_read)
     machine.set_write_callback(on_write)
@@ -446,7 +514,6 @@ def main(argv):
     ap.add_argument("--script", required=True, help="the 68000 stimulus (see make_script)")
     ap.add_argument("--native-log", help="the log the replacement produced when driven by the script (tools/krisalis_replay_harness)")
     ap.add_argument("--tail-frames", type=float, default=2.0, help="writes this close to the horizon may be missing from the side that lags (default 2 frames)")
-    ap.add_argument("--dac-tolerance", type=int, default=64)
     ap.add_argument("--json")
     args = ap.parse_args(argv)
     if args.game_log:
@@ -472,12 +539,12 @@ def main(argv):
     with open(args.rom, "rb") as handle:
         rom = handle.read()
     fm, dac, bank, _committed = run_oracle(script, rom)
-    result = check(lines, fm, dac, bank, args.revision, int(args.tail_frames * 896040), args.dac_tolerance)
+    result = check(lines, fm, dac, bank, args.revision, int(args.tail_frames * 896040))
     print(json.dumps(result, indent=1))
     if args.json:
         with open(args.json, "w") as handle:
             json.dump(result, handle, indent=1)
-    return 0 if result["identical"] else 1
+    return 0 if result["passed"] else 1
 
 
 if __name__ == "__main__":

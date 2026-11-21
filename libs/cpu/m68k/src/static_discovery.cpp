@@ -2254,13 +2254,25 @@ class M68kStaticGraphWalker {
     if (base < 0 || (base & 1) != 0) return false;
     std::vector<Address> candidates;
     std::vector<std::uint16_t> values;
-    for (std::uint16_t slot = 0; slot < 64U; ++slot) {
+    // The run must be established completely: a terminator (a word that is not a slot) has to be READ after the last slot, including after the 64th. A table with a 65th slot, or one whose
+    // terminator is not readable from immutable bytes, is not a proven run.
+    bool terminated = false;
+    for (std::uint16_t slot = 0; slot <= 64U; ++slot) {
       const auto at = base + 4 * static_cast<std::int64_t>(slot);
-      const auto opcode = word_at(at), displacement = word_at(at + 2);
-      if (!opcode || !displacement || *opcode != UINT16_C(0x6000) || *displacement == 0U || (*displacement & 1U) != 0U) break;  // BRA.W, even non-zero displacement
+      const auto opcode = word_at(at);
+      if (!opcode) return false;                                  // unreadable: the extent is not established
+      bool is_slot = false;
+      if (*opcode == UINT16_C(0x6000)) {
+        const auto displacement = word_at(at + 2);
+        if (!displacement) return false;
+        is_slot = *displacement != 0U && (*displacement & 1U) == 0U;   // BRA.W, even non-zero displacement
+      }
+      if (!is_slot) { terminated = true; break; }
+      if (slot == 64U) return false;                              // a 65th slot: more than the bounded run
       candidates.push_back(static_cast<Address>(at));
       values.push_back(static_cast<std::uint16_t>(4U * slot));
     }
+    if (!terminated) return false;
     if (candidates.size() < 2U) return false;
     out.source_instruction = decoded.provenance;
     out.control_ea = ea;

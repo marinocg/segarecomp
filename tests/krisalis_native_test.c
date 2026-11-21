@@ -38,7 +38,7 @@ static void fx_ym_write(void *c, uint32_t port, uint8_t value, uint64_t ticks) {
   if (f->count < sizeof f->log / sizeof f->log[0]) { f->log[f->count].port = (uint8_t)port; f->log[f->count].value = value; f->log[f->count++].ticks = ticks; }
 }
 static uint32_t fx_bank_get(void *c) { return ((Fixture *)c)->bank; }
-static void fx_bank_write(void *c, uint8_t bit) { Fixture *f = (Fixture *)c; f->bank = ((uint32_t)(bit & 1u) << 8) | (f->bank >> 1); }
+static void fx_bank_write(void *c, uint8_t bit, uint64_t ticks) { Fixture *f = (Fixture *)c; (void)ticks; f->bank = ((uint32_t)(bit & 1u) << 8) | (f->bank >> 1); }
 static void fx_command_tap(void *c, const uint8_t *bytes, unsigned count, uint64_t ticks) {
   Fixture *f = (Fixture *)c;
   (void)ticks;
@@ -397,6 +397,134 @@ static void test_state(void) {
   free(a); free(b);
 }
 
+
+/* ---- corrupt snapshots: structurally valid payloads of states the driver could never be in --------------------------------------------------------------------- */
+typedef void (*Mutation)(KrisalisNative *k);
+
+static void prepare_busy(Fixture *f) {   /* a revision-3 driver with an active sample and a partially processed row */
+  uint8_t cells[12] = {0};
+  size_t i;
+  make_voices(f);
+  for (i = 0; i < 2000u; ++i) f->rom[(1u << 15) + 0x10u + i] = (uint8_t)(i * 3u);
+  *mbox(f, 0x10) = 0x10u; *mbox(f, 0x11) = 0x80u; *mbox(f, 0x12) = 0x80u; *mbox(f, 0x14) = 0xD0u; *mbox(f, 0x15) = 0x07u; *mbox(f, 0x42) = 1u;
+  run_to(f, MS(5));
+  (void)krisalis_native_run_to(&f->driver, MS(5));
+  krisalis_native_suspend(&f->driver, MS(5));
+  *mbox(f, 0x16) = 1u;
+  krisalis_native_resume(&f->driver, MS(5));
+  run_to(f, MS(20));
+  cell_set(cells, 0, 3u, 2u, 0u);
+  cell_set(cells, 1, 20u, 3u, 0u);
+  send_at(f, MS(20), 10u, cells);
+  run_to(f, MS(20) + 300u * 15u * 8u);   /* mid-row */
+}
+
+static void m_wrong_revision(KrisalisNative *k) { k->revision = KRISALIS_REVISION_1; }
+static void m_unknown_revision(KrisalisNative *k) { k->revision = 9u; }
+static void m_zero_revision(KrisalisNative *k) { k->revision = 0u; }
+static void m_rate_zero_finite_due(KrisalisNative *k) { k->dac_rate = 0u; k->dac_due = k->floor_ticks + 1000u; }
+static void m_active_no_left(KrisalisNative *k) { k->dac_left = 0u; }
+static void m_active_no_start(KrisalisNative *k) { k->count_samples_started = 0u; }
+static void m_active_no_due(KrisalisNative *k) { k->dac_due = UINT64_MAX; }
+static void m_due_far_future(KrisalisNative *k) { k->dac_due = UINT64_MAX - 5u; }
+static void m_op_kind(KrisalisNative *k) { k->queue[k->queue_head].kind = 77u; }
+static void m_ym_port(KrisalisNative *k) { size_t i; for (i = 0; i < k->queue_count; ++i) { KrisalisOp *o = &k->queue[(k->queue_head + i) % KRISALIS_QUEUE_MAX]; if (o->kind == 1u) { o->a = 9u; return; } } }
+static void m_ym_operand_b(KrisalisNative *k) { size_t i; for (i = 0; i < k->queue_count; ++i) { KrisalisOp *o = &k->queue[(k->queue_head + i) % KRISALIS_QUEUE_MAX]; if (o->kind == 1u) { o->b = 1u; return; } } }
+static void m_bank_operand(KrisalisNative *k) { KrisalisOp *o = &k->queue[(k->queue_head + k->queue_count - 1u) % KRISALIS_QUEUE_MAX]; o->kind = 3u; o->a = 0u; o->b = 0u; o->c = 7u; }
+static void m_ram_operand(KrisalisNative *k) { KrisalisOp *o = &k->queue[(k->queue_head + k->queue_count - 1u) % KRISALIS_QUEUE_MAX]; o->kind = 2u; o->a = 0u; o->b = 0xFFu; o->c = 1u; }   /* offset $FF00: outside the 8 KiB RAM */
+static void m_gap_overflow(KrisalisNative *k) { k->queue_base = UINT64_MAX - 10u; k->queue[(k->queue_head + 1u) % KRISALIS_QUEUE_MAX].dt = 0xFFFFFu; }
+static void m_gap_huge(KrisalisNative *k) { k->queue[(k->queue_head + 1u) % KRISALIS_QUEUE_MAX].dt = 0xFFFFFFFFu; }
+static void m_head_gap(KrisalisNative *k) { k->queue[k->queue_head].dt = 5u; }
+static void m_idle_ahead(KrisalisNative *k) { k->idle_since = UINT64_MAX - 1u; }
+static void m_held_future(KrisalisNative *k) { k->held_since = UINT64_MAX - 3u; }
+static void m_idle_phase(KrisalisNative *k) { k->idle_phase = 100000u; }
+static void m_pair_open_empty(KrisalisNative *k) { k->queue_count = 0u; k->pair_open = 1u; }
+static void m_pair_unexpected(KrisalisNative *k) { k->pair_open = (uint8_t)(k->pair_open ? 0u : 1u); }
+static void m_data_without_address(KrisalisNative *k) { size_t i; for (i = 1; i < k->queue_count; ++i) { KrisalisOp *o = &k->queue[(k->queue_head + i) % KRISALIS_QUEUE_MAX]; if (o->kind == 1u && (o->a & 1u) == 0u) { o->kind = 1u; o->a = 1u; return; } } }
+static void m_open_pair_at_end(KrisalisNative *k) { KrisalisOp *o = &k->queue[(k->queue_head + k->queue_count - 1u) % KRISALIS_QUEUE_MAX]; o->kind = 1u; o->a = 0u; o->b = 0u; o->c = 0u; }
+static void m_counters(KrisalisNative *k) { k->count_rows = k->count_commands + 5u; }
+static void m_not_started(KrisalisNative *k) { k->started = 0u; }
+static void m_floor_future(KrisalisNative *k) { k->floor_ticks = UINT64_MAX / 2u; }
+
+static void test_corrupt_states(void) {
+  static const struct { const char *name; Mutation mutate; } cases[] = {
+      {"another supported revision", m_wrong_revision}, {"an unknown revision", m_unknown_revision}, {"revision zero", m_zero_revision},
+      {"revision 3, active DAC, rate 0, finite due time", m_rate_zero_finite_due}, {"an active sample with nothing left", m_active_no_left}, {"an active sample that was never started", m_active_no_start},
+      {"an active sample with no scheduled poll", m_active_no_due}, {"a poll due at the end of time", m_due_far_future}, {"an invalid operation kind", m_op_kind}, {"a YM port above 3", m_ym_port},
+      {"a YM operation with a stray operand", m_ym_operand_b}, {"a bank-register bit above 1", m_bank_operand}, {"a sound-RAM write outside the RAM", m_ram_operand}, {"a queue timestamp overflow", m_gap_overflow},
+      {"an impossible gap between two effects", m_gap_huge}, {"a gap in front of the head", m_head_gap}, {"an idle time at the end of time", m_idle_ahead}, {"a bus hold that starts in the future", m_held_future},
+      {"an impossible wait-loop phase", m_idle_phase}, {"an open register pair with an empty queue", m_pair_open_empty}, {"an inconsistent open-pair flag", m_pair_unexpected},
+      {"a data write whose address write is not in the queue", m_data_without_address}, {"a queue that ends inside a register pair", m_open_pair_at_end}, {"counters no run can produce", m_counters},
+      {"a driver that never started", m_not_started}, {"a floor time in the future", m_floor_future}};
+  Fixture *live = fx_new(3u), *twin = fx_new(3u), *source = fx_new(3u);
+  uint8_t payload[KRISALIS_NATIVE_STATE_MAX_BYTES], good[KRISALIS_NATIVE_STATE_MAX_BYTES], before[KRISALIS_NATIVE_STATE_MAX_BYTES], after[KRISALIS_NATIVE_STATE_MAX_BYTES];
+  uint32_t length, good_length, before_length, after_length;
+  const uint64_t now = MS(20) + 300u * 15u * 8u;
+  size_t c, accepted = 0u, tested = 0u;
+  prepare_busy(live); prepare_busy(twin); prepare_busy(source);
+  CHECK(live->driver.queue_count > 4u && live->driver.dac_active && live->driver.pair_open <= 1u, "the fixture is mid-row with an active sample (%u effects pending)", live->driver.queue_count);
+  good_length = krisalis_native_state_put(&source->driver, good, sizeof good);
+  CHECK(good_length > 0u, "the source state serialises");
+  {   /* the unmutated payload is accepted (so every rejection below is about its mutation) */
+    KrisalisNative stage = live->driver;
+    CHECK(krisalis_native_state_get(&stage, good, good_length, now), "the unmutated state is accepted");
+  }
+  for (c = 0; c < sizeof cases / sizeof cases[0]; ++c) {
+    KrisalisNative mutated = source->driver, stage = live->driver;
+    const size_t writes = live->count;
+    uint8_t ram[8192];
+    memcpy(ram, live->ram, sizeof ram);
+    before_length = krisalis_native_state_put(&live->driver, before, sizeof before);
+    cases[c].mutate(&mutated);
+    length = krisalis_native_state_put(&mutated, payload, sizeof payload);
+    if (length == 0u) continue;   /* a mutation the encoder itself refuses (not an accepted state either) */
+    ++tested;
+    if (krisalis_native_state_get(&stage, payload, length, now)) { ++accepted; CHECK(0, "REJECTED? no: accepted a corrupt state: %s", cases[c].name); }
+    CHECK(memcmp(&stage, &live->driver, sizeof stage) == 0, "a refused state leaves the staged driver unchanged: %s", cases[c].name);
+    after_length = krisalis_native_state_put(&live->driver, after, sizeof after);
+    CHECK(after_length == before_length && memcmp(before, after, before_length) == 0 && memcmp(ram, live->ram, sizeof ram) == 0, "the live driver and its RAM are unchanged: %s", cases[c].name);
+    CHECK(live->count == writes, "no chip write: %s", cases[c].name);
+  }
+  CHECK(accepted == 0u && tested == sizeof cases / sizeof cases[0], "every mutation was encoded and refused (%zu of %zu)", tested, sizeof cases / sizeof cases[0]);
+  /* a wrong revision for the bound driver, and a payload for another revision into a started revision-1 driver */
+  {
+    Fixture *r1 = fx_new(1u);
+    KrisalisNative stage = r1->driver;
+    run_to(r1, MS(5));
+    stage = r1->driver;
+    CHECK(!krisalis_native_state_get(&stage, good, good_length, now), "a revision-3 payload is refused by a bound revision-1 driver");
+    CHECK(memcmp(&stage, &r1->driver, sizeof stage) == 0, "...and nothing was staged");
+    free(r1);
+  }
+  /* truncations and extensions of the valid payload */
+  for (c = 0; c < good_length; c += (c < 200u ? 1u : 61u)) {
+    KrisalisNative stage = live->driver;
+    CHECK(!krisalis_native_state_get(&stage, good, (uint32_t)c, now), "a payload truncated to %zu bytes is refused", c);
+  }
+  { KrisalisNative stage = live->driver; memcpy(payload, good, good_length); payload[good_length] = 0u;
+    CHECK(!krisalis_native_state_get(&stage, payload, good_length + 1u, now), "a payload with a trailing byte is refused"); }
+  /* after all of it, the live driver and an untouched twin continue identically (and the unmutated state is still accepted) */
+  {
+    size_t base = live->count, tbase = twin->count, i;
+    run_to(live, MS(60)); run_to(twin, MS(60));
+    CHECK(live->count - base == twin->count - tbase && live->count - base > 0u, "the continuation of the refused-into driver has the twin's length");
+    for (i = 0; i < live->count - base && i < twin->count - tbase; ++i)
+      CHECK(live->log[base + i].port == twin->log[tbase + i].port && live->log[base + i].value == twin->log[tbase + i].value && live->log[base + i].ticks == twin->log[tbase + i].ticks, "continuation write %zu differs", i);
+  }
+  free(live); free(twin); free(source);
+}
+
+/* a fail-closed guard: a driver whose DAC state was damaged in memory (not through a snapshot) faults instead of dividing by zero */
+static void test_zero_rate_guard(void) {
+  Fixture *f = fx_new(3u);
+  prepare_busy(f);
+  f->driver.dac_rate = 0u;
+  f->driver.dac_due = f->driver.floor_ticks;
+  (void)krisalis_native_run_to(&f->driver, MS(300));
+  CHECK(f->driver.fault == KRISALIS_FAULT_INVALID_STATE, "an impossible DAC rate faults the driver (%s)", krisalis_native_fault_name(f->driver.fault));
+  free(f);
+}
+
 static void test_catalog(void) {
   uint8_t unknown[32] = {1, 2, 3};
   const char *version = NULL;
@@ -417,6 +545,8 @@ int main(void) {
   g_test = "test_cell_commands_rev3"; test_cell_commands_rev3();
   g_test = "test_revision_2"; test_revision_2();
   g_test = "test_state"; test_state();
+  g_test = "test_corrupt_states"; test_corrupt_states();
+  g_test = "test_zero_rate_guard"; test_zero_rate_guard();
   g_test = "test_catalog"; test_catalog();
   if (g_failures != 0) { fprintf(stderr, "%d failure(s)\n", g_failures); return 1; }
   puts("krisalis_native_tests: ok");

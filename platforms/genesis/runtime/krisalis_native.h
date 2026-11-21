@@ -44,7 +44,7 @@ typedef struct KrisalisNativeHost {
   void (*ym_write)(void *context, uint32_t port, uint8_t value, uint64_t master_ticks);
   /* The Z80 bank register ($6000): the current 9-bit value, and one serial write (bit 0 of `bit`) that shifts it like the hardware does. */
   uint32_t (*bank_get)(void *context);
-  void (*bank_write)(void *context, uint8_t bit);
+  void (*bank_write)(void *context, uint8_t bit, uint64_t master_ticks);
   /* Optional observer (may be NULL): each command the driver consumes (the command byte first, then the twelve cell bytes). Validation seam only. */
   void (*command_tap)(void *context, const uint8_t *bytes, unsigned count, uint64_t master_ticks);
 } KrisalisNativeHost;

@@ -60,6 +60,19 @@ std::vector<std::uint8_t> image(std::uint32_t scale, std::vector<std::uint32_t> 
   return out;
 }
 
+
+// A table of `n` BRA.W slots after `MOVE.W ($0002).W,D7 / <scale> / JMP 2(PC,D7.W)`, then `terminator` words (none = the image ends right after the last slot) and one RTS every slot branches to.
+std::vector<std::uint8_t> sized(unsigned n, std::vector<std::uint32_t> terminator, std::uint32_t scale = 0xE54F, std::uint32_t ext = 0x7002) {
+  std::vector<std::uint8_t> out;
+  w(out, 0x3E38); w(out, 0x0002); w(out, scale); w(out, 0x4EFB); w(out, ext);
+  const std::uint32_t target = 0x0AU + 4U * n + 2U * static_cast<std::uint32_t>(terminator.size()) + 2U;
+  for (unsigned i = 0; i < n; ++i) { w(out, 0x6000); w(out, target - (0x0AU + 4U * i + 2U)); }
+  for (const auto word : terminator) w(out, word);
+  w(out, 0x4E71);
+  w(out, 0x4E75);
+  return out;
+}
+
 segarecomp::M68kStaticDiscoveryResult run(const std::vector<std::uint8_t> &bytes, bool immutable = true) {
   Env environment(bytes, 0x2000U, immutable);
   const segarecomp::M68kStaticDiscoveryLimits limits{4096U, 4096U, 8U};
@@ -88,6 +101,30 @@ int main() {
     w(narrow, 0x4E75); w(narrow, 0x4E75); w(narrow, 0x4E75);
     const auto proven = run(narrow);
     assert(proven.indirect_target_ea_sets.size() == 1U && proven.indirect_target_ea_sets.front().candidates.size() == 3U);
+  }
+
+
+  // the bounded run: the extent must be ESTABLISHED (a readable terminator after the last slot, the 64th included)
+  const auto sets = [](const segarecomp::M68kStaticDiscoveryResult &r) { return r.indirect_target_ea_sets.empty() ? 0U : r.indirect_target_ea_sets.front().candidates.size(); };
+  assert(sets(run(sized(2, {0x4E71}))) == 2U);
+  assert(sets(run(sized(63, {0x4E71}))) == 63U);
+  assert(sets(run(sized(64, {0x4E71}))) == 64U);
+  { const auto r = run(sized(65, {0x4E71})); assert(r.indirect_target_ea_sets.empty() && r.primary_issue.has_value()); }       // a 65th slot: not a proven run
+  { const auto r = run(sized(100, {0x4E71})); assert(r.indirect_target_ea_sets.empty() && r.primary_issue.has_value()); }
+  { std::vector<std::uint8_t> bytes = sized(3, {}); bytes.resize(0x0AU + 12U);      // the image ends right after the last slot: no readable terminator
+    const auto r = run(bytes); assert(r.indirect_target_ea_sets.empty() && r.primary_issue.has_value()); }
+  { std::vector<std::uint8_t> bytes = sized(64, {}); bytes.resize(0x0AU + 4U * 64U);
+    const auto r = run(bytes); assert(r.indirect_target_ea_sets.empty() && r.primary_issue.has_value()); }                  // 64 slots, terminator unreadable
+  assert(sets(run(sized(3, {0x6000, 0x0003}))) == 3U);                                                                    // an odd displacement terminates the run
+  assert(sets(run(sized(3, {0x6000, 0x0000}))) == 3U);                                                                    // so does a zero displacement
+  { const auto r = run(sized(3, {0x4E71}, 0x4E71)); assert(r.indirect_target_ea_sets.empty() && r.primary_issue.has_value()); }        // wrong scaling instruction
+  { const auto r = run(sized(3, {0x4E71}, 0xE54E)); assert(r.indirect_target_ea_sets.empty() && r.primary_issue.has_value()); }        // wrong index register
+  { const auto r = run(sized(3, {0x4E71}), false); assert(r.indirect_target_ea_sets.empty() && r.primary_issue.has_value()); }          // not immutable
+  {   // the admitted set is exactly the run: an index outside it (e.g. 3 * 4 for a 3-slot table) is not a candidate, so the emitted guard stops on it at run time
+    const auto r = run(sized(3, {0x4E71}));
+    const auto &c = r.indirect_target_ea_sets.front().candidates;
+    assert(c.size() == 3U && c.front().value == 0x200AU && c.back().value == 0x2012U);
+    for (const auto &candidate : c) assert(candidate.value != 0x2016U);
   }
 
   // negatives: each keeps the unresolved (unproven, fail-closed) behaviour

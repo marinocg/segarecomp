@@ -248,6 +248,7 @@ static void dac_event(KrisalisNative *k, uint64_t t) {
     return;
   }
   /* revision 3: a byte per carry; the phase advanced by the iterations that led here */
+  if (k->dac_rate == 0u) { fail(k, KRISALIS_FAULT_INVALID_STATE); return; }   /* never scheduled with rate 0: an inconsistent state faults instead of dividing by zero */
   {
     const unsigned need = 256u - k->dac_phase;
     const unsigned n = (need + k->dac_rate - 1u) / k->dac_rate;
@@ -792,7 +793,7 @@ static void apply_queue_head(KrisalisNative *k) {
   switch (op->kind) {
     case OP_YM: k->host.ym_write(k->host.context, op->a, op->c, t); k->pair_open = (uint8_t)((op->a & 1u) == 0u); break;
     case OP_RAM: k->host.ram[((unsigned)op->a | ((unsigned)op->b << 8)) & RAM_MASK] = op->c; break;
-    case OP_BANK: k->host.bank_write(k->host.context, op->c); break;
+    case OP_BANK: k->host.bank_write(k->host.context, op->c, t); break;
     case OP_DAC_START:
       k->dac_pointer = k->pend_pointer;
       k->dac_left = k->pend_left;
@@ -928,6 +929,66 @@ uint32_t krisalis_native_state_put(const KrisalisNative *k, uint8_t *out, uint32
   return w.error ? 0u : w.size;
 }
 
+/* A decoded state is accepted only if it is one this implementation could have produced at this guest time (nothing here is a guess: each bound is a property of the
+ * code that builds the state). `live_revision` is the revision of the driver the state is restored into (0 = never started: the outer identity check has already tied the
+ * payload to a catalogued image). */
+#define STATE_MAX_AHEAD_TICKS (UINT64_C(20000) * CYCLE_TICKS * 8u)   /* the longest effect list (a revision-3 row) spans well under 100,000 cycles */
+#define STATE_MAX_GAP_TICKS UINT32_C(1048576)                         /* the longest gap between two effects of one command is under 8,000 cycles */
+
+static int state_valid(const KrisalisNative *s, uint8_t live_revision, uint64_t master_ticks) {
+  uint64_t due, horizon;
+  uint16_t i;
+  int open = 0;
+  unsigned open_port = 0u;
+  if (s->revision < KRISALIS_REVISION_1 || s->revision > KRISALIS_REVISION_3) return 0;
+  if (live_revision != 0u && live_revision != s->revision) return 0;
+  if (s->started != 1u || s->dac_active > 1u || s->dac_redirect > 1u || s->pair_open > 1u) return 0;
+  if (s->floor_ticks > master_ticks || s->idle_since == UINT64_MAX) return 0;
+  if (s->idle_since > master_ticks + STATE_MAX_AHEAD_TICKS) return 0;
+  if (s->held_since != UINT64_MAX && s->held_since > master_ticks) return 0;
+  if (s->idle_phase >= 300u) return 0;   /* the longest wait-loop iteration is 291 cycles */
+  if (s->queue_count > KRISALIS_QUEUE_MAX) return 0;
+  if (s->count_rows > s->count_commands || s->count_ticks > s->count_commands) return 0;
+  if (s->dac_active && (s->dac_left == 0u || s->count_samples_started == 0u)) return 0;
+  if (s->dac_active) {   /* a poll is always scheduled for a playing sample; revision 3 with rate 0 never reaches its next carry */
+    if (s->revision == KRISALIS_REVISION_3 && s->dac_rate == 0u ? s->dac_due != UINT64_MAX : s->dac_due == UINT64_MAX) return 0;
+    if (s->dac_due != UINT64_MAX && s->dac_due > master_ticks + STATE_MAX_AHEAD_TICKS) return 0;
+  }
+  if (s->revision != KRISALIS_REVISION_3 && s->dac_redirect != 0u && !s->dac_active) return 0;
+  if (s->queue_count == 0u) return s->pair_open == 0u;
+  if (s->queue_base == UINT64_MAX || s->queue_base > master_ticks + STATE_MAX_AHEAD_TICKS) return 0;
+  due = s->queue_base;
+  horizon = master_ticks + STATE_MAX_AHEAD_TICKS;
+  for (i = 0; i < s->queue_count; ++i) {
+    const KrisalisOp *op = &s->queue[i];
+    if (i == 0u ? op->dt != 0u : op->dt > STATE_MAX_GAP_TICKS) return 0;
+    if (due > UINT64_MAX - op->dt) return 0;   /* the reconstructed due time must not overflow */
+    due += op->dt;
+    if (due > horizon) return 0;
+    switch (op->kind) {
+      case OP_YM:
+        if (op->a > 3u || op->b != 0u) return 0;
+        if (open) { if ((unsigned)op->a != open_port + 1u) return 0; open = 0; }                   /* an address write is followed by its data write */
+        else if (op->a & 1u) { if (i != 0u || !s->pair_open) return 0; }                          /* only the head may be a data write whose address was already issued */
+        else { open = 1; open_port = op->a; }
+        break;
+      case OP_RAM: if (open || (((unsigned)op->a | ((unsigned)op->b << 8)) & ~RAM_MASK) != 0u) return 0; break;
+      case OP_BANK: if (open || op->a != 0u || op->b != 0u || op->c > 1u) return 0; break;
+      case OP_DAC_CUT: if (open || op->a != 0u || op->b != 0u || op->c > 1u) return 0; break;
+      case OP_DAC_START: if (open || op->a != 0u || op->b != 0u || op->c != 0u) return 0; break;
+      default: return 0;
+    }
+  }
+  if (open) return 0;   /* a command's effects end on a complete pair */
+  {   /* the head decides whether a pair or a bank-register loop is in progress */
+    const KrisalisOp *head = &s->queue[0];
+    const int head_data = head->kind == OP_YM && (head->a & 1u);
+    if (head_data != (s->pair_open && head->kind == OP_YM)) return 0;
+    if (s->pair_open && head->kind != OP_YM && head->kind != OP_BANK) return 0;
+  }
+  return 1;
+}
+
 int krisalis_native_state_get(KrisalisNative *stage, const uint8_t *in, uint32_t length, uint64_t master_ticks) {
   R r;
   uint16_t i, count;
@@ -967,8 +1028,7 @@ int krisalis_native_state_get(KrisalisNative *stage, const uint8_t *in, uint32_t
   s.count_key_events = r64(&r);
   base = r64(&r);
   count = r16(&r);
-  if (r.error || s.revision < KRISALIS_REVISION_1 || s.revision > KRISALIS_REVISION_3 || s.started > 1u || s.dac_active > 1u || s.dac_redirect > 1u || s.pair_open > 1u) return 0;
-  if (count > KRISALIS_QUEUE_MAX) return 0;
+  if (r.error || count > KRISALIS_QUEUE_MAX) return 0;
   s.queue_head = 0u;
   s.queue_count = count;
   s.queue_base = base;
@@ -979,15 +1039,9 @@ int krisalis_native_state_get(KrisalisNative *stage, const uint8_t *in, uint32_t
     op->a = r8(&r);
     op->b = r8(&r);
     op->c = r8(&r);
-    if (op->kind < OP_YM || op->kind > OP_DAC_START || (op->kind == OP_YM && op->a > 3u)) return 0;
-    if (i == 0u && op->dt != 0u) return 0;
   }
   if (r.error || r.offset != r.size) return 0;
-  /* the state must be one this implementation could have produced at this guest time */
-  if (s.floor_ticks > master_ticks || s.idle_since == UINT64_MAX) return 0;
-  if (s.held_since != UINT64_MAX && s.held_since > master_ticks) return 0;
-  if (count != 0u && base == UINT64_MAX) return 0;
-  if (s.dac_active && s.dac_left == 0u) return 0;
+  if (!state_valid(&s, stage->started ? stage->revision : 0u, master_ticks)) return 0;
   *stage = s;
   return 1;
 }

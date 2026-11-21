@@ -167,7 +167,8 @@ static const GenesisZ80NativeDriver g_gems_ops = {NULL, native_identify, native_
 static KrisalisNative g_krisalis;
 
 static uint32_t native_bank_get(void *context) { return ((const GenesisRuntime *)context)->devices.z80_bus.bank; }
-static void native_bank_write(void *context, uint8_t bit) {
+static void native_bank_write(void *context, uint8_t bit, uint64_t ticks) {
+  if (g_audio.write_tap != NULL) g_audio.write_tap(g_audio.write_tap_context, 'K', bit & 1u, 0U, ticks);   /* validation seam: the driver's own bank-register writes */
   GenesisRuntime *runtime = (GenesisRuntime *)context;
   runtime->devices.z80_bus.bank = (uint16_t)((((uint32_t)bit & 1U) << 8) | (runtime->devices.z80_bus.bank >> 1));
   ++g_native_machine->count_bank_writes;

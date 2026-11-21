@@ -32,10 +32,12 @@ static void ctx_ym_write(void *c, uint32_t port, uint8_t value, uint64_t ticks) 
   printf("y %u %02X %llu\n", (unsigned)port, (unsigned)value, (unsigned long long)ticks);
 }
 static uint32_t ctx_bank_get(void *c) { return ((const Context *)c)->bank; }
-static void ctx_bank_write(void *c, uint8_t bit) {
+static void ctx_bank_write(void *c, uint8_t bit, uint64_t ticks) {
   Context *x = (Context *)c;
+  printf("K %u 00 %llu\n", (unsigned)(bit & 1u), (unsigned long long)ticks);   /* the driver's own bank-register write, same record as the game's validation log */
   x->bank = ((uint32_t)(bit & 1u) << 8) | (x->bank >> 1);
 }
+
 static void ctx_command_tap(void *c, const uint8_t *bytes, unsigned count, uint64_t ticks) {
   unsigned i;
   (void)c;
