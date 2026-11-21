@@ -1110,7 +1110,7 @@ int main(void) {
   assert(transfer.kind == GENESIS_STOP);
   assert(transfer.stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_FORM);
   assert(runtime.pc == UINT32_C(0x00000B06));
-  assert((runtime.sr & UINT16_C(0x000F)) == UINT16_C(0x0004));
+  assert((runtime.sr & UINT16_C(0x000F)) == UINT16_C(0x0000)); /* status 0x0200 (write FIFO empty): TST.W sets neither Z nor N */
   return 0;
 }
 '''
