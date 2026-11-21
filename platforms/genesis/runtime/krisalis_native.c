@@ -805,6 +805,7 @@ static void apply_queue_head(KrisalisNative *k) {
 KrisalisFault krisalis_native_run_to(KrisalisNative *k, uint64_t master_ticks) {
   Build b;
   uint64_t started_before = 0u;
+  int work_is_trigger = 0;
   b.k = k;
   for (;;) {
     uint64_t best = UINT64_MAX;
@@ -818,7 +819,10 @@ KrisalisFault krisalis_native_run_to(KrisalisNative *k, uint64_t master_ticks) {
     }
     if (k->queue_count == 0u && (*mb(k, MB_CMD) != 0u || *mb(k, MB_TRIGGER) != 0u)) {
       const unsigned l = loop_cycles(k);
-      const uint64_t at = *mb(k, MB_TRIGGER) != 0u ? idle_reach(k, 0u) : idle_reach(k, l - 20u);   /* the trigger is read first in the loop, the command last */
+      const uint64_t at_trigger = *mb(k, MB_TRIGGER) != 0u ? idle_reach(k, 0u) : UINT64_MAX;       /* the trigger is read first in the loop ... */
+      const uint64_t at_command = *mb(k, MB_CMD) != 0u ? idle_reach(k, l - 20u) : UINT64_MAX;      /* ... the command last: whichever the Z80 reaches first is served first */
+      const uint64_t at = at_trigger <= at_command ? at_trigger : at_command;
+      work_is_trigger = at_trigger <= at_command;
       if (at < best) { best = at; kind = 3; }
     }
     if (kind == 0 || best > master_ticks) break;
@@ -829,7 +833,7 @@ KrisalisFault krisalis_native_run_to(KrisalisNative *k, uint64_t master_ticks) {
         b.t = best;
         b.last = best;
         started_before = k->count_samples_started;
-        if (*mb(k, MB_TRIGGER) != 0u) start_sfx_sample(&b);
+        if (work_is_trigger) start_sfx_sample(&b);
         else consume_command(&b, *mb(k, MB_CMD));
         if (k->revision != KRISALIS_REVISION_3 && k->dac_active && k->dac_due != UINT64_MAX && k->queue_count != 0u)   /* revisions 1 and 2 do not poll the DAC while they work */
           k->dac_due = max_u64(k->dac_due, b.last + (uint64_t)CYC_YM_WRITE * CYCLE_TICKS);

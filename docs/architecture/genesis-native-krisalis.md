@@ -20,7 +20,7 @@ Only the second is replaced. The stub is compiled-native and works; the replacem
 ## 2. Identity
 
 The replacement serves an uploaded image only if its **activation signature** (the digest the runtime already computes for every image epoch: the 68000-written extents of the sound RAM and
-their bytes) is a line of `krisalis_driver_catalog.inc`. The signature covers the driver bytes **and** the voice bank uploaded with them, so a line names one exact upload; it is not a
+their bytes) is a line of `krisalis_driver_catalog.inc`. The signature covers the 68000-written extents at activation: the reset area and the 5 KiB block the game copies for the driver (its code **and** whatever followed it in that game's ROM; the voice bank is loaded after the start and is not part of it), so a line names one exact upload and two games that share a code image but not the bytes after it have separate lines; it is not a
 title, filename, address or release date and nothing of the kind is compared anywhere. Each line states the published driver revision whose behaviour the image has and the strongest
 evidence tier reached for it (`build_qualified`, or `reference_checked` = compared operation by operation with an independent execution of the original driver). An unlisted image is
 never served by a replacement (the automatic policy ignores it; a forced `--sound-driver krisalis` fails with a typed `sound_driver_unverified` diagnostic).
@@ -72,8 +72,8 @@ the implementation version, `save_states = "supported"` and the build's own star
 
 ## 8. Save states and rewind
 
-The driver's private state (the effect queue, the DAC player, the wait-loop phase, the clocks and the counters) is a canonical, versioned, pointer-free payload (`krisalis_native_state_put/get`, schema 1); the mailbox, the voice bank and the channel state live in the sound RAM, which the machine snapshot already carries, so a re-upload of the driver
-resets them exactly as it resets the original. The machine's existing staged-restore contract applies unchanged: decode into private storage, validate against the guest clock, commit atomically, no chip write on restore, a state is refused by a program without this replacement and by a replacement of another driver, version, implementation or signature. The payload bound
+The driver's private state (the effect queue, the DAC player, the wait-loop phase, the clocks and the counters) is a canonical, versioned, pointer-free payload (`krisalis_native_state_put/get`, schema 1); the mailbox, the voice bank and the channel state live in the sound RAM, which the machine snapshot already carries, so a re-upload of the driver block
+resets the mailbox and the channel state exactly as it resets the original. The machine's existing staged-restore contract applies unchanged: decode into private storage, validate against the guest clock, commit atomically, no chip write on restore, a state is refused by a program without this replacement and by a replacement of another driver, version, implementation or signature. The payload bound
 (`GENESIS_Z80_NATIVE_STATE_MAX`) was raised from 4 KiB to 6 KiB for the longest effect queue.
 
 ## 9. Limits

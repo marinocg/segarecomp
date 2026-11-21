@@ -24,6 +24,7 @@ import sys
 from collections import namedtuple
 
 Z80_TICK = 15  # master ticks per Z80 cycle
+BOUNDARY_SPILL = 6  # bytes a sample boundary may shift between the two sides (the old sample is still polled while the next one starts)
 
 MAILBOX = {1: 0x0E58, 2: 0x0F58, 3: 0x0FAC}
 CELLS_AT, CELLS_LEN = 2, 12
@@ -69,6 +70,11 @@ def split_port_stream(port_writes, revision):
             latch[0] = 0x2B   # the end of a sample (FM6's pan comes back from its voice, the DAC goes off): the player's own group, not row work
             latch[1] = 0xB6
             i += 4
+            continue
+        if port == 0 and value == 0x2B and i + 1 < n and port_writes[i + 1][0] == 1:
+            dac.append((0, 0x2B, port_writes[i + 1][1], ticks))   # the DAC enable: the player's start of a sample (its order against a tick the original and the model may serve in either order, see below)
+            latch[0] = 0x2B
+            i += 2
             continue
         part = port >> 1
         if port & 1 == 0:
@@ -173,15 +179,16 @@ def _percentiles(values):
     return [ordered[int(len(ordered) * q) - 1 if q < 1 else -1] for q in (0.5, 0.95, 0.99)]
 
 
-def dac_segments(dac, fm):
-    """DAC data bytes grouped by sample: a segment starts at each DAC-enable write ($2B <- $80) of the same side's FM stream."""
-    starts = [w[3] for w in fm if w[0] == 0 and w[1] == 0x2B and w[2] == 0x80]
+def dac_segments(dac, fm=None):
+    """DAC data bytes grouped by sample: a segment starts at each DAC-enable write ($2B <- $80) of the same side's player stream (it is part of `dac`)."""
     segments = {}
-    j = 0
-    for _part, _reg, value, ticks in dac:
-        while j < len(starts) and starts[j] <= ticks:
-            j += 1
-        segments.setdefault(j, []).append(value)
+    index = 0
+    for _part, reg, value, _ticks in dac:
+        if reg == 0x2B:
+            if value == 0x80:
+                index += 1
+            continue
+        segments.setdefault(index, []).append(value)
     return segments
 
 
@@ -189,18 +196,26 @@ def compare_dac(native_dac, native_fm, reference_dac, reference_fm, tolerance_by
     """Per sample: the bytes both sides wrote must be the same stream; the original polls the DAC between pieces of its row work, so where a sample is cut (a new sample, a
     silence, a note on FM6) the two may differ in LENGTH by the polls the timing skew moves across the cut: at most `tolerance_bytes`. Returns (failures, bytes_compared, max_length_difference)."""
     failures = []
-    n, r = dac_segments(native_dac, native_fm), dac_segments(reference_dac, reference_fm)
+    n, r = dac_segments(native_dac), dac_segments(reference_dac)
+    starts_n = sum(1 for w in native_dac if w[1] == 0x2B and w[2] == 0x80)
+    starts_r = sum(1 for w in reference_dac if w[1] == 0x2B and w[2] == 0x80)
+    if abs(starts_n - starts_r) > 1:   # at most the sample the horizon cuts
+        failures.append("dac: %d samples started natively, %d by the original" % (starts_n, starts_r))
     compared, worst = 0, 0
     for key in sorted(set(n) | set(r)):
         a, b = n.get(key, []), r.get(key, [])
-        m = min(len(a), len(b))
-        if a[:m] != b[:m]:
-            first = next(i for i in range(m) if a[i] != b[i])
-            failures.append("dac: sample %d byte %d differs: native %02X reference %02X" % (key, first, a[first], b[first]))
+        # the bytes of the previous sample that are still being polled while a new one is started may fall on either side of the start marker: the first bytes may be shifted by a few
+        spill = BOUNDARY_SPILL if min(len(a), len(b)) > 2 * BOUNDARY_SPILL else 0   # a short sample is compared exactly
+        shift = next((d for d in sorted(range(-spill, spill + 1), key=abs)
+                      if a[max(0, d):][:min(len(a) - max(0, d), len(b) - max(0, -d))] == b[max(0, -d):][:min(len(a) - max(0, d), len(b) - max(0, -d))]), None)
+        if shift is None:
+            m = min(len(a), len(b))
+            first = next((i for i in range(m) if a[i] != b[i]), 0)
+            failures.append("dac: sample %d byte %d differs: native %02X reference %02X" % (key, first, a[first] if a else 0, b[first] if b else 0))
             continue
-        compared += m
-        worst = max(worst, abs(len(a) - len(b)))
-        if abs(len(a) - len(b)) > tolerance_bytes:
+        compared += min(len(a) - max(0, shift), len(b) - max(0, -shift))
+        worst = max(worst, abs((len(a) - max(0, shift)) - (len(b) - max(0, -shift))))
+        if abs((len(a) - max(0, shift)) - (len(b) - max(0, -shift))) > tolerance_bytes:
             failures.append("dac: sample %d length differs by %d bytes (native %d, reference %d)" % (key, abs(len(a) - len(b)), len(a), len(b)))
     return failures, compared, worst
 
