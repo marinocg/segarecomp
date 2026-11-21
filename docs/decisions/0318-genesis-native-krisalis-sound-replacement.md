@@ -18,7 +18,7 @@ waits for that acknowledge forever (it is stuck in its sound-command wait loop: 
 2. **Three Z80 images per game, one of them the driver.** Every image epoch uploads (a) a small program shared by every game (the same signature in all five), (b) a 27-byte boot stub (revision 1 selects ROM bank 2, revisions 2/3 bank 0), (c) the driver. Only (c) faults the original path and only (c) is replaced. Its activation signature covers the reset area and the whole 5 KiB block the game copies (the code and whatever followed it in the game's ROM), so each game's driver upload has its own signature even where the code image is the same.
 3. **The 68000 stops at the acknowledge**, not at a VDP or CPU failure: the sound-command wait (`Z80_WaitIdle` of the published 68000 module) spins on the mailbox command byte; a replacement that clears it exactly when the original does lets all three games proceed.
 4. **A second, unrelated frontier then appears for revision-3 module layouts that dispatch through a jump table** (The Lion King, Boogerman): the 68000 sound module's entry (`lsl.w #2,d7 / jmp table(pc,d7.w)` over a run of `bra.w` slots) is an indexed computed jump whose index is a caller constant; the static analysis does not prove its target set and the program stops with `unresolved_indirect_target`. This is a 68000
-   discovery gap, independent of sound; it is recorded as a follow-up (SEG-151-T002) and not masked.
+   discovery gap, independent of sound; ADR 0319 (SEG-151-T002, same PR) resolves it.
 
 ## Decision 1 - one shared Krisalis core with revision descriptors, not three drivers and not a framework
 
@@ -45,13 +45,13 @@ with the same typed refusal (`sound_driver_unverified`). The record (`audio_impl
 
 Unchanged contract (ADR 0291 Decision 5): canonical versioned payload, staged restore against the guest clock, atomic commit, no chip write on restore, refusal by a program without this replacement or with another driver / version / signature. The bound of the payload (`GENESIS_Z80_NATIVE_STATE_MAX`) is raised from 4 KiB to 6 KiB (the longest effect queue of a revision-3 row); the GEMS payload is unchanged.
 
-## Decision 6 - revision 2 is analysed, not claimed
+## Decision 6 - revision 2 is implemented and verified like the others
 
-Revision 2's code is a close sibling of revision 3 (acknowledge at the end of the work as in revision 1, DAC polled only in the wait loop, no loaded-voice cache). It is not implemented here: independent verification would need a gameplay-driven reference run for it and the supplied games do not exercise it. No Sensible Soccer image is in the catalog; the automatic policy leaves those builds degraded exactly as before.
+Revision 2 is a close sibling of revision 3 (acknowledge at the end of the work as in revision 1, DAC polled only in the wait loop with a pan rewrite on every poll, no loaded-voice cache, no FM6 pan redirect): a few explicit branches of the same core. It is verified against the original driver of the local Sensible Soccer image (its own start-up traffic, plus the command traffic of a revision-3 game transplanted onto its driver and voice bank, because that game stalls on an unrelated frontier of its own). Both Sensible Soccer images are in the catalog.
 
 ## Consequences
 
-Chuck Rock and Mickey Mania run past their freezes (gameplay, input, music and samples) on the default build path; The Lion King shows its logo and starts its music and then meets the discovery frontier of fact 4. Builds of the three games take one extra pass (two in total), with the first pass's evidence as the selection record.
+Chuck Rock, Mickey Mania and The Lion King run past their freezes (gameplay, input, music and samples) on the default build path. Builds of the three games take one extra pass (two in total), with the first pass's evidence as the selection record.
 
 ## Rejected
 

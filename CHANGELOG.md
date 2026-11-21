@@ -11,8 +11,8 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 * Games that use the Krisalis (Shaun Hollingworth) Mega Drive driver ended with a degraded sound CPU and a 68000 spinning on the mailbox it never saw acknowledged (frozen title / blank screen). The build now selects, automatically, a native C11 replacement
   of the driver for a **verified uploaded image** (revisions 1 and 3; one shared core), after the original generated-native Z80 has failed and with GEMS keeping precedence for its own images. No option, no interpreter, no fallback; unlisted images are never served.
-* Chuck Rock plays its title and level 1, Mickey Mania its title and first level, both with music and PCM and with save states / rewind; The Lion King starts its music and shows its logo and then stops on an unrelated 68000 discovery frontier (recorded as a follow-up).
-  Validated against the original driver executed by an independent emulator (tools/krisalis_reference_check.py; local). Revision 2 (Sensible Soccer) is not claimed.
+* Chuck Rock, Mickey Mania and The Lion King play (title, level 1, input, music and PCM, save states / rewind); revisions 1, 2 and 3 are covered (revision 2: Sensible Soccer, sound side verified; the game itself stalls on its own frontier).
+  Validated against the original driver executed by an independent emulator (tools/krisalis_reference_check.py; local). The 68000 discovery now resolves a `lsl.w #2,Dn` / `jmp table(pc,Dn.w)` over a run of `bra.w` slots to that run (ADR 0319), which unblocked The Lion King and moved Boogerman on.
 
 ### Sound for games whose own driver rewrites its code, when the structural alternatives close it (ADR 0291 Decision 6)
 

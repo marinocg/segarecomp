@@ -41,7 +41,7 @@ reverse-engineered revision (offline, privately; no byte or disassembly is recor
 | Volume / fades | none | music + jingle attenuation | same |
 | Slides | add step, no block wrap | add 2x step, wrap `$269..$4D0` | same |
 
-Implemented and verified: **1 and 3** (the supplied games). Revision 2 is analysed and added only after it is verified independently (section 8).
+Implemented and verified: **1, 2 and 3** (Chuck Rock; Sensible Soccer; Mickey Mania, The Lion King and Boogerman). Revision 2 shares revision 3's row and cell code; it differs in the acknowledge (when the work is done), the DAC (every poll of the wait loop rewrites the FM6 pan and adds the rate; no polls inside row work), and the absence of the loaded-voice cache and of the FM6 pan redirect.
 
 ## 4. What the replacement reproduces (the contract)
 
@@ -78,4 +78,4 @@ resets the mailbox and the channel state exactly as it resets the original. The 
 
 ## 9. Limits
 
-Event-level timing, no cycle accuracy; the oracle for validation is the original driver executed by an independent emulator, not real hardware; revision 2 is not claimed unless the validation document says so; audibility of a play session is not claimed.
+Event-level timing, no cycle accuracy; the oracle for validation is the original driver executed by an independent emulator, not real hardware; audibility of a play session is not claimed.

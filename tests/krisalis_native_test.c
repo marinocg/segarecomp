@@ -316,6 +316,42 @@ static void test_cell_commands_rev3(void) {
   free(f);
 }
 
+/* revision 2: the acknowledge comes when the work is done (like revision 1), and every DAC poll rewrites the FM6 pan before the byte */
+static void test_revision_2(void) {
+  Fixture *f = fx_new(2u);
+  Reg r[200];
+  size_t n, base, i;
+  unsigned bytes = 0u, pans = 0u;
+  const uint8_t cell[12] = {0};
+  run_to(f, MS(50));
+  send_at(f, MS(50), 1u, cell);
+  run_to(f, MS(50) + 40u * 15u);
+  CHECK(*mbox(f, 0) != 0u, "rev 2 has not acknowledged a command it has only just seen");
+  run_to(f, MS(60));
+  CHECK(*mbox(f, 0) == 0u, "rev 2 acknowledges when the work is done");
+  for (i = 0; i < 20u; ++i) f->rom[(2u << 15) + 0x10u + i] = (uint8_t)(i * 5u);
+  *mbox(f, 0x10) = 0x10u; *mbox(f, 0x11) = 0x80u; *mbox(f, 0x12) = 0x80u; *mbox(f, 0x14) = 20u; *mbox(f, 0x42) = 2u; *mbox(f, 0x3E) = 0x80u;
+  (void)krisalis_native_run_to(&f->driver, MS(70));
+  krisalis_native_suspend(&f->driver, MS(70));
+  *mbox(f, 0x16) = 1u;
+  krisalis_native_resume(&f->driver, MS(70));
+  base = f->count;
+  run_to(f, MS(90));
+  n = registers(f, base, r, 200);
+  CHECK(f->bank == 2u, "the sample's bank is selected");
+  for (i = 0; i < n; ++i) {
+    if (r[i].part == 1u && r[i].reg == 0xB6u && r[i].value == 0x80u) ++pans;
+    if (r[i].part == 0u && r[i].reg == 0x2Au) {
+      CHECK(bytes < 8u && r[i].value == (uint8_t)(f->rom[(2u << 15) + 0x10u + 8u + bytes] + 0x80u), "rev 2 DAC byte %u", bytes);
+      ++bytes;
+    }
+  }
+  CHECK(bytes == 8u, "8 DAC bytes (got %u)", bytes);
+  CHECK(pans > bytes, "every poll rewrites the FM6 pan (the SFX pan $80), %u pan writes for %u bytes", pans, bytes);
+  CHECK(*mbox(f, 0x38) == 0u, "the SFX flag is clear after the sample");
+  free(f);
+}
+
 static void test_state(void) {
   Fixture *a = fx_new(3u), *b = fx_new(3u);
   uint8_t payload[KRISALIS_NATIVE_STATE_MAX_BYTES];
@@ -379,6 +415,7 @@ int main(void) {
   g_test = "test_dac_sample"; test_dac_sample();
   g_test = "test_faults_and_hold"; test_faults_and_hold();
   g_test = "test_cell_commands_rev3"; test_cell_commands_rev3();
+  g_test = "test_revision_2"; test_revision_2();
   g_test = "test_state"; test_state();
   g_test = "test_catalog"; test_catalog();
   if (g_failures != 0) { fprintf(stderr, "%d failure(s)\n", g_failures); return 1; }

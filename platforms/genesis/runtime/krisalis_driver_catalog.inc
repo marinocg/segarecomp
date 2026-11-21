@@ -10,8 +10,8 @@
  */
 KRISALIS_CATALOG_REVISION(1)
 KRISALIS_VERIFIED_IMAGE("krisalis", "1", "reference_checked", "cb738bcff6f8d61e6144aa4bf0be8e105a02eee9d3aef9a137d25c7f0c4ad774")
-KRISALIS_VERIFIED_IMAGE("krisalis", "3", "build_qualified", "ea33c5f08477725778c9b524fd0d432fc7e1a0ef3fb1b372713e6419a86b4a1c")
+KRISALIS_VERIFIED_IMAGE("krisalis", "3", "reference_checked", "ea33c5f08477725778c9b524fd0d432fc7e1a0ef3fb1b372713e6419a86b4a1c")
 KRISALIS_VERIFIED_IMAGE("krisalis", "3", "reference_checked", "6b424b975219d64a0d1416760184abb49df13491b3765a6d109e963887d7e04a")
-KRISALIS_VERIFIED_IMAGE("krisalis", "3", "build_qualified", "c164e951bfa7ea9888b805595c15317dcdaacf822e43f5e4eb6eabf5e780b7bb")
+KRISALIS_VERIFIED_IMAGE("krisalis", "3", "reference_checked", "c164e951bfa7ea9888b805595c15317dcdaacf822e43f5e4eb6eabf5e780b7bb")
 KRISALIS_VERIFIED_IMAGE("krisalis", "2", "reference_checked", "399f60f93ba48e828dd70e00b73c5b8fd985a4918ba9863d5d9039067f0782a6")
 KRISALIS_VERIFIED_IMAGE("krisalis", "2", "build_qualified", "79c62b95b5853cf0e26dff0a01e1f12740464e77cc378549142a3db749ca2bf1")
