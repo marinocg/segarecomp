@@ -144,6 +144,7 @@ void run_matrix(const Scenario &sc, const Aspect &asp, int ai, Timing timing, Ta
     const bool one_sided = left == 0 || left == 2 * side;
     check(v.scenario == want || (one_sided && v.scenario == "PASS" && want != "PASS"), std::string("expected ") + want + ": " + what);
     check(v.rows_unexplained == 0, std::string("every difference is attributed: ") + what);
+    if (timing == Timing::Exact) check((v.uncovered == 0) == v.feasible, std::string("a feasible builder represents every requested cell, an infeasible one does not: ") + what);
     if (v.scenario == "PASS") { ++t.pass; check(v.digest1 == v.digest2 && v.rows_differ == 0, std::string("PASS means identical surfaces: ") + what); }
     else { ++t.limit; check(v.rows_differ > 0 && v.digest1 != v.digest2, std::string("a claimed limit fails deterministically: ") + what); }
   }
@@ -162,6 +163,81 @@ void cost_report() {
         check(v.words <= 4U * segarecomp::scenery::kWordsMax && v.abi1_calls > v.words, std::string("windows are bounded and cheaper than per-pixel provider calls: ") + id + " " + asp.name);
       }
     }
+}
+
+// ---- the interval cover (the column-slicing fallback of the builder), tested against an independent checker ----------------------------------------------------------------------------------------
+using Iv = std::pair<long, long>;
+// Independent of cover_columns: does the union of `windows` (each exactly `cap` wide) contain every integer of every interval, are the windows within the cap and is there no window beyond the need?
+bool covers(const std::vector<Iv> &intervals, const std::vector<Iv> &windows, long cap) {
+  for (const Iv &w : windows) if (w.second - w.first + 1 != cap) return false;
+  for (const Iv &iv : intervals)
+    for (long c = iv.first; c <= iv.second; ++c) {
+      bool in = false;
+      for (const Iv &w : windows) in = in || (c >= w.first && c <= w.second);
+      if (!in) return false;
+    }
+  return true;
+}
+// The defective algorithm the review found (one slice per input interval, however wide the interval is), kept only to prove the checker and the regression detect it.
+std::vector<Iv> faulty_cover_columns(std::vector<Iv> intervals, long cap) {
+  std::vector<Iv> out;
+  std::sort(intervals.begin(), intervals.end());
+  long covered_to = 0; bool have = false;
+  for (const Iv &p : intervals) {
+    if (have && p.second <= covered_to) continue;
+    const long start = (have && p.first <= covered_to) ? covered_to + 1 : p.first;
+    out.push_back({start, start + cap - 1});
+    covered_to = start + cap - 1; have = true;
+  }
+  return out;
+}
+void cover_tests() {
+  const long cap = 128;
+  struct Case { const char *name; std::vector<Iv> iv; size_t want; } cases[] = {
+      {"shorter than the cap", {{10, 100}}, 1},
+      {"exactly the cap", {{-64, 63}}, 1},
+      {"one over the cap needs two windows", {{0, 128}}, 2},
+      {"169 columns (the 672 px right extension at a constant scroll) need two windows", {{43, 211}}, 2},
+      {"three windows", {{0, 300}}, 3},
+      {"exactly two caps", {{5, 260}}, 2},
+      {"overlapping intervals merge", {{0, 100}, {50, 150}, {120, 200}}, 2},
+      {"adjacent intervals merge", {{0, 63}, {64, 127}}, 1},
+      {"disjoint intervals", {{0, 10}, {1000, 1010}, {-500, -490}}, 3},
+      {"disjoint intervals, one wide", {{0, 10}, {1000, 1200}}, 3},
+      {"contained interval adds nothing", {{0, 200}, {20, 30}}, 2},
+      {"no interval", {}, 0},
+  };
+  for (const Case &c : cases) {
+    const std::vector<Iv> out = cover_columns(c.iv, cap);
+    check(out.size() == c.want, std::string("minimum number of windows: ") + c.name);
+    check(covers(c.iv, out, cap), std::string("every column of every interval is covered: ") + c.name);
+    for (size_t i = 1; i < out.size(); ++i) check(out[i].first > out[i - 1].second, std::string("windows do not overlap: ") + c.name);
+  }
+  check(cover_columns({{0, 10}}, 0).empty(), "cap 0 (the plane has too many cell rows for any window) yields no window");
+  // the defect: one interval of 169 columns got a single window
+  const std::vector<Iv> wide = {{43, 211}};
+  check(!covers(wide, faulty_cover_columns(wide, cap), cap), "the checker detects the defective one-slice-per-interval cover");
+  check(covers(wide, cover_columns(wide, cap), cap), "the corrected cover represents the 169-column interval");
+}
+
+void wide_placement_tests() {
+  // 320 px picture, planned side 672 (1344 extra columns), constant hscroll -300: the one-sided right extension is 168 plane cells, the left-only one the same; both need two windows and, with only two
+  // windows allowed, every requested cell must be represented (a passing case means no cell is missing, not only that pixels agree).
+  Spec s; s.id = "wide-constant";
+  set_plane(s, 0, [](int) { return -300; }); set_plane(s, 1, [](int) { return -300; });
+  for (const int left : {0, 1344, 672, 336}) {
+    const Verdict v = run_case(s, 672, left, Timing::Exact);
+    std::printf("PARITY wide-constant side=672 left_px=%d: %s (uncovered %u, windows %u+%u, needed %u+%u)\n", left, v.scenario.c_str(), v.uncovered, v.windows[0], v.windows[1], v.needed[0], v.needed[1]);
+    check(v.scenario == "PASS" && v.uncovered == 0 && v.feasible, std::string("672 px per side, constant scroll, every requested cell represented: left_px=") + std::to_string(left));
+    check(v.needed[0] >= 1 && v.needed[0] <= 2 && v.needed[1] >= 1 && v.needed[1] <= 2, "needed window count is the true minimum (1 or 2)");
+    if (left == 0 || left == 1344) check(v.needed[0] == 2 && v.needed[1] == 2, "a 168-column one-sided extension needs two windows");
+  }
+  // more windows needed than may be submitted: the count is still exact and the shortfall is reported as a limit, never as a PASS
+  Spec t; t.id = "wide-three";
+  set_plane(t, 0, [](int) { return -300; }); set_plane(t, 1, [](int r) { return ((r / 8) & 1) != 0 ? 500 : -500; });
+  const Verdict v3 = run_case(t, 672, 0, Timing::Exact);
+  std::printf("PARITY wide-three side=672 left_px=0: %s (uncovered %u, needed %u+%u)\n", v3.scenario.c_str(), v3.uncovered, v3.needed[0], v3.needed[1]);
+  check(v3.needed[1] >= 3 && !v3.feasible && v3.uncovered > 0 && v3.scenario == "LIMIT:window", "three windows needed, two submitted: exact count, limit, cells missing");
 }
 
 void placement_errors() {
@@ -203,6 +279,8 @@ int main() {
       run_matrix(sc, kAspects[ai], ai, Timing::Exact, exact);
       run_matrix(sc, kAspects[ai], ai, Timing::Predicted, predicted);
     }
+  cover_tests();
+  wide_placement_tests();
   placement_errors();
   maximum_side();
   cost_report();

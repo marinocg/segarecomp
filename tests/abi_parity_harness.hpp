@@ -172,6 +172,28 @@ struct Built {
   unsigned total_words = 0;
 };
 
+// Minimum cover of the union of closed integer intervals by windows of exactly `cap` columns (the greedy cover from the left is optimal). Every interval is covered completely, however many windows that takes;
+// overlapping and adjacent coverage is merged (a window starts at the leftmost uncovered column); `cap < 1` (no window can hold even one full-height column) yields no window, which the caller reports as infeasible.
+inline std::vector<std::pair<long, long>> cover_columns(std::vector<std::pair<long, long>> intervals, long cap) {
+  std::vector<std::pair<long, long>> out;
+  if (cap < 1) return out;
+  std::sort(intervals.begin(), intervals.end());
+  long covered_to = 0;
+  bool have = false;
+  for (const auto &p : intervals) {
+    if (p.second < p.first || (have && p.second <= covered_to)) continue;
+    long start = (have && p.first <= covered_to) ? covered_to + 1 : p.first;
+    for (;;) {
+      out.push_back({start, start + cap - 1});
+      covered_to = start + cap - 1;
+      have = true;
+      if (covered_to >= p.second) break;
+      start = covered_to + 1;
+    }
+  }
+  return out;
+}
+
 struct CellSpan { long cy, c0, c1; bool left; };
 
 inline bool fits(long cols, long rows) {
@@ -240,30 +262,23 @@ inline void build_plane(const Spec &s, const Scene &sc, unsigned plane, int side
       }
     }
   }
-  // Column slicing: full-height windows of at most min(128, 4096 / rows) columns covering the union of every span. The greedy cover from the left is optimal for intervals, so `needed` is the minimum
-  // number of such windows; two of them are a feasible partition (the host answers a cell from the first window that contains it, so a span may straddle two windows).
+  // Column slicing: full-height windows of at most min(128, 4096 / rows) columns covering the union of every span (`cover_columns`). The greedy cover from the left is optimal for intervals, so
+  // `needed` is the minimum number of such windows; two of them are a feasible partition (the host answers a cell from the first window that contains it, so a span may straddle windows).
   {
-    long ymin = 0, ymax = -1, cap = static_cast<long>(segarecomp::scenery::kColsMax);
+    long ymin = 0, ymax = -1;
     for (const CellSpan &sp : spans) { if (ymax < ymin) { ymin = ymax = sp.cy; } ymin = std::min(ymin, sp.cy); ymax = std::max(ymax, sp.cy); }
-    if (ymax >= ymin) cap = std::min(cap, static_cast<long>(segarecomp::scenery::kWordsMax) / (ymax - ymin + 1));
+    const long rows = ymax - ymin + 1;
+    const long cap = ymax >= ymin && rows <= static_cast<long>(segarecomp::scenery::kRowsMax) ? std::min(static_cast<long>(segarecomp::scenery::kColsMax), static_cast<long>(segarecomp::scenery::kWordsMax) / rows) : 0L;
     std::vector<std::pair<long, long>> iv;
     for (const CellSpan &sp : spans) iv.push_back({sp.c0, sp.c1});
-    std::sort(iv.begin(), iv.end());
+    const std::vector<std::pair<long, long>> cols = cover_columns(iv, cap);
     std::vector<Rect> slices;
-    long covered_to = 0; bool have = false;
-    for (const auto &p : iv) {
-      if (have && p.second <= covered_to) continue;
-      const long start = (have && p.first <= covered_to) ? covered_to + 1 : p.first;
-      Rect r{ymin, ymax, start, start + cap - 1, true};
-      slices.push_back(r);
-      covered_to = r.c1; have = true;
-    }
+    for (const auto &c : cols) slices.push_back(Rect{ymin, ymax, c.first, c.second, true});
     out.needed[plane] = static_cast<int>(slices.size());
     if (!chosen.empty()) out.needed[plane] = std::min(out.needed[plane], static_cast<int>(chosen.size()));
-    if (chosen.empty() && slices.size() <= 2 && !spans.empty()) chosen = slices;
-    else if (chosen.empty() && !spans.empty()) {   // more than two windows needed: the best the provider can do is the first two slices (the rest is unanswered)
-      out.feasible[plane] = false;
-      chosen = {slices[0], slices[1]};
+    if (chosen.empty() && !spans.empty()) {
+      if (slices.size() <= 2) chosen = slices;
+      else { out.feasible[plane] = false; chosen = {slices[0], slices[1]}; }   // a true representation limit: more windows than the contract allows; the best a provider can do is the first two
     }
   }
   for (size_t n = 0; n < chosen.size() && n < 2; ++n) {
@@ -324,6 +339,7 @@ struct Verdict {
   std::string scenario;   // PASS or the (single) LIMIT class of the differing rows; "PROVIDER_ERROR:placement" when the builder used another placement than it declared
   unsigned rows_differ = 0, rows_window = 0, rows_fallback = 0, rows_condition = 0, rows_unexplained = 0;
   unsigned windows[2] = {0, 0}, words = 0, needed[2] = {0, 0};
+  unsigned uncovered = 0;   // requested (plane, line, plane cell) triples outside every submitted window, counted independently of the pixels
   unsigned abi1_calls = 0, abi2_calls = 0;   // scenery_word calls of the producer: the ABI 1 provider answers each in its own code, the ABI 2 host answers them from <= `words` window words
   bool feasible = true;
   uint64_t digest1 = 0, digest2 = 0;
@@ -368,6 +384,20 @@ inline Verdict run_case(const Spec &s, int side, int left_px, Timing timing, int
   v.words = built.total_words; v.abi1_calls = ref.cells; v.abi2_calls = twin.cells;
   if (a.rc != 0 || b.rc != 0 || a.pitch != b.pitch || a.surface.size() != b.surface.size()) { v.scenario = "HARNESS_ERROR"; return v; }
   v.digest1 = surface_digest(a); v.digest2 = surface_digest(b);
+  for (unsigned plane = 0; plane < 2; ++plane)
+    for (int r = 0; r < H; ++r) {
+      const long cy = floor8(static_cast<long>(r) + s.vs[plane]);
+      for (int sidef = 0; sidef < 2; ++sidef) {
+        const int px = sidef == 0 ? left_px : 2 * side - left_px;
+        if (px <= 0) continue;
+        const Span sp = sidef == 0 ? left_span(s.hs[plane][r], px) : right_span(s.hs[plane][r], px);
+        for (long c = sp.c0; c <= sp.c1; ++c) {
+          bool in = false;
+          for (const auto &w : twin.windows[plane]) if (w.present && c >= w.x0 && c < w.x0 + static_cast<long>(w.cols) && cy >= w.y0 && cy < w.y0 + static_cast<long>(w.rows)) in = true;
+          if (!in) ++v.uncovered;
+        }
+      }
+    }
   std::map<std::tuple<unsigned, long, long>, CellTruth> truth;
   bool truth_built = false;
   for (int r = 0; r < H; ++r) {

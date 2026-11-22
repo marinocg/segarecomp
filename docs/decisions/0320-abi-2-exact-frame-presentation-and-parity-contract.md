@@ -31,6 +31,19 @@ A provider that **requires** the capability `frame.vdp` (ABI 2 catalogue id 3) i
 - an immutable `SegaGenesisFrameView` (Decision 4) carries raster N: frame-start VRAM, the per-line registers, CRAM and VSRAM, the picture size, the planned side;
 - everything the callback submits (scenery windows, overlays, virtual sprites, `view_left`, the refusal call) is consumed by the **same producer invocation that called it**: there is no `+ 2` epoch binding and no stale-frame hazard to reason about, because there is no frame between submission and use.
 
+**When the exact-frame callback runs (it is the producer seam, not the widescreen extension, that triggers it).** The trigger is "the extension producer is invoked for this frame and reaches the provider hook with a requested component and a valid RAM copy", exactly the condition under which an ABI 1 `prepare` is called today (`vdp_render.c`; ADR 0315 makes the producer run for a verified-HUD provider even when nothing of the extension is shown). The host's geometry ownership and every earlier behaviour are unchanged. Therefore:
+
+| Situation | Callback runs? | What it sees / what is honoured |
+|---|---|---|
+| Widescreen with extension columns | yes, once per produced frame | `view->side` = the planned margin; HUD, sprites, scenery windows, `view_left` honoured as today |
+| Original | yes, when the producer runs for a verified-HUD provider (`extension_shown` = 0) | `view->side` = 0; HUD and indicator content honoured; scenery windows and `view_left` are ignored (there is no extension to fill or place; the host's geometry is untouched) |
+| Exact 4:3 | yes, as Original | the native 4:3 picture, `view->side` = 0, HUD honoured as ADR 0315 specifies; no placement |
+| Failed extension production (the producer returns before the provider hook: target too small, invalid plan, native geometry) | no | the frame is generic, as for ABI 1 where `prepare` is not reached |
+| Skipped presentation (the producer is not requested for the frame and no verified-HUD provider needs it) | no | nothing is submitted, nothing carries |
+| First frame after restore or rewind (no valid previous-onset RAM copy: `compat_ram_valid` false) | no | generic frame, reason `STALE_STATE` (host-originated), as ABI 1 |
+
+"No widescreen extension" is never taken to mean "no callback": the callback is skipped only where ABI 1 would not have called `prepare` either. Tests are in Decision 11 (T003).
+
 Option B (rejected): an additive presentation phase, `SEGA_MOD_PHASE_PRESENT`, delivered through the existing `phase` callback to providers that opt in, with the ordinary `render` unchanged.
 
 | Dimension | Option A: exact-frame `render` at the seam | Option B: additive `present` phase |
@@ -78,7 +91,12 @@ Contract (each a testable requirement):
 - **R3 serialization versus invalidation.** The host invalidates, never carries, anything it staged; a provider's own state is whatever `state.mod` saved. A cache is **invalidated** (cleared) on restore, rewind and `reset`, and rebuilt on demand; essential state is **serialized**. Existing `state.mod` providers stay compatible (the state schema is the provider's own).
 - **R4 nothing previously supported disappears.** A frame that ABI 1 would present must still be presented after restore or rewind. If a cache is essential to exact output, the provider must specify its lifecycle: preserved through `state.mod`, or reconstructible from the exact-frame view and RAM copy alone.
 
-Application to the named providers (read from the CURRENT provider code, not comments): Sonic 2 keeps `g_prev_level` and `g_hud_frame` (the HUD label frame held through the restart fade) across frames; Sonic 3 & Knuckles keeps `g_prev_kx[l]/g_prev_ky[l]` (registration seeds feed tie-break scores in `bg_register`). Today these are updated in `prepare`, that is, only on frames where the producer ran, so they already violate R2 (iii) in ABI 1 (output could differ between a run with presentation and a run without). Neither is a harmless cache. SEG-152-T010 and T011 must resolve each by one of: derive the value from the exact-frame view and RAM copy alone (no history), maintain it in `frame-end` from guest state, or serialize it in `state.mod`; and prove the port's output with the state cleared at every frame equals the ABI 1 output. The ADR does not prescribe which; it prescribes the invariant and the test (`abi_parity_state_test`, T008).
+**Two classes, two different tests (they are not interchangeable).**
+
+- *Pure cache.* Test: output with the cache **cleared before every presented frame** is byte-identical to output with it warm, and clearing it on restore/rewind changes nothing. A cache that passes may be invalidated freely.
+- *Essential cross-frame state* (state that decides what a later frame shows and that no single exact-frame view reconstructs). It **cannot** be discarded to "prove" ABI 1 equality: it must be maintained from a phase that runs for every frame (for example `frame-end`) or serialized through `state.mod`, and the test is **uninterrupted-run equality**: the frames presented after a skipped-presentation stretch, after a save/load and after a rewind are byte-identical to the frames of an uninterrupted run, while guest, native-picture and audio digests are identical with presentation on, off and toggled (R1).
+
+Application to the named providers (read from the CURRENT provider code, not comments): Sonic 2 keeps `g_prev_level` and `g_hud_frame` (the HUD label frame held through the restart fade, a value the game last really built) and Sonic 3 & Knuckles keeps `g_prev_kx[l]/g_prev_ky[l]` (registration seeds that feed tie-break scores in `bg_register`). Today they are updated in `prepare`, only on frames where the producer ran, so they already violate R2 (iii) in ABI 1: a run with presentation and a run without can differ. SEG-152-T010 and T011 must **first classify** each such item with evidence (it is a pure cache only if clearing it before every presented frame reproduces the ABI 1 output; otherwise it is essential), then apply the matching test above. The ADR does not prescribe the implementation: derive from the view and RAM copy alone, maintain in `frame-end` from guest state, or serialize in `state.mod` are all acceptable. The acceptance goal stays exact ABI 1 parity; a state whose ABI 1 behaviour is itself presentation-dependent (above) is reported as such, with the chosen deterministic behaviour, for operator approval.
 
 `frame-end(N)` runs before the exact-frame `render(N)` but the latter reads RAM of the end of N - 1: state a provider derives at `frame-end(N)` from the live RAM refers to frame N + 1's picture, not N. A provider keeps at most one extra frame of such state or reads everything from the RAM copy; the host documents this in `mod-execution-phases.md` section 2.
 
@@ -94,14 +112,15 @@ typedef struct SegaGenesisFrameView {
   uint32_t side;                /* the per-side extension margin this frame is produced with; 0 = none (Original, 4:3) */
   uint32_t requested;           /* component bitmask the host asked for: HUD 1, SPRITES 2, SCENERY 4 */
   const uint8_t *work_ram;      /* 65536 bytes, NULL unless frame.work_ram is granted: the same copy read() serves */
-  const uint8_t *vram;          /* 65536 bytes: VRAM at the frame's first line (host-owned copy) */
+  uint32_t flags;               /* SEGA_GEN_FRAME_VRAM_FRAME_START (1): `vram` is the frame-start state (journaled frame); 0: the producer's own end-of-frame VRAM, see below */
+  const uint8_t *vram;          /* 65536 bytes, host-owned copy, never NULL when frame.vdp is granted */
   const SegaGenesisFrameLine *lines; /* per-line registers, CRAM, VSRAM */
   uint32_t line_count;          /* <= 224 */
-  uint32_t reserved[8];
+  uint32_t reserved[7];
 } SegaGenesisFrameView;
 ```
 
-- Host-owned copy, **no pointer to live guest memory**: `vram` points at the producer's own frame-start copy (`raster->vram_start`), `lines` at the frame's captured raster lines, `work_ram` at the scheduler's previous-onset copy. Mutating the guest after the callback cannot change them (test in T003). `vram` is NULL and the frame is **declined** (the callback is not called; the generic picture is presented and the existing extension flag `GENESIS_EXT_FLAG_NO_VRAM_JOURNAL` records why) when the host has no journaled VRAM for the frame: ABI 1 hands out the *live* VRAM pointer in that case; ABI 2 copies or declines, and declines, because a provider that verifies identity against frame-start state would be misled by a live pointer and the producer already withholds authored credit for such frames (`GENESIS_EXT_FLAG_NO_VRAM_JOURNAL`). `work_ram` and `vram`/`lines` are gated independently: `frame.work_ram` gates the former, `frame.vdp` the rest.
+- Host-owned copy, **no pointer to live guest memory**: `vram` is a host-owned copy of the frame-start VRAM (`raster->vram_start`) for a journaled frame (see below for a non-journaled one), `lines` at the frame's captured raster lines, `work_ram` at the scheduler's previous-onset copy. Mutating the guest after the callback cannot change them (test in T003). **A frame without a VRAM journal is NOT declined.** Verified by `genesis_native_compat_tests` (`non_journaled_frame`): for such a frame ABI 1 still calls the provider, still delivers its HUD, hands it the producer's own end-of-frame VRAM (not `raster->vram_start`) and withholds only the authored-scenery credit (`GENESIS_EXT_FLAG_NO_VRAM_JOURNAL`, `vdp_render.c`: `cf.vram = journaled ? raster->vram_start : vram`). Declining the callback wholesale would drop HUD frames ABI 1 draws. The contract is therefore: the view's `vram` is always a **host-owned copy** (64 KiB copied once per such frame, never the producer's or the guest's live buffer), and `flags` says honestly which state it is: `SEGA_GEN_FRAME_VRAM_FRAME_START` set = the frame-start copy (journaled frame), clear = the producer's end-of-frame VRAM, **not** a frame-start snapshot (nothing is fabricated: no data exists that could establish one). A provider that needs frame-start state for an identity check declines (`decline`, `BAD_STATE`) when the flag is clear, exactly as the ABI 1 providers already do when their scroll check disagrees; a provider that only draws art from tiles (the HUD) may proceed, as it does under ABI 1. The producer's provenance accounting is unchanged: authored scenery credit and authored rows stay withheld for such a frame whatever the callback submits. `work_ram` and `vram`/`lines` are gated independently: `frame.work_ram` gates the former, `frame.vdp` the rest.
 - `read()` in the exact-frame callback: `SEGA_GEN_SPACE_M68K_WORK_RAM` reads the previous-onset copy (the same bytes as `view->work_ram`; the declared-range rules are unchanged). The VDP spaces keep returning `SEGA_MOD_E_SPACE` in every phase: the view is the only VDP access (one access path, not two).
 - Per-line data is registers 24 x u16, CRAM 128 B, VSRAM 80 B for up to 224 lines (the existing `GenesisCompatLine`).
 
@@ -127,13 +146,19 @@ Implemented by SEG-152-T005; the design:
 
 Implemented by SEG-152-T006.
 
-- A new non-fault call `decline(uint32_t components, uint32_t reason)` on `SegaGenesisRenderApi` declines the named components (`HUD 1, SPRITES 2, SCENERY 4`) with a reason from a fixed bounded vocabulary equal to ABI 1's: `UNSUPPORTED_SCENE`, `BAD_SCROLL`, `MISMATCH`, `BAD_STATE`, `STALE_STATE`. It returns `SEGA_MOD_OK`, never faults, and is mapped by the adapter onto `GenesisCompatDecision.accepted / reason` and the viewer's extension diagnostic exactly as an ABI 1 decline. Declined components' staged output is discarded (never half-served); calling it twice in a callback is defined: the union of the declined components, the first reason wins. No component declined and no output is the legal "nothing to add". `FAULT` and `STALE_STATE` (host-originated) are not selectable by a provider.
+- A new non-fault call `decline(uint32_t components, uint32_t reason)` on `SegaGenesisRenderApi` declines the named components (`HUD 1, SPRITES 2, SCENERY 4`). **Provider-selectable reasons** (the ABI 1 provider-owned vocabulary): `UNSUPPORTED_SCENE`, `BAD_SCROLL`, `MISMATCH`, `BAD_STATE`. **Host-originated reasons, never selectable by a provider:** `STALE_STATE` (no valid previous-onset RAM copy), `FAULT` (a callback fault or an unanswered authored cell) and the host-detected frame conditions (extension flags such as `GENESIS_EXT_FLAG_NO_VRAM_JOURNAL`). A provider that passes a host-originated or unknown reason, or an empty or unknown component mask, makes an invalid call: a `range` fault. (Intended narrowing of ABI 1, whose `prepare` could write any number: a provider must not impersonate a failure only the host can observe.) The call returns `SEGA_MOD_OK`, never faults for a valid argument, and is mapped by the adapter onto `GenesisCompatDecision.accepted / reason` and the viewer's extension diagnostic exactly as an ABI 1 decline. Declined components' staged output is discarded (never half-served); calling it twice in a callback is defined: the union of the declined components, the first reason wins. No component declined and no output is the legal "nothing to add".
 - Already non-fault today (verified, only documented): no output means not served; a plane without a window is generic (ADR 0314); an unanswered cell inside a window plane is a generic cell plus a failed authored claim (ADR 0313).
 - Faults remain: an invalid range, a wrong phase, a capability violation, an over-budget or malformed bitmap. A fault discards the callback's output and disables the mod (`E_MOD_FAULT`). An unsupported scene never disables the mod.
 
 ## Decision 8: scenery
 
-Adopt the disposition recorded by SEG-152-T001 unchanged: **`T007_NOT_REQUIRED`**. The two-window, 128 x 64-cell, 4096-word bounded windows express every ABI 1 scenery shape the three production providers exercise under the exact-frame timing; the shapes that the windows cannot express (a per-line fallback, an origin multiple or a raster condition that changes inside one plane cell row) are classified as representation limits with failing fixtures but do not occur in the measured scenes; they are watched by the T008 differential and re-open T007 only with new failing evidence (see the sufficiency document).
+Adopt the disposition recorded by SEG-152-T001 **with its scope**, and keep the three claims apart ([sufficiency](../architecture/widescreen-scenery-window-sufficiency.md)):
+
+1. *Geometry sufficiency* holds: two bounded windows (with column slicing) cover every plane cell the measured scenes ask for at 16:9, 21:9 and 32:9, and by the 10-bit-scroll bound any scene up to 1024 px total width.
+2. *Answer representability* does not hold in general: the real Sonic 2 provider (Emerald Hill Zone 1) asks the same plane coordinate with a fallback line and an authored line giving different answers in half of its accepted frames, and even an ideal window differs from the ABI 1 frame in up to two pixel rows. The disposition is **`T007_REQUIRED`**, limited to the **per-line fallback class**, with the minimal design **a per-row generic flag per plane**. Sonic 3 & Knuckles Angel Island Zone 1 has zero conflicts in 1032 accepted frames. The origin-multiple and raster-condition classes have synthetic failing fixtures only and are not implemented.
+3. *Production coverage*: unresolved gates are recorded: Sonic 1 (the provider did not accept a scene of the available image), Sonic 2 revision 1, Sonic 3 & Knuckles zones other than Angel Island Zone 1. They can widen T007 only on a concrete failing real-provider comparison.
+
+The canonical T007 resolution step (full refinement after F31 merges, before F32 starts) therefore promotes T007 to `ready` with this scope; it does not cancel it.
 
 ## Decision 9: ADR 0315 preservation (asymmetric viewport)
 
@@ -166,12 +191,16 @@ Decision: **an additive manifest field `abi.minor`** (integer, default 0), plus 
 | opt-in (`frame.vdp` required) works; optional `frame.vdp` is `E_CAPABILITY_INCONSISTENT`; never called twice per frame; frame number | `genesis_mod_exact_frame_tests`, `mod_exact_frame_abi2_test.py` | T003 |
 | existing providers unchanged (non-opting ABI 2 provider and Luau script: identical overlay/scenery/sprite digests and callback frame numbers) | `genesis_mod_exact_frame_tests` golden cases | T003 |
 | no-live-pointer rule: views are host-owned copies, mutated guest after the callback does not change them, accessor NULL outside the callback, invalid phase use is `SEGA_MOD_E_PHASE` and a fault | `genesis_mod_exact_frame_tests` immutability case | T003 |
-| R1/R2/R3: guest, native and audio digests identical with presentation on, off, skipped and at different aspects; essential state survives save/load and rewind; pure cache cleared equals warm; a presentation-time write to essential state is detected | `genesis_mod_exact_frame_tests` (R1, R3), `abi_parity_state_test` (R2, R4; extends `abi_parity_harness.hpp`) | T003, T008 |
+| R1/R3: guest, native and audio digests identical with presentation on, off, skipped and at different aspects; a presentation-time write to essential state is detected | `genesis_mod_exact_frame_tests` | T003 |
+| R2/R4, pure cache: cleared before every presented frame equals warm, invalidation on restore changes nothing | `abi_parity_state_test` (cache arm; extends `abi_parity_harness.hpp`) | T008, T010, T011 |
+| R2/R4, essential state: frames after skipped presentation, save/load and rewind equal an uninterrupted run | `abi_parity_state_test` (essential arm) | T008, T010, T011 |
 | frame exactness: skipped producer call, restore, rewind, aspect change, presentation toggled leave no stale pixels, scenery, placement or sprites | `mod_exact_frame_abi2_test.py` | T003 |
 | ADR 0315 preservation (non-opting: identical; opting: placement bound to its frame, windows for another margin never reinterpreted, transitions) | `mod_view_abi2_test.py`, `mod_view_transitions_abi2_test.py` unmodified + `mod_exact_frame_abi2_test.py` | T003, T008 |
+| a frame without a VRAM journal: the provider is still called, receives a host-owned copy with `flags` clear, HUD is delivered, authored credit withheld; byte equality with the ABI 1 `prepare` input including that frame | `genesis_mod_exact_frame_tests` (non-journaled case; the ABI 1 behaviour is pinned today by `genesis_native_compat_tests`) | T003 |
+| the callback runs exactly where ABI 1 `prepare` would: Original and exact 4:3 with a verified-HUD provider (side 0, HUD honoured, windows and `view_left` ignored, geometry untouched), widescreen, and not on a failed production, a skipped presentation or the first frame after restore/rewind | `genesis_mod_exact_frame_tests` (run matrix), `mod_exact_frame_abi2_test.py` | T003 |
 | helpers equal the ABI 1 `GenesisCompatHost` for every scroll mode, both planes, interlace, out of range, NULL | `genesis_mod_vdp_helper_tests` | T004 |
 | bitmap pixel equality with ABI 1 `GenesisCompatOverlay` bytes, limits, fault, old providers unchanged | `genesis_mod_bitmap_tests`, `mod_bitmap_abi2_test.py` | T005 |
-| refusal is not a fault; reason parity with ABI 1; genuine fault disables the mod | `genesis_mod_refusal_tests`, `mod_refusal_abi2_test.py` | T006 |
+| refusal is not a fault; reason parity with ABI 1 for the provider-selectable reasons; a host-originated or unknown reason, or an empty component mask, is a `range` fault; genuine fault disables the mod | `genesis_mod_refusal_tests`, `mod_refusal_abi2_test.py` | T006 |
 | the whole twin differential, including every scenario of the scenery sufficiency harness | `abi_parity_gate_tests` (extends `abi_parity_harness.hpp`, no second harness) | T008 |
 | minor negotiation: `abi.minor = 1` refused by an older product (`E_FIELD_UNKNOWN`, simulated by the previous reader), `E_ABI_MINOR_TOO_NEW`, source/manifest/table agreement, an older provider on the extended host | `segapatch_abi_minor_tests` | T003 |
 
@@ -181,7 +210,7 @@ Decision: **an additive manifest field `abi.minor`** (integer, default 0), plus 
 |---|---|---|
 | `SEGA_MOD_ABI_MINOR` 1; manifest `abi.minor`; `SEGA_MOD_TARGET_ABI_MINOR` | `segarecomp_mod.h`, `mod_package.cpp`, the build command | Decision 10 |
 | capability `frame.vdp` (id 3) grantable; required-only | `mod_scheduler.c` `genesis_mod_scheduler_supported`, manifest check | Decision 2 |
-| `SegaGenesisFrameView`, `SegaGenesisFrameLine`, `SegaGenesisFeatures::frame` | `segarecomp_mod_genesis.h` | Decision 4; NULL outside the exact-frame callback |
+| `SegaGenesisFrameView` (incl. `flags`, `SEGA_GEN_FRAME_VRAM_FRAME_START`), `SegaGenesisFrameLine`, `SegaGenesisFeatures::frame` | `segarecomp_mod_genesis.h` | Decision 4; NULL outside the exact-frame callback |
 | `genesis_mod_scheduler_present` (exact-frame `render` at the seam) | `mod_scheduler.c/.h` | Decision 1 |
 | `SegaGenesisVdpHelpers`, `SegaGenesisFeatures::vdp` | `segarecomp_mod_genesis.h` | Decision 5 (T004) |
 | `overlay_bitmap`, `overlay_layer_bitmap`, `overlay_layer_clip`, `overlay_fallback` | `SegaGenesisRenderApi` (appended) | Decision 6 (T005) |
@@ -189,6 +218,7 @@ Decision: **an additive manifest field `abi.minor`** (integer, default 0), plus 
 
 ## Consequences
 
+- A per-row generic flag is added to the scenery contract by SEG-152-T007 (promoted by the resolution step), before the twin differential gate.
 - Stage B and C tasks implement a decided contract; the only implementation freedom is inside each decision's stated bounds.
 - A provider that wants exact-frame data pays one callback per produced frame, and nothing for frames that are not produced; presentation can therefore never feed back into the guest (R1).
 - The cost of the choice: an exact-frame provider cannot also use the predicted timing. Accepted (Decision 1); reversible by an additive phase.

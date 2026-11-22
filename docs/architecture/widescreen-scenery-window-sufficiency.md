@@ -1,6 +1,6 @@
 # Widescreen scenery window sufficiency (SEG-152-T001)
 
-Status: **measured and tested**. Disposition: **`T007_NOT_REQUIRED`**. Companion of [ADR 0320](../decisions/0320-abi-2-exact-frame-presentation-and-parity-contract.md) (decision 8) and the [parity matrix](abi2-abi1-parity.md) (row 6).
+Status: **measured and tested**. Disposition: **`T007_REQUIRED`**, scoped to the per-line fallback class (a real Sonic 2 conflict was reproduced); window geometry itself is sufficient. See "Disposition". Companion of [ADR 0320](../decisions/0320-abi-2-exact-frame-presentation-and-parity-contract.md) (decision 8) and the [parity matrix](abi2-abi1-parity.md) (row 6).
 
 ## Question
 
@@ -18,7 +18,7 @@ ABI 2 submits authored offscreen scenery as bounded name-table **windows**: at m
 | ABI 2 twin | a window **builder** (the provider model) that submits at most two windows per plane for the placement it declares, answered by `segarecomp::scenery::lookup` |
 | Digest | `row_digest` / `surface_digest`: one FNV-1a 64 over the produced RGB rows |
 | Classifier | per row either identical pixels or the class of the difference: `LIMIT:window` (a requested cell is outside every window), `LIMIT:per-line-fallback`, `LIMIT:condition-dependent`, or `UNEXPLAINED` (a harness failure). `PROVIDER_ERROR:placement` marks a builder that used another placement than the one it declared; it is never a limit and never counts toward `T007_REQUIRED` |
-| Builder strategy | one rectangle; else left | right rectangles; else a row split; else **column slicing** (full-height windows of at most `min(128, 4096 / rows)` columns covering the union of every requested span; the greedy cover is optimal, so the number of windows it reports is the minimum) |
+| Builder strategy | one rectangle; else left | right rectangles; else a row split; else **column slicing** (`cover_columns`: full-height windows of at most `min(128, 4096 / rows)` columns covering the union of every requested span completely, however many windows one interval needs; overlapping and adjacent coverage merges; the greedy cover from the left is optimal, so the count it reports is the true minimum; with more than two needed the provider submits the first two and the case is a `LIMIT:window`). The runner counts `uncovered` requested cells independently of the pixels and asserts that a builder is feasible exactly when none is uncovered |
 
 Timings: **Exact** builds the windows from the scroll the host applies to the produced frame (what the exact-frame mechanism of ADR 0320 provides); **Predicted** builds them from the scroll two frames earlier (`render(N)` feeds the frame produced when the runtime counts N + 2) and pads every span by the largest per-line displacement **without extrapolation**. The Sonic providers derive the scroll of the frame they serve from the same RAM snapshot ABI 1 uses, so "Predicted" is a lower bound for them (it is what a provider without a RAM scroll buffer could do), and a limit that exists only there never requires T007.
 
@@ -45,7 +45,7 @@ Every scenario is run at 16:9 (side 39), 21:9 (101) and 32:9 (238) over the plac
 
 `placement-error`: a builder that computed its windows for another placement than it declared (centred declared, intermediate built; right-aligned declared, left-aligned built) is classified `PROVIDER_ERROR:placement` at all three aspects and differs in the produced rows; it is excluded from every T007 tally.
 
-`672 px per side` (the maximum planned side): `constant` and `parallax-few` PASS at all four placements with two windows per plane (a plane needs 2 x 84 columns, never a window wider than 128); `parallax-interleaved` is **LIMIT:window** (the widest scroll spread plus 1344 planned columns needs three 128-column windows). The window bound only bites above a total width of 1024 pixels (about 41:9 for this picture); 32:9 is 796.
+`wide-constant` (672 px per side, constant scroll, left-only, right-only, centred and intermediate placement): PASS with every requested cell represented; a one-sided 1344-column extension is 168 plane cells and needs **two** windows (the first version of the slicer made one slice per interval and left the remainder uncovered: now fixed and pinned by `cover_tests`, which also cover one, exactly-capped, two, three, overlapping, adjacent and disjoint intervals and a three-window case where only two can be submitted). `672 px per side` (the maximum planned side): `constant` and `parallax-few` PASS at all four placements with two windows per plane (a plane needs 2 x 84 columns, never a window wider than 128); `parallax-interleaved` is **LIMIT:window** (the widest scroll spread plus 1344 planned columns needs three 128-column windows). The window bound only bites above a total width of 1024 pixels (about 41:9 for this picture); 32:9 is 796.
 
 Every claimed limit has a deterministic failing assertion in the test (the differing rows exist, the surface digests differ, and each differing row is attributed to the class); every PASS asserts identical rows and identical digests.
 
@@ -84,21 +84,49 @@ Reading: plane A (the foreground) is a single window at every aspect in all thre
 
 Provider-side work per produced frame (deterministic counts, `PARITY cost` lines of the test; centred placement): the ABI 1 provider answers every off-picture cell of both planes in its own code, one call per pixel, **34,944 / 90,496 / 213,248 calls** at 16:9 / 21:9 / 32:9; an ABI 2 provider fills at most two bounded windows per plane (**2,856 / 3,724 / 5,628 words** for a constant scroll, **4,044 / 4,940 / 9,996** for 28-band parallax, never more than 4 x 4096 = 16,384), and the host answers the same pixels by lookup in those words. The host copies the words once per submission (at most 4 x 8 KiB). The wall-clock share of the producer itself is the existing measurement of [widescreen-scenery-lookup-measurement.md](widescreen-scenery-lookup-measurement.md) (10.57% of a 60 Hz frame at 32:9 on its host, the lookup being 40% to 69% of it); the lookup is unchanged, and what an ABI 2 provider adds is bounded by the word counts above, with no per-pixel callout.
 
+## Real-provider answer-conflict experiment (the three conclusions kept apart)
+
+Three different claims were conflated in the first version of this note; they are separate here.
+
+1. **Geometry sufficiency**: can two bounded windows *cover* the plane cells a frame asks for? Established by the bound and by the measurements above, for the measured scenes and every aspect up to 32:9.
+2. **Answer representability**: does the real provider give **one** answer per plane coordinate within a frame (a window holds one word per cell)? This is a property of the provider's answers, not of the geometry, and it is what the synthetic `LIMIT:` scenarios model.
+3. **Production coverage**: which verified scenes were actually measured.
+
+Experiment (scratch, outside the repository; authorized local images; aggregate counts only): the **real, unmodified ABI 1 provider source** (`segarecomp-patches` `32eb7d4`) was compiled into the scratch runtime and driven by the real producer through a recording wrapper with the exact ABI 1 pairing (raster N, work RAM of the end of N - 1, `prepare` verdicts honoured). For one frame in 5 and the 32:9 plane (side 238) it recorded every answer by plane coordinate `(plane, floor((x - hscroll)/8), floor((line + vscroll)/8))` and counted: frames accepted or declined (and why), the provider's own `own_plane` lines and where their boundaries fall relative to plane cell rows, registered-multiple (`kx`, `ky`) changes between lines, **coordinates answered differently by different lines (conflicts)**, those involving a fallback line, and unanswered cells. For the conflicts it also produced the frame a second time through an **ideal window** (a table holding exactly the first answer per coordinate, unlimited geometry: the best any window set can do) and counted pixel rows that differ from the ABI 1 frame.
+
+| Scene (image, class) | Accepted frames | `own_plane` lines (max / frames > 0) | `own_plane` or multiple boundaries inside a plane cell row | Multiple changes | **Coordinates with two answers** (frames) | Unanswered cells | Pixel rows differing for an ideal window |
+|---|---:|---|---|---|---|---:|---|
+| Sonic 3 & Knuckles lock-on, Angel Island Zone 1, running level | 1032 | plane B: 224 / 356; plane A: 0 | 0 | 0 | **0 (0 of 1032)** | 0 | 0 |
+| Sonic 2 (World), Emerald Hill Zone 1, 1 player | 269 | not instrumented (the conflicts below were measured directly): the conflicting lines are up to 2 fallback lines and 1 authored line | not instrumented | not instrumented | **up to 34 keys, on up to 3 lines, in 136 of 269 frames, all involving a fallback line, plane A only** | 0 | **up to 2 rows, in 136 of 269 frames** |
+| Sonic 1 (USA, Europe image) | 0 (the provider declines every frame of this image; the scene scope of the image was not reachable) | not measured | not measured | not measured | not measured | not measured | not measured |
+
+Differing scroll values alone are common (Sonic 3 & Knuckles: up to 18 line boundaries per frame inside a plane cell row) and are **not** conflicts: two lines with different scroll ask different plane cells, and the world is a pure function of the world cell. A conflict needs the same plane coordinate and two answers, which in these providers means a fallback line (the VDP's own wrapped word) sharing a plane cell with an authored line.
+
+Reading:
+
+- **Sonic 3 & Knuckles, Angel Island Zone 1**: answer representability holds across 1032 accepted frames: the 356 frames with `own_plane` lines have their boundary on a cell row boundary or share no coordinate with an authored line; the registered multiples never change.
+- **Sonic 2, Emerald Hill Zone 1**: a **real, reproducible failing comparison**. In half of the accepted frames, up to three lines share a plane coordinate between a fallback line and an authored line, and even an ideal window (unbounded geometry) differs from the ABI 1 frame in up to two pixel rows. This is the synthetic `LIMIT:per-line-fallback` class occurring in a production scene.
+- **Sonic 1**: not established (see the gate below).
+
 ## Conclusion per class
 
-| Scene class | Expressible by windows? | T007 required? |
-|---|---|---|
-| Sonic 1 gameplay: foreground (constant scroll) and background parallax (up to ~100 distinct hscroll values) | yes: plane A one window, plane B two column-sliced windows, at 16:9, 21:9 and 32:9 | no |
-| Sonic 1 special stage (the VDP's own wrapped plane) | yes: the planes are left to the generic extension (ADR 0314), the answer is the VDP's word | no |
-| Sonic 2 (1 player) gameplay: foreground (2 distinct values, a status split) and parallax background (up to ~46 values) | yes: one or two windows per plane | no |
-| Sonic 3 & Knuckles gameplay: foreground constant; background with registered origin multiples and per-line `own_plane` | yes where a plane cell has one answer (every measured frame needed at most two windows); expressible only with exact-frame scroll for the pairing; **a mid-cell change of `own_plane` or of the multiple is a `LIMIT:`** | no (no such scene measured); **watched** by T008 and T011 |
-| any scene with a total planned width above 1024 px (about 41:9) | no, not with two 128-column windows | not for any production aspect; named alternative below |
-| a camera that crosses the scroll wrap under the predicted timing | no | no: exact-frame only, the limit does not exist there |
+| Scene class | Geometry | Answer representability | Production coverage | T007 |
+|---|---|---|---|---|
+| Sonic 1 gameplay | sufficient (two windows; measured, bound) | **unresolved**: the provider was not reachable on the available image; it has per-line origin offsets that can differ by multiples of 512 (the Sonic 3 & Knuckles `kx` shape) | geometry: Green Hill Zone 1 | gate (below) |
+| Sonic 1 special stage | sufficient (planes left to the generic extension) | holds (plane level) | not measured | no |
+| Sonic 2 (1 player) | sufficient | **fails** for the per-line fallback class (measured conflict) | Emerald Hill Zone 1 | **required (per-line fallback)** |
+| Sonic 3 & Knuckles | sufficient | holds in Angel Island Zone 1 (0 conflicts in 1032 frames); other zones unmeasured | Angel Island Zone 1 | not for AIZ1; the other zones fall under the gate |
+| total planned width above 1024 px | no (three windows) | n/a | not a production aspect | no |
+| a camera that crosses the scroll wrap under the predicted timing | no | n/a | exact-frame removes it | no |
 
-Smallest bounded alternatives, named so that a re-opening has a design to start from (none is implemented): a per-row generic flag for plane B (`LIMIT:per-line-fallback`); per-line spans, a window that answers only a screen-line range (`LIMIT:condition-dependent`, a multiple or condition that changes inside a plane cell row); a third window or a larger bound (`LIMIT:window` above 1024 px total).
+Smallest bounded alternatives, named so that the implementation task has a design to start from: **a per-row generic flag** per plane (a 224-bit mask: a flagged line is answered by the VDP-derived generic extension regardless of windows; this exactly expresses `own_plane` lines, the measured Sonic 2 case, with no new geometry); per-line spans (a window answering only a screen-line range) for a multiple or condition that changes inside a plane cell row, to be added only if a real comparison needs it; a third window or a larger bound above 1024 px total width.
 
 ## Disposition
 
-`T007_NOT_REQUIRED`. The windows, with column slicing and the exact-frame timing of ADR 0320, express every scenery answer of the measured Sonic 1, Sonic 2 and Sonic 3 & Knuckles scenes at 16:9, 21:9 and 32:9 and at every placement of the native picture; the three classes that are real representation limits (a per-line fallback, an origin multiple or a raster condition changing **inside one plane cell row**) have deterministic failing fixtures but no measured production scene. They are not dismissed: they are the falsifiers T008 (the twin differential) and T011 (the local old-versus-new comparison on Sonic 3 & Knuckles, the only production provider with per-line multiples and fallback) must watch, and **a difference attributed to one of them is new failing evidence that re-opens SEG-152-T007**.
+Geometry is sufficient and is **not** the open question. Answer representability is **required to be extended** for the per-line fallback class, on concrete evidence from the real Sonic 2 provider, and is **unresolved** for Sonic 1 and for Sonic 3 & Knuckles beyond Angel Island Zone 1.
 
-Provenance and limits of this evidence: the geometry was measured on sampled gameplay frames of three scenes; the real Sonic 3 & Knuckles per-line decisions were not instrumented. The synthetic harness is a model of the providers' shapes over the real producer and the production window lookup; it does not run guest code, snapshots, save/load or replay (those are the viewer tests and T008).
+`T007_REQUIRED - the per-line fallback class: real-provider comparison Sonic 2 Emerald Hill Zone 1 (conflicts in 136 of 269 accepted frames, up to 2 pixel rows differing even for an ideal window), synthetic fixture fallback-mid-cell; minimal bounded design: a per-row generic flag per plane (a 224-bit mask) in the scenery contract; the registered-multiple and raster-condition classes (origin-multiple-mid-cell, raster-condition) have synthetic failing fixtures only and stay watched, not implemented.`
+
+Unresolved gate (recorded, not silent): the Sonic 1 answer-representability measurement (needs the provider to accept a Sonic 1 scene on an available image), Sonic 2 revision 1, and Sonic 3 & Knuckles zones other than Angel Island Zone 1. Any of them can only widen T007 (for example to per-line spans); none can cancel the per-line fallback work, because that one is reproduced.
+
+Provenance and limits: the geometry was sampled (one frame in 30, one zone and act per game); the conflict experiment samples one frame in 5 of one zone and act per measured game; the synthetic harness models the providers' shapes over the real producer and the production window lookup and does not run guest code, snapshots, save/load or replay (the viewer tests and T008 do). An operator may instead accept up to two differing pixel rows in Emerald Hill Zone 1 as a recorded exception at T008/T010; that is a decision for the operator, not this note.
