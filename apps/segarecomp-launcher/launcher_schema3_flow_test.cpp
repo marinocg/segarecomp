@@ -13,6 +13,8 @@
 #include <thread>
 #include <vector>
 
+#include <SDL3/SDL.h>
+
 #include "launcher_core.hpp"
 #include "library_catalog.hpp"
 #include "patch_library.hpp"
@@ -150,6 +152,73 @@ int main(int argc, char **argv) {
     out << "vanilla=" << entry_executable(vanilla_entry).string() << "\nmod=" << entry_executable(mod_entry).string() << "\nidentity=" << installed.identity << "\n";
   }
 
+  // ---- an install made BEFORE presentation defaults existed: the next launch of the verified package brings its defaults, without a reinstall ----
+  {
+    const PatchInstall g = installed;   // the approved, built native package (its scenery fixture declares widescreen geometry and no [presentation])
+    InstalledPatch *record = entry->find_patch(g.identity);
+    expect(record != nullptr && record->widescreen == "enhanced_gameplay" && record->side_style == "raw", "a fresh install derives Enhanced + Raw from the verified geometry");
+    if (record != nullptr) {
+      const std::string identity_before = record->identity;
+      const long long installed_at = record->installed_at;
+      entry->selected_variant = g.identity;
+      const RomView built = view_for_variant(*entry, g.identity);
+      const fs::path geo_entry = mod_entry;
+      const std::string program = digest_of(entry_executable(geo_entry)), program_meta = slurp(geo_entry / "metadata.json");
+      const fs::path geo_saves = genesis_save_dir(built);
+      fs::create_directories(geo_saves);
+      { std::ofstream(geo_saves / "slot0.sav") << "mod save"; }
+      record->widescreen.clear();   // simulate the record an earlier release wrote
+      record->side_style.clear();
+      expect(catalog.save(), "the legacy library saves");
+      Catalog legacy(library / "library.json");
+      legacy.load();
+      LibraryEntry *old_entry = legacy.find_id(entry->id());
+      expect(old_entry != nullptr && old_entry->selected_variant == g.identity, "the legacy record is still selected after a reload");
+      if (old_entry != nullptr) {
+        RomView view = view_from_entry(*old_entry);
+        expect(view.luau_mod() && view.luau_approved && view.patch_widescreen.empty() && view.patch_side_style.empty(), "the view built from the legacy record has no defaults yet");
+        bool changed = false;
+        expect(prepare_variant_launch(*old_entry, view, &changed).empty() && changed, "the launch gate re-verifies the package and corrects the record");
+        expect(view.patch_widescreen == "enhanced_gameplay" && view.patch_side_style == "raw", "the corrected defaults are in the very view that launches");
+        SDL_Environment *env = SDL_CreateEnvironment(false);
+        apply_game_environment(env, view);
+        const auto get = [&](const char *k) { const char *v = SDL_GetEnvironmentVariable(env, k); return std::string(v != nullptr ? v : "<unset>"); };
+        expect(get("SEGARECOMP_PATCH_ID") == g.identity && get("SEGARECOMP_PATCH_WIDESCREEN") == "enhanced_gameplay" && get("SEGARECOMP_PATCH_SIDE_STYLE") == "raw", "the launch environment carries the identity and the defaults");
+        SDL_DestroyEnvironment(env);
+        const InstalledPatch *fixed = old_entry->find_patch(g.identity);
+        expect(fixed != nullptr && fixed->identity == identity_before && fixed->installed_at == installed_at && fixed->native_approved && fixed->widescreen == "enhanced_gameplay" && fixed->side_style == "raw" && old_entry->selected_variant == g.identity,
+               "identity, approval, timestamp and selection are preserved; only the defaults were corrected");
+        expect(legacy.save(), "the corrected library saves");
+        Catalog reloaded(library / "library.json");
+        reloaded.load();
+        const LibraryEntry *r2 = reloaded.find_id(entry->id());
+        expect(r2 != nullptr && r2->find_patch(g.identity) != nullptr && r2->find_patch(g.identity)->widescreen == "enhanced_gameplay" && r2->find_patch(g.identity)->side_style == "raw", "the corrected metadata survives a reload");
+        RomView again = view_from_entry(*r2);
+        changed = true;
+        expect(prepare_variant_launch(*old_entry, again, &changed).empty() && !changed, "a second launch changes nothing and requests no write");
+        // a tampered package never launches and never refreshes anything
+        const fs::path stored_geo = library / "patches" / (g.identity + ".segapatch");
+        const std::string good = slurp(stored_geo);
+        std::string bad = good;
+        bad[bad.size() / 2] = static_cast<char>(bad[bad.size() / 2] ^ 0x55);
+        { std::ofstream out(stored_geo, std::ios::binary | std::ios::trunc); out << bad; }
+        RomView tampered = view_from_entry(*r2);
+        tampered.patch_widescreen.clear(); tampered.patch_side_style.clear();
+        changed = true;
+        expect(!prepare_variant_launch(*old_entry, tampered, &changed).empty() && !changed && tampered.patch_widescreen.empty(), "a tampered package is refused and its defaults are not refreshed");
+        { std::ofstream out(stored_geo, std::ios::binary | std::ios::trunc); out << good; }
+      }
+      // reinstalling the identical package also refreshes a stale record (and keeps everything else)
+      record->widescreen.clear(); record->side_style.clear();
+      PatchInstall same = install_patch(*entry, native, rom_path, library, 1009, true);
+      record = entry->find_patch(g.identity);
+      expect(same.ok && !same.added && record != nullptr && record->widescreen == "enhanced_gameplay" && record->side_style == "raw" && record->installed_at == installed_at && record->native_approved, "an identical reinstall refreshes a stale record and keeps the rest");
+      expect(digest_of(entry_executable(geo_entry)) == program && slurp(geo_entry / "metadata.json") == program_meta && slurp(geo_saves / "slot0.sav") == "mod save" && entry_ready_for(geo_entry, view_for_variant(*entry, g.identity), layout),
+             "the built program, its record and the save data are untouched (presentation is not part of the build identity)");
+      { std::error_code rm; fs::remove(geo_saves / "slot0.sav", rm); }
+    }
+  }
+
   // ---- a DATA-ONLY schema 3 mod: its verified effective image is compiled as a distinct variant (no provider, no approval) ----
   {
     PatchInstall d = install_patch(*entry, data, rom_path, library, 1004, false);
@@ -238,6 +307,7 @@ int main(int argc, char **argv) {
     expect(remove_patch(*entry, l.identity, library), "removing it works");
     entry->selected_variant = installed.identity;
   }
+
 
   // ---- an oversized original image is refused BEFORE anything is read or allocated at its declared size (sparse file, far above the product's maximum image size) ----
   {

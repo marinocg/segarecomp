@@ -222,8 +222,17 @@ int main(int argc, char **argv) {
       const std::string profile = vanilla.sha256;
       expect(launch_env(view_for_variant(*entry, implicit.identity)) == implicit.identity + "|enhanced_gameplay|raw|" + profile, "the launch environment carries the identity and defaults: " + launch_env(view_for_variant(*entry, implicit.identity)));
       expect(launch_env(view_for_variant(*entry, expl.identity)) == expl.identity + "|extended_backgrounds|borders|" + profile, "the explicit defaults reach the launch environment");
-      expect(launch_env(view_for_variant(*entry, plain.identity)) == "<unset>|<unset>|<unset>|" + profile && launch_env(view_for_variant(*entry, nogeo.identity)) == "<unset>|<unset>|<unset>|" + profile, "a mod without defaults exports none");
+      expect(launch_env(view_for_variant(*entry, plain.identity)) == plain.identity + "|<unset>|<unset>|" + profile && launch_env(view_for_variant(*entry, nogeo.identity)) == nogeo.identity + "|<unset>|<unset>|" + profile, "a mod without defaults still exports its own identity (its own viewer profile) and no defaults");
       expect(launch_env(view_for_variant(*entry, "")) == "<unset>|<unset>|<unset>|<unset>", "Vanilla exports no presentation defaults and no variant profile");
+      {  // one inherited environment across switches: nothing of the previous variant survives
+        SDL_Environment *env = SDL_CreateEnvironment(false);
+        apply_game_environment(env, view_for_variant(*entry, implicit.identity));
+        apply_game_environment(env, view_for_variant(*entry, plain.identity));
+        expect(SDL_GetEnvironmentVariable(env, "SEGARECOMP_PATCH_WIDESCREEN") == nullptr && SDL_GetEnvironmentVariable(env, "SEGARECOMP_PATCH_SIDE_STYLE") == nullptr, "switching to a mod without defaults clears the previous mod's defaults");
+        apply_game_environment(env, view_for_variant(*entry, ""));
+        expect(SDL_GetEnvironmentVariable(env, "SEGARECOMP_PATCH_ID") == nullptr && SDL_GetEnvironmentVariable(env, "SEGARECOMP_PATCH_WIDESCREEN") == nullptr, "switching back to Vanilla clears the variant identity and defaults");
+        SDL_DestroyEnvironment(env);
+      }
       // a tampered stored package fails the launch refusal before any environment is used; the defaults of one package never reach another
       const fs::path stored = lib / "patches" / (implicit.identity + ".segapatch");
       const std::string good = slurp(stored);
