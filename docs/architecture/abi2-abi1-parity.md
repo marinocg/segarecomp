@@ -60,7 +60,7 @@ A window is addressed by the **plane cell the host derives from the line's real 
 
 | Open item | Owner | Gate |
 |---|---|---|
-| Sonic 2 `g_prev_level`, `g_hud_frame` and Sonic 3 & Knuckles `g_prev_kx/g_prev_ky` redesigned under ADR 0320 R2/R4 | SEG-152-T010, T011 | zero differences from ABI 1 with the state cleared every frame |
+| Sonic 2 `g_prev_level`, `g_hud_frame` and Sonic 3 & Knuckles `g_prev_kx/g_prev_ky`: classify each with evidence, then apply ADR 0320 R2/R4 (nothing is called a cache without evidence). **Pure cache**: clearing it before every presented frame must not change output (warm equals cold; invalidation on restore changes nothing). **Essential state**: preserved or reconstructed through the established lifecycle (a phase that runs for every frame, or `state.mod`); uninterrupted-run equivalence after skipped presentation, save/load and rewind, with guest/native/audio digests unchanged by presentation. Exact ABI 1 parity within the verified scope remains the goal | SEG-152-T008 (`abi_parity_state_test`, both arms), T010, T011 | each item classified with evidence; the matching arm passes; zero differences from ABI 1 within the verified scope |
 | per-row generic flag (the Sonic 2 per-line fallback conflict) | SEG-152-T007, promoted by the resolution step | the T008 differential passes for Emerald Hill Zone 1 |
 | answer-representability gate: Sonic 1, Sonic 2 revision 1, Sonic 3 & Knuckles zones other than Angel Island Zone 1 | SEG-152-T009, T010, T011 (real-provider comparison) | a conflict beyond the fallback class widens T007 with that evidence |
 | exact-frame mechanism implementation | SEG-152-T003 | ADR 0320 D1-D4, D9, D10 |

@@ -158,7 +158,7 @@ Adopt the disposition recorded by SEG-152-T001 **with its scope**, and keep the 
 2. *Answer representability* does not hold in general: the real Sonic 2 provider (Emerald Hill Zone 1) asks the same plane coordinate with a fallback line and an authored line giving different answers in half of its accepted frames, and even an ideal window differs from the ABI 1 frame in up to two pixel rows. The disposition is **`T007_REQUIRED`**, limited to the **per-line fallback class**, with the minimal design **a per-row generic flag per plane**. Sonic 3 & Knuckles Angel Island Zone 1 has zero conflicts in 1032 accepted frames. The origin-multiple and raster-condition classes have synthetic failing fixtures only and are not implemented.
 3. *Production coverage*: unresolved gates are recorded: Sonic 1 (the provider did not accept a scene of the available image), Sonic 2 revision 1, Sonic 3 & Knuckles zones other than Angel Island Zone 1. They can widen T007 only on a concrete failing real-provider comparison.
 
-The canonical T007 resolution step (full refinement after F31 merges, before F32 starts) therefore promotes T007 to `ready` with this scope; it does not cancel it.
+The canonical T007 resolution step (full refinement after F31 merges, **completed before F32 starts**) therefore: records the T001 evidence, promotes T007 from `draft` to `ready` with this measured scope only (the per-line fallback class, the smallest per-row generic mechanism; not implemented in F31), resolves the dependency edges, and runs the harness backlog and control validation. It does not cancel T007. The unresolved gates above are follow-up verification gates, not proof of compatibility.
 
 ## Decision 9: ADR 0315 preservation (asymmetric viewport)
 
