@@ -14,10 +14,15 @@
 #include <stdint.h>
 
 #define SEGA_MOD_ABI_MAJOR 2U
-#define SEGA_MOD_ABI_MINOR 0U /* a host with a larger minor accepts a provider requiring a smaller or equal minor */
+#define SEGA_MOD_ABI_MINOR 1U /* a host with a larger minor accepts a provider requiring a smaller or equal minor. Minor 1 (ADR 0320, SEG-152-T003): the exact-frame view and VDP helpers of the Genesis table */
 
 #if defined(SEGA_MOD_TARGET_ABI_MAJOR) && (SEGA_MOD_TARGET_ABI_MAJOR != SEGA_MOD_ABI_MAJOR)
 #error "E_ABI_HEADER_MISMATCH: the manifest abi.native differs from SEGA_MOD_ABI_MAJOR of this header"
+#endif
+
+/* ADR 0320 decision 10: the host passes -DSEGA_MOD_TARGET_ABI_MINOR=<manifest abi.minor> (0 when the manifest declares none). A source targeting a minor this header does not provide fails with a stable class. */
+#if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR > SEGA_MOD_ABI_MINOR)
+#error "E_ABI_MINOR_TOO_NEW: the manifest abi.minor is larger than SEGA_MOD_ABI_MINOR of this header"
 #endif
 
 /* Preprocessor-visible platform ids (an enum constant cannot be tested by #if); equal to SegaModPlatform. */

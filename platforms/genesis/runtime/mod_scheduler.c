@@ -21,7 +21,7 @@ static uint64_t cap_bit(unsigned id) { return UINT64_C(1) << (id % 64U); }
 void genesis_mod_scheduler_supported(uint64_t out[2]) {
   out[0] = cap_bit(SEGA_MOD_CAP_HOST_LOG) | cap_bit(SEGA_MOD_CAP_FRAME_WORK_RAM) | cap_bit(SEGA_MOD_CAP_MEMORY_READ) | cap_bit(SEGA_MOD_CAP_MEMORY_WRITE) | cap_bit(SEGA_MOD_CAP_INPUT_READ) |
            cap_bit(SEGA_MOD_CAP_INPUT_INTERCEPT) | cap_bit(SEGA_MOD_CAP_HOOK_FUNCTION) | cap_bit(SEGA_MOD_CAP_STATE_MOD) |
-           cap_bit(SEGA_MOD_CAP_SCENERY_WORDS) | cap_bit(SEGA_MOD_CAP_OVERLAY_RGBA); /* scenery.words (SEG-140-T011) is output of the same kind: */ /* presentation output of `render`: collected by the provider adapter and presented by the host, not a scheduler service */
+           cap_bit(SEGA_MOD_CAP_SCENERY_WORDS) | cap_bit(SEGA_MOD_CAP_OVERLAY_RGBA) | cap_bit(SEGA_MOD_CAP_FRAME_VDP); /* frame.vdp (ADR 0320): REQUIRED-only, it selects the exact-frame callback; scenery.words (SEG-140-T011) is output of the same kind: */ /* presentation output of `render`: collected by the provider adapter and presented by the host, not a scheduler service */
   out[1] = 0;
 }
 
@@ -423,7 +423,7 @@ static void hook_frame_end(void *ctx, GenesisRuntime *rt) {
 static void hook_after_snapshot(void *ctx, GenesisRuntime *rt) {
   GenesisModScheduler *s = (GenesisModScheduler *)ctx;
   const uint64_t ended = rt->virtual_frame_count - 1U;
-  if (!s->disabled && (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_RENDER)) != 0U) {
+  if (!s->disabled && !s->exact_frame && (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_RENDER)) != 0U) {   /* an exact-frame provider's render runs at the producer seam instead (genesis_mod_scheduler_present) */
     s->render_copy_valid = 0U;
     if (granted(s, SEGA_MOD_CAP_FRAME_WORK_RAM)) { /* render reads copies taken after frame-end, never live memory */
       memcpy(s->render_copy, rt->work_ram, GENESIS_MOD_WORK_RAM_BYTES);
@@ -433,6 +433,37 @@ static void hook_after_snapshot(void *ctx, GenesisRuntime *rt) {
     s->render_copy_valid = 0U;
   }
   open_frame(s, rt);
+}
+
+int genesis_mod_scheduler_present(GenesisModScheduler *s, const GenesisModExactFrame *f) {
+  uint32_t lines;
+  if (s == NULL || f == NULL || !s->exact_frame || s->disabled || s->runtime == NULL || s->in_callback || (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_RENDER)) == 0U) return 0;
+  if (f->vram == NULL || (f->line_count != 0U && f->lines == NULL)) return 0;
+  lines = f->line_count < SEGA_GEN_FRAME_MAX_LINES ? f->line_count : SEGA_GEN_FRAME_MAX_LINES;
+  s->render_copy_valid = 0U;
+  if (granted(s, SEGA_MOD_CAP_FRAME_WORK_RAM) && f->work_ram != NULL) {   /* the previous-onset copy, re-copied so the provider can never alias the producer's buffer */
+    memcpy(s->render_copy, f->work_ram, GENESIS_MOD_WORK_RAM_BYTES);
+    s->render_copy_valid = 1U;
+  }
+  memcpy(s->view_vram, f->vram, GENESIS_MOD_WORK_RAM_BYTES);
+  if (lines != 0U) memcpy(s->view_lines, f->lines, (size_t)lines * sizeof(SegaGenesisFrameLine));
+  memset(&s->view, 0, sizeof s->view);
+  s->view.size = (uint32_t)sizeof s->view;
+  s->view.width = f->width;
+  s->view.height = f->height;
+  s->view.side = f->side;
+  s->view.requested = f->requested;
+  s->view.work_ram = s->render_copy_valid ? s->render_copy : NULL;
+  s->view.flags = f->vram_frame_start ? SEGA_GEN_FRAME_VRAM_FRAME_START : 0U;
+  s->view.vram = s->view_vram;
+  s->view.lines = s->view_lines;
+  s->view.line_count = lines;
+  s->features.frame = &s->view;
+  ++s->exact_calls;
+  run_phase(s, SEGA_MOD_PHASE_RENDER, s->runtime->virtual_frame_count - 1U);
+  s->features.frame = NULL;
+  s->render_copy_valid = 0U;
+  return s->disabled ? 0 : 1;
 }
 
 int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, const GenesisModConfig *config, const char **rejection) {
@@ -466,6 +497,8 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
   s->host.platform = SEGA_MOD_PLATFORM_GENESIS;
   s->host.granted[0] = (config->required[0] | config->optional[0]) & supported[0];
   s->host.granted[1] = (config->required[1] | config->optional[1]) & supported[1];
+  s->host.granted[0] &= ~(cap_bit(SEGA_MOD_CAP_FRAME_VDP) & ~config->required[0]); /* ADR 0320 decision 2: frame.vdp selects the callback timing, so it is granted ONLY when required; an optional declaration is never granted (the package layer refuses it with E_CAPABILITY_INCONSISTENT) and never changes timing */
+  s->exact_frame = (config->required[0] & cap_bit(SEGA_MOD_CAP_FRAME_VDP)) != 0U ? 1U : 0U;
   n = sega_mod_negotiate(config->provider, &s->host, config->required);
   required_bad = (config->required[0] & ~supported[0]) | config->required[1];
   if (n == SEGA_MOD_NEG_OK && required_bad != 0U) n = SEGA_MOD_NEG_E_CAPABILITY_UNSUPPORTED;
@@ -478,6 +511,10 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
     return 1;
   }
   if (config->phase_mask == 0U || (config->phase_mask & ~VALID_PHASES) != 0U) { /* none, unknown or bit 0 */
+    *rejection = "E_PHASE_UNSUPPORTED";
+    return 1;
+  }
+  if (s->exact_frame && (config->phase_mask & PHASE_BIT(SEGA_MOD_PHASE_RENDER)) == 0U) { /* an exact-frame provider is its render callback */
     *rejection = "E_PHASE_UNSUPPORTED";
     return 1;
   }
@@ -550,6 +587,8 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
   s->features.vsram_bytes = 80U;
   s->features.visible_lines = 224U;
   s->features.render = sega_mod_is_granted(&s->host, SEGA_MOD_CAP_OVERLAY_RGBA) || sega_mod_is_granted(&s->host, SEGA_MOD_CAP_SCENERY_WORDS) ? config->render_api : NULL;   /* SEG-140-T011: scenery.words is render output too */
+  s->features.frame = NULL;   /* non-NULL only inside the exact-frame render callback */
+  s->features.vdp = sega_mod_is_granted(&s->host, SEGA_MOD_CAP_FRAME_VDP) ? config->vdp_helpers : NULL;   /* ADR 0320 decision 5: the host's own VDP functions, supplied by the adapter (the scheduler never links the VDP renderer) */
   s->host.platform_features = &s->features;
   s->host.platform_features_size = (uint32_t)sizeof(SegaGenesisFeatures);
   s->host.log = service_log;

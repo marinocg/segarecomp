@@ -97,6 +97,9 @@ struct Mod {
   SceneryWindow staged_scenery[2][2], visible_scenery[2][2];   // [plane][window]: ADR 0313, up to two windows per plane (the playfield rows and a split-scroll band can need disjoint cell ranges)
   std::uint64_t visible_scenery_frame = 0;   // the guest frame whose render callback committed `visible_scenery` (and the ADR 0315 placement below: they are committed together)
   // ADR 0315: the frame-bound asymmetric placement. `margin` is the per-side margin the provider saw when it chose `left_px`; -1 = none declared.
+  bool exact_served = false;                  // ADR 0320: the committed output was produced by THIS prepare() call (an exact-frame provider); it is never carried to another frame
+  std::uint32_t exact_side = 0;               // the per-side margin of the frame an exact-frame callback is running for (== SegaGenesisFrameView::side, so view_margin and the view agree)
+  bool exact_running = false;
   std::int64_t staged_left_px = -1, visible_left_px = -1;
   std::uint32_t staged_left_margin = 0, visible_left_margin = 0;
 #endif
@@ -245,7 +248,7 @@ std::uint32_t current_margin() {
 int api_view_margin(std::uint32_t *margin_px) {
   if (!in_render()) return refused_phase();
   if (margin_px == nullptr) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
-  *margin_px = current_margin();
+  *margin_px = g.exact_running ? g.exact_side : current_margin();   // inside an exact-frame callback the margin is the one of the frame being produced
   return SEGA_MOD_OK;
 }
 int api_view_left(std::uint32_t left_px, std::uint32_t margin_px) {
@@ -255,6 +258,23 @@ int api_view_left(std::uint32_t left_px, std::uint32_t margin_px) {
   g.staged_left_margin = margin_px;   // the margin the provider computed for, not the one the host happens to show at the call
   return SEGA_MOD_OK;
 }
+#ifdef SEGARECOMP_MOD_VIEWER
+// SEG-152-T004 (ADR 0320 decision 5): the typed helper table re-exports the host's existing functions; there is no second VDP interpretation here.
+extern "C" const GenesisCompatHost *genesis_native_compat_host(void);
+SegaGenesisVdpHelpers make_vdp_helpers() {
+  const GenesisCompatHost *h = genesis_native_compat_host();
+  SegaGenesisVdpHelpers t{};
+  t.size = sizeof t;
+  t.read_hscroll = h->read_hscroll;
+  t.read_vscroll = h->read_vscroll;
+  t.vscroll_is_per_column = h->vscroll_is_per_column;
+  t.cram_rgb = h->cram_rgb;
+  return t;
+}
+const SegaGenesisVdpHelpers g_vdp_helpers = make_vdp_helpers();
+static_assert(sizeof(SegaGenesisFrameLine) == sizeof(GenesisCompatLine) && offsetof(SegaGenesisFrameLine, cram) == offsetof(GenesisCompatLine, cram) && offsetof(SegaGenesisFrameLine, vsram) == offsetof(GenesisCompatLine, vsram),
+              "the ABI 2 frame line has the layout of the ABI 1 compat line");
+#endif
 SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, api_view_margin, api_view_left, {nullptr, nullptr, nullptr, nullptr}};
 
 // The provider's `phase` entry, wrapped: a render callback starts from an empty staging area, and what it staged becomes visible only if the callback finished without a fault (a faulted callback leaves nothing).
@@ -310,6 +330,9 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
   c.required[0] = segarecomp_mod_caps_required[0]; c.required[1] = segarecomp_mod_caps_required[1];
   c.optional[0] = segarecomp_mod_caps_optional[0]; c.optional[1] = segarecomp_mod_caps_optional[1];
   c.render_api = &g_render_api;
+#ifdef SEGARECOMP_MOD_VIEWER
+  c.vdp_helpers = &g_vdp_helpers;   // SEG-152-T004: the host's own pure VDP functions (ABI 1 GenesisCompatHost), re-exported through the ABI 2 Genesis table
+#endif
 #ifdef SEGARECOMP_MOD_HOOKS
   {   // SEG-138-T012: every binding must name a site of the generated table (the build checked the same; a program must never run with a binding that can never fire), and the hook phases are registered with it
     std::size_t site_count = 0;
@@ -359,6 +382,13 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
   c.log_sink = log_sink;
   identity_bytes(c.identity_sha256);
   const char *why = "";
+#ifndef SEGARECOMP_MOD_NATIVE
+  if ((c.required[0] >> SEGA_MOD_CAP_FRAME_VDP & 1U) != 0U) {   // ADR 0320: the exact-frame callback is a native ABI 2 feature; a Luau script that requires frame.vdp is refused exactly as before
+    g.refused = true; g.refusal = "E_CAPABILITY_UNSUPPORTED";
+    std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_CAPABILITY_UNSUPPORTED\"}\n");
+    return 1;
+  }
+#endif
   if (genesis_mod_scheduler_attach(g.scheduler.get(), runtime, &c, &why) != 0) {
     g.refused = true; g.refusal = why;
     std::fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\"}\n", why);
@@ -426,6 +456,9 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   p.have_set = false;
   p.scenery = false;
   p.left_ok = false;
+#ifdef SEGARECOMP_MOD_NATIVE
+  g.exact_served = false;
+#endif
   if ((frame->requested & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY)) == 0) return;
   if (!g.attached || g.scheduler->fault.faulted != 0U || g.scheduler->disabled != 0U) {   // a faulted mod presents nothing; the guest and the picture go on
     out->reason = GENESIS_COMPAT_FAULT;
@@ -433,13 +466,39 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   }
   unsigned accepted = 0;
 #ifdef SEGARECOMP_MOD_NATIVE
+  // ADR 0320 (SEG-152-T003): an exact-frame provider (it required frame.vdp) has its `render` callback run HERE, once per produced frame, with an immutable copy of this frame's data. What it stages is consumed by this very
+  // call: there is no epoch to bind, so nothing of another frame can be served. An ordinary provider is untouched (its callback ran after the previous snapshot; the epoch rules below apply).
+  const bool exact = g.scheduler->exact_frame != 0U;
+  std::uint32_t eff_side = frame->side;
+  g.exact_served = false;
+  if (exact) {
+    const GenesisRasterCapture *raster = g.scheduler->runtime != nullptr ? g.scheduler->runtime->live_raster : nullptr;
+    const GenesisFrameExtension *ext = raster != nullptr ? raster->extension : nullptr;
+    eff_side = ext == nullptr || ext->extension_shown != 0U ? frame->side : 0U;   // Original and exact 4:3 show no extension: the view reports side 0 (ADR 0315)
+    GenesisModExactFrame ef{};
+    ef.work_ram = frame->work_ram;
+    ef.vram = frame->vram;
+    ef.lines = reinterpret_cast<const SegaGenesisFrameLine *>(frame->lines);
+    ef.line_count = frame->line_count;
+    ef.width = frame->width; ef.height = frame->height; ef.side = eff_side; ef.requested = frame->requested;
+    ef.vram_frame_start = raster != nullptr && frame->vram != nullptr && frame->vram == raster->frame.vram_start ? 1U : 0U;   // a journaled frame hands out the frame-start VRAM, any other the producer's end-of-frame image
+    g.exact_side = eff_side;
+    g.exact_running = true;
+    const int ran = genesis_mod_scheduler_present(g.scheduler.get(), &ef);
+    g.exact_running = false;
+    if (!ran) {
+      if (g.scheduler->disabled != 0U || g.scheduler->fault.faulted != 0U) out->reason = GENESIS_COMPAT_FAULT;   // a genuine callback fault: nothing staged is served
+      return;
+    }
+    g.exact_served = true;
+  }
   // SEG-140-T011: a window belongs to exactly one produced frame. The render callback of guest frame N runs right after frame N ended; the host produces the frame that callback describes when the runtime counts N + 2
   // (the producer sees the work-RAM snapshot taken one onset earlier, as for every route). A window committed for any other frame (a rewind, a load, a skipped callback), or none, is never served.
-  const bool current = g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count;
+  const bool current = g.exact_served || (!exact && g.scheduler->runtime != nullptr && g.visible_scenery_frame + 2U == g.scheduler->runtime->virtual_frame_count);
   // ADR 0315: framing is a render-API feature of its own, independent of scenery: a provider with generic scenery can request a placement without claiming authored scenery. It is served only for the frame it was
   // declared for (the same epoch), only when it was computed for the margin this frame is produced with, and only inside the planned total; anything else is the centred layout.
   const bool declared = current && g.visible_left_px >= 0;
-  p.left_ok = declared && frame->side > 0U && g.visible_left_margin == frame->side && g.visible_left_px <= 2 * static_cast<std::int64_t>(frame->side);
+  p.left_ok = declared && eff_side > 0U && g.visible_left_margin == eff_side && g.visible_left_px <= 2 * static_cast<std::int64_t>(eff_side);
   if ((frame->requested & GENESIS_COMPAT_SCENERY) != 0U) {
     p.scenery = current && (g.visible_scenery[0][0].present || g.visible_scenery[1][0].present);   // ADR 0314: a frame is served when at least one plane has a window (an empty plane is a window of blank cells); a plane without one is left to the generic extension
     if (p.scenery) accepted |= GENESIS_COMPAT_SCENERY;
@@ -459,7 +518,8 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     if (p.have_set && frame->work_ram != nullptr) {   // W04 gap B (a provider without frame.work_ram has no snapshot: the compositor then rejects game art as UNVERIFIED_STATE, as before): a set naming the game's own art must belong to THIS frame's epoch; otherwise the whole set is dropped (a stale submission, a restore, a rewind or a skipped callback never draws game art)
       bool verified = false;
       for (std::uint32_t i = 0; i < view.set->count && i < GENESIS_VSPRITE_MAX; ++i) verified = verified || view.set->sprites[i].provenance == GENESIS_VSPRITE_GAME_STATE_VERIFIED;
-      const bool epoch = g.scheduler->runtime != nullptr && g.visible_set_frame + 2U == g.scheduler->runtime->virtual_frame_count && g.visible_set_digest_valid && frame->work_ram != nullptr &&
+      const bool epoch = g.exact_served ? g.visible_set_digest_valid && fnv1a64(frame->work_ram, GENESIS_MOD_WORK_RAM_BYTES) == g.visible_set_digest   // exact frame: the copy the callback ran against is this frame's own
+                                        : g.scheduler->runtime != nullptr && g.visible_set_frame + 2U == g.scheduler->runtime->virtual_frame_count && g.visible_set_digest_valid && frame->work_ram != nullptr &&
                          fnv1a64(frame->work_ram, GENESIS_MOD_WORK_RAM_BYTES) == g.visible_set_digest;
       if (verified && !epoch) p.have_set = false;
     }

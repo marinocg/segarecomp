@@ -157,6 +157,7 @@ int compile_natives(const mod::Package &pkg, const std::string &cc, const fs::pa
   for (const std::string_view flag : mod::kNativeCompileFlags) base.emplace_back(flag);
   base.push_back("-DSEGA_MOD_TARGET_PLATFORM=" + std::to_string(adapter.platform_id));
   base.push_back("-DSEGA_MOD_TARGET_ABI_MAJOR=" + std::to_string(m.abi_native) + "U");
+  base.push_back("-DSEGA_MOD_TARGET_ABI_MINOR=" + std::to_string(m.abi_minor) + "U");   // ADR 0320 decision 10: the manifest's declared minimum minor selects which members of the header the source sees
   for (const fs::path &inc : {sdk_root / "sdk", sdk_root / std::string(m.platform) / "sdk", work / "src"}) { base.push_back("-I"); base.push_back(inc.string()); }
   const fs::path log = work / "compile.log";
   const auto fail_with = [&](const std::string &where, bool link) {
@@ -165,7 +166,7 @@ int compile_natives(const mod::Package &pkg, const std::string &cc, const fs::pa
     const auto has = [&](const char *needle) { return text.find(needle) != std::string::npos; };
     // The entry is missing only when the linker reports THAT symbol as undefined (GNU ld, Apple ld, lld spellings); any other link error is E_LINK_FAILED.
     if (link) class_out = has("undefined reference to `segarecomp_mod_provider'") || has("\"_segarecomp_mod_provider\"") || has("undefined symbol: segarecomp_mod_provider") || has("undefined symbol: _segarecomp_mod_provider") || has("unresolved external symbol segarecomp_mod_provider") || has("unresolved external symbol _segarecomp_mod_provider") ? "E_ABI_ENTRY_MISSING" : "E_LINK_FAILED";
-    else class_out = text.find("E_ABI_PLATFORM") != std::string::npos ? "E_ABI_PLATFORM" : text.find("E_ABI_HEADER_MISMATCH") != std::string::npos ? "E_ABI_HEADER_MISMATCH" : "E_COMPILE_FAILED";
+    else class_out = text.find("E_ABI_PLATFORM") != std::string::npos ? "E_ABI_PLATFORM" : text.find("E_ABI_HEADER_MISMATCH") != std::string::npos ? "E_ABI_HEADER_MISMATCH" : text.find("E_ABI_MINOR_TOO_NEW") != std::string::npos ? "E_ABI_MINOR_TOO_NEW" : "E_COMPILE_FAILED";
     detail = where + ": " + text.substr(0, 1500);
   };
   for (const auto &[path, bytes] : pkg.files) {   // std::map order: deterministic compile order

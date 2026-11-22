@@ -62,12 +62,55 @@ typedef struct SegaGenesisRenderApi {
   void *reserved[4];                          /* NULL */
 } SegaGenesisRenderApi;
 
+/* ADR 0320 (SEG-152-T003, ABI minor 1): the exact-frame view. Present only for a provider that REQUIRES `frame.vdp` (an exact-frame provider): the host runs its `render` callback once per produced frame at the producer
+ * seam, and `SegaGenesisFeatures::frame` is non-NULL only inside that callback (NULL in every other phase and for every other provider). Everything is a host-owned copy valid only during the callback: there is no
+ * pointer to live guest memory. `work_ram` is the copy taken at the previous onset (the one ABI 1 `prepare` receives for the same frame) and is NULL unless `frame.work_ram` was granted; `vram`, `lines` need `frame.vdp`.
+ * `flags` bit SEGA_GEN_FRAME_VRAM_FRAME_START: `vram` is the frame-start state (a journaled frame); clear: it is the producer's own end-of-frame VRAM and NOT a frame-start snapshot (a frame without a VRAM journal is still
+ * delivered, as for ABI 1). `requested` is the component mask the host asked for (HUD 1, SPRITES 2, SCENERY 4). `side` is the per-side extension margin planned for this frame (0 = none: Original, exact 4:3). */
+#define SEGA_GEN_FRAME_VRAM_FRAME_START 1U
+#define SEGA_GEN_FRAME_MAX_LINES 224U
+typedef struct SegaGenesisFrameLine {
+  uint16_t registers[24];
+  uint8_t cram[128];
+  uint8_t vsram[80];
+} SegaGenesisFrameLine; /* layout equal to the host's GenesisCompatLine (asserted by the host) */
+typedef struct SegaGenesisFrameView {
+  uint32_t size; /* the host's sizeof: read fields only below it */
+  uint32_t width, height;
+  uint32_t side;
+  uint32_t requested;
+  const uint8_t *work_ram; /* 65536 bytes or NULL */
+  uint32_t flags;
+  const uint8_t *vram;                 /* 65536 bytes, host-owned copy */
+  const SegaGenesisFrameLine *lines;   /* per output line registers, CRAM, VSRAM */
+  uint32_t line_count;                 /* <= SEGA_GEN_FRAME_MAX_LINES */
+  uint32_t reserved[7];
+} SegaGenesisFrameView;
+
+/* ADR 0320 decision 5 (SEG-152-T004): the host's own pure VDP helpers (the ABI 1 GenesisCompatHost functions, same semantics, 0 = success). Non-NULL exactly when `frame.vdp` was granted. */
+typedef struct SegaGenesisVdpHelpers {
+  uint32_t size; /* the host's sizeof */
+  int (*read_hscroll)(const uint8_t vram[65536], const uint16_t registers[24], unsigned plane, unsigned line, int32_t *value);   /* plane 0 = A, 1 = B; plane_x = screen_x - hscroll */
+  int (*read_vscroll)(const uint8_t vsram[80], const uint16_t registers[24], unsigned plane, unsigned cell_column, int32_t *value);
+  int (*vscroll_is_per_column)(const uint16_t registers[24]);   /* non-zero when per-2-cell-column vertical scroll is selected */
+  int (*cram_rgb)(const uint8_t cram[128], unsigned index, uint8_t rgb[3]);   /* index 0-63: palette line * 16 + colour */
+} SegaGenesisVdpHelpers;
+
 typedef struct SegaGenesisFeatures {
   uint32_t size; /* the host's sizeof */
   uint32_t work_ram_bytes, vram_bytes, vdp_registers, cram_bytes, vsram_bytes, visible_lines; /* 65536, 65536, 24, 128, 80, 224 */
   uint32_t reserved[8];
   /* Appended by SEG-138-T011 (append-only: a provider reads this field only when `size` covers it). Non-NULL exactly when overlay.rgba was granted. */
   const SegaGenesisRenderApi *render;
+  /* Appended by SEG-152-T003/T004 (ABI minor 1; a provider reads these only when `size` covers them and its manifest declares abi.minor >= 1). */
+#if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR < 1)
+  /* ADR 0320 decision 10: a source whose manifest declares no abi.minor (0) does not see the minor-1 members; using one fails to compile ("no member named frame/vdp": declare "abi": {"native": 2, "minor": 1}). */
+  const void *e_abi_minor_1_required_frame;
+  const void *e_abi_minor_1_required_vdp;
+#else
+  const SegaGenesisFrameView *frame;   /* non-NULL only inside the exact-frame render callback of a provider granted frame.vdp */
+  const SegaGenesisVdpHelpers *vdp;    /* non-NULL exactly when frame.vdp was granted */
+#endif
 } SegaGenesisFeatures;
 
 #endif /* SEGARECOMP_MOD_GENESIS_H */

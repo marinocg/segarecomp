@@ -451,8 +451,14 @@ Manifest parse_manifest(const Value &root) {
   const bool native = has_kind(m, "native-c11");
   if (const Value *a = root.find("abi"); a != nullptr) {
     object(*a, "abi");
-    only(*a, {"native"}, "abi");
+    only(*a, {"native", "minor"}, "abi");
     const std::uint64_t v = num(*a, "native");
+    if (a->find("minor") != nullptr) {   // ADR 0320 decision 10: additive; a reader that does not know the key refuses it with E_FIELD_UNKNOWN (the strict `only` above)
+      const std::uint64_t minor = num(*a, "minor");
+      if (minor == 0) fail("E_FIELD_VALUE", "abi.minor is omitted for minor 0");
+      if (minor > kNativeAbiMinor) fail("E_ABI_MINOR_TOO_NEW", "abi.minor " + std::to_string(minor) + " is newer than this release provides (" + std::to_string(kNativeAbiMinor) + ")");
+      m.abi_minor = static_cast<unsigned>(minor);
+    }
     if (!native) fail("E_FIELD_UNKNOWN", "abi is valid only with a native-c11 payload");
     if (v == 1) fail("E_FIELD_VALUE", "a schema 3 package declares ABI 2; ABI 1 stays schema 2");
     if (v != kNativeAbiMajor) fail("E_ABI_UNSUPPORTED", "the native ABI " + std::to_string(v) + " is not provided by this release");
@@ -519,6 +525,9 @@ Manifest parse_manifest(const Value &root) {
     const CapabilityInfo *c = find_capability(name);
     if (!code || (!c->luau_bound && !native)) fail("E_CAPABILITY_INCONSISTENT", "the capability \"" + name + "\" needs a " + (c->luau_bound ? "native-c11 or luau-source" : "native-c11") + " payload");
   }
+  if (native)   // ADR 0320 decision 2: frame.vdp selects the exact-frame callback timing, so it may only be required; an optional declaration could silently change timing between hosts
+    for (const std::string &name : m.capabilities_optional)
+      if (name == "frame.vdp") fail("E_CAPABILITY_INCONSISTENT", "frame.vdp selects the exact-frame callback timing and may only be required");
   for (const std::string &name : m.capabilities_optional)
     if (!code) fail("E_CAPABILITY_INCONSISTENT", "the capability \"" + name + "\" needs a native-c11 or luau-source payload");
   if (m.has_hooks && !has_capability(m, "hook.function")) fail("E_CAPABILITY_INCONSISTENT", "hooks needs the hook.function capability");
@@ -642,7 +651,7 @@ std::string serialize_manifest(const Manifest &m) {
   o += '}';
   if (!m.capabilities.empty()) { o += ','; key(o, "capabilities"); string_array(o, m.capabilities); }
   if (!m.capabilities_optional.empty()) { o += ','; key(o, "capabilities_optional"); string_array(o, m.capabilities_optional); }
-  if (m.abi_native != 0) { o += ','; key(o, "abi"); o += "{\"native\":" + std::to_string(m.abi_native) + "}"; }
+  if (m.abi_native != 0) { o += ','; key(o, "abi"); o += "{\"native\":" + std::to_string(m.abi_native) + (m.abi_minor != 0 ? ",\"minor\":" + std::to_string(m.abi_minor) : std::string()) + "}"; }
   if (m.state_schema != 0) kn(o, "state_schema", m.state_schema);
   if (m.has_hooks) {
     o += ','; key(o, "hooks"); o += '[';

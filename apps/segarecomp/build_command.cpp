@@ -155,6 +155,8 @@ struct Options {
   bool luau = false;
   bool native_mod = false;           // SEG-138-T011: the scheduled mod is a native ABI 2 provider (no Luau VM)
   bool native_frame_state = false;   // W04 gap B: the provider was granted frame.work_ram (the producer then verifies the frame's state epoch and may admit game-art virtual sprites)
+  bool native_frame_vdp = false;     // SEG-152-T003 (ADR 0320): the provider REQUIRED frame.vdp: its render callback runs at the producer seam with an immutable frame view
+  unsigned native_abi_minor = 0;     // ADR 0320 decision 10: the manifest's declared minimum ABI minor, passed to the source compile as SEGA_MOD_TARGET_ABI_MINOR
   bool native_scenery = false;       // SEG-140-T011: the provider was granted scenery.words (the played program's producer then also serves the SCENERY component)
   std::vector<std::pair<fs::path, std::string>> native_mod_units;   // the staged native-c11 files (path, sha256 of the verified package payload); every .c is a compile unit
   fs::path native_mod_dir;           // <output>/native-mod: staged sources and the constant artifact
@@ -1259,7 +1261,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     build.c_native_mod.insert(build.c_native_mod.end(), options.cc_args.begin(), options.cc_args.end());
     for (const std::string_view flag : segarecomp::mod::kNativeCompileFlags)
       if (flag != "-c") build.c_native_mod.emplace_back(flag);
-    build.c_native_mod.insert(build.c_native_mod.end(), {"-DSEGA_MOD_TARGET_PLATFORM=1", "-DSEGA_MOD_TARGET_ABI_MAJOR=2U", "-I", (options.runtime_dir / "sdk").string(),
+    build.c_native_mod.insert(build.c_native_mod.end(), {"-DSEGA_MOD_TARGET_PLATFORM=1", "-DSEGA_MOD_TARGET_ABI_MAJOR=2U", "-DSEGA_MOD_TARGET_ABI_MINOR=" + std::to_string(options.native_abi_minor) + "U", "-I", (options.runtime_dir / "sdk").string(),
                                                          "-I", (build.root / "platforms" / "sdk").string(), "-I", (options.native_mod_dir / "src").string()});
   }
   build.cxx_base = {options.cxx};
@@ -1365,7 +1367,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       // SEG-138-T011 (ADR 0305): the played program drives a native ABI 2 provider through the SAME scheduler and presenter seam; no Luau VM is linked, only the overlay rasterizer and rules it shares.
       const std::vector<std::string> flags = native_mod_cxx_flags();
       add_native_mod_common(flags, "-DSEGARECOMP_MOD_VIEWER=1");
-      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::string(options.native_scenery ? (options.native_frame_state ? "13U" : "12U") : (options.native_frame_state ? "9U" : "8U")), "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::to_string(8U | (options.native_frame_state ? 1U : 0U) | (options.native_frame_vdp ? 2U : 0U) | (options.native_scenery ? 4U : 0U)) + "U", "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
     } else if (options.luau && options.luau_scheduled) {
       // SEG-138-T010 (ADR 0305): the played program runs the ONE mod scheduler (the headless program's adapter, compiled for the viewer) and presents its render output through the existing provider seam.
       const std::vector<std::string> flags = add_luau_runtime();
@@ -1918,6 +1920,10 @@ int run_build(Options options) {
       options.native_mod = true;
       options.native_scenery = granted("scenery.words");
       options.native_frame_state = granted("frame.work_ram");
+      options.native_frame_vdp = granted("frame.vdp");
+      options.native_abi_minor = package.manifest.abi_minor;
+      if (options.native_frame_vdp && options.native_abi_minor < 1U)   // ADR 0320 decision 10: the manifest, the source's header view and the provider table must agree
+        return fail(options, log, original_sha, "analyze", 1, "A package that requires frame.vdp must declare abi.minor 1 (the exact-frame view is a minor-1 member of the Genesis table).", "E_CAPABILITY_INCONSISTENT");
       options.luau_identity = options.native_identity;
       options.luau_original_sha256 = original_sha;
       options.luau_effective_sha256 = effective.effective_sha256;
