@@ -24,15 +24,26 @@ This is not a tilemap-wrapping or background-coverage defect: the window plane d
    When the extension is not shown (4:3, Original, or an asymmetric surface under a narrower plan) the picture, band included, is presented exactly as produced.
 4. **Black, not the per-row VDP backdrop, in the presenter.** The producer's margin rows are the VDP backdrop (the surface); the presenter's relocated band uses black, the same neutral the Borders treatment uses for
    absent content. A game whose backdrop colour is not black behind its HUD rows would show black margins there: the established presentation behaviour of an extension with no content.
-5. **Positioned layers and the legacy HUD overlay** are unchanged; their background lookup follows the band so alpha blending reads the pixel actually shown.
+5. **Overlay contract: authored overlays stay visible over the backdrop.** The band is drawn **before** the legacy HUD overlay and the positioned layers, which are the same order as for every other presentation
+   (picture, side treatment, then overlays). An explicitly authored layer (a package's indicator, its relocated HUD) is deliberate UI, not background, so it is not masked: it may sit over the black margins beside the band.
+   The black-margin guarantee therefore concerns **plane/background content and the extension's own columns**, never an authored overlay. No further masking stage was added; their background lookup follows the band so
+   alpha blending reads the pixel actually shown. Tested: a layer anchored in a band margin is fully visible while the rest of the margin stays black.
+5b. **Virtual-sprite accounting (review of #247).** The compositor reports side pixels per frame, not per row, so the host cannot tell an actor pixel above the band (shown) from one inside it (removed by the band).
+   While a band is applied the host therefore credits **no side pixel** (left/right counters stay 0; a set that has only side pixels is `virtual_sprite_unpresented`), and keeps crediting pixels in the native picture,
+   which the band keeps whole. This is a deliberate **under-claim**: side actors above the HUD are shown but not counted while a HUD band exists, the same conservative rule Comfort and Borders already follow. Without a
+   band nothing changes. No per-row count and no compositor interface were added.
+5c. **Notice.** `virtual_sprite_unpresented` is a diagnostic only (coverage JSON, `reason_frames`, `last_reason`): it occurs in ordinary play and on mode changes and no longer raises a toast. The transition bookkeeping
+   still advances, so a later genuine reason is announced; `virtual_sprite_rejected` and every other reason still raise their notice.
+5d. **Thumbnails.** The menu thumbnail composes the part above the band and the band separately; a band as tall as the picture (`hud_rows == height`) has no upper part and is handled.
 6. **Out of scope, deliberately:** a camera model, any per-game offset, the generic VDP renderer's native output, vertical placement, hiding sprites outside the band rows, a non-bottom band.
 
 ## Consequences
 
 - The HUD position is independent of the camera and of the picture's placement, for every planned total; both margins are the same width (`side`) and symmetric.
 - Gameplay rows (above the band), the native viewport (320 columns, no extension shown) and ABI 2 (`SegaGenesisRenderApi`, `view_left`, scenery windows) are unchanged.
-- A virtual actor in the extension columns of a band row is not shown (the margins of those rows are the backdrop by design); actors above the band are unaffected.
+- A virtual actor in the extension columns of a band row is not shown (the margins of those rows are the backdrop by design); actors above the band are unaffected, but their side pixels are not counted while a band exists (decision 5b).
 - The menu thumbnail composes its two parts (above/inside the band) so it still shows the native picture; the small CRT preview crop is not recomposed.
+- Tests added in the review round: `sv_vsprite_admission_test` (side credit with/without a band, centred and asymmetric, Raw/Comfort/Borders; the unpresented diagnostic is silent but intact; genuine reasons still notify), `sv_hud_band_test` (full-height band, thumbnails for 0/32/224-row bands, the overlay contract).
 - Tests: `sv_hud_band_test` (the real presenter at 32:9, 21:9 and 16:9, four placements at 32:9, Raw/Comfort/Borders: HUD column constant, margins black and symmetric, above-the-band picture at its placement, no band = the previous
   output, an invalid band refused, the extension not shown leaves the native picture untouched, an aspect change); `genesis_extension_tests` (the producer against the independent reference with the band rule, a bottom-window
   scene whose margins are flat backdrop while the rows above keep their scenery).

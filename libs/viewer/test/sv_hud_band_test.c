@@ -53,15 +53,18 @@ static void build(int total, int left) {
     }
 }
 
-static int present(SvHost *h, int side, int shift, int hud_rows, uint64_t *seq) {
+static int present_layers(SvHost *h, int side, int shift, int hud_rows, uint64_t *seq, const SvOverlayLayer *layers, int nlayers) {
   SvExtendedSurface e;
   const int total = 2 * side;
   memset(&e, 0, sizeof e);
   ++*seq;
   e.rgb24 = g_surface; e.size = sizeof g_surface; e.width = NW + total; e.height = NH; e.pitch = (NW + total) * 3; e.side = side; e.shift = shift; e.sequence = *seq;
   e.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; e.status = SV_WS_PARTIAL; e.source = SV_EXTSRC_GENERIC; e.hud_rows = hud_rows;
+  e.layers = layers; e.layer_count = nlayers;
   return sv_host_present_extended(h, g_native, NW, NH, NW * 3, *seq, &e);
 }
+
+static int present(SvHost *h, int side, int shift, int hud_rows, uint64_t *seq) { return present_layers(h, side, shift, hud_rows, seq, NULL, 0); }
 
 static void configure(SvHost *h, SvDisplayRatio ratio, SvSideStyle style, int win_w) {
   SvSettings s = *sv_host_settings(h);
@@ -74,7 +77,7 @@ static SDL_Surface *shoot(SvHost *h) { sv_host_toast(h, ""); return sv_host_capt
 
 /* Presents a surface of `side` per side with the picture at `left` and a `BAND`-row HUD band, in `style`, and checks the whole composed output: above the band exactly what hud_rows == 0 shows (the picture at `left`),
  * in the band the picture row at column `side` with black on every other column. */
-static int check_case(SvHost *h, SvDisplayRatio ratio, SvSideStyle style, int side, int left, uint64_t *seq, const char *label) {
+static int check_case_band(SvHost *h, SvDisplayRatio ratio, SvSideStyle style, int side, int left, int band, uint64_t *seq, const char *label) {
   const int total = 2 * side, wide = NW + total;
   int x, y, wrong_above = 0, wrong_hud = 0, wrong_margin = 0, vl = -1, vr = -1;
   const uint8_t black[3] = {0, 0, 0};
@@ -82,16 +85,16 @@ static int check_case(SvHost *h, SvDisplayRatio ratio, SvSideStyle style, int si
   char what[200];
   build(total, left);
   configure(h, ratio, style, wide);
-  if (present(h, side, left - side, BAND, seq) != 0 || sv_host_extension_side(h) != side) { CHECK(0, "the surface with a band is accepted"); return -1; }
+  if (present(h, side, left - side, band, seq) != 0 || sv_host_extension_side(h) != side) { CHECK(0, "the surface with a band is accepted"); return -1; }
   sv_host_visible_columns(h, &vl, &vr);
   snprintf(what, sizeof what, "%s: the whole total is visible (%d + %d)", label, left, total - left);
   CHECK(vl == left && vr == total - left, what);
   o = shoot(h);
   if (o == NULL) { CHECK(0, "capture"); return -1; }
   CHECK(o->w == wide * 2 && o->h == NH * 2, "the output is the 2x surface");
-  for (y = 0; y < NH - BAND; ++y)   /* above the band: the native picture at `left` (the side columns are the style's, checked by the existing suites) */
+  for (y = 0; y < NH - band; ++y)   /* above the band: the native picture at `left` (the side columns are the style's, checked by the existing suites) */
     for (x = 0; x < NW; ++x) { uint8_t want[3]; native_px(x, y, want); if (!read_is(o, left + x, y, want)) ++wrong_above; }
-  for (y = NH - BAND; y < NH; ++y) {
+  for (y = NH - band; y < NH; ++y) {
     for (x = 0; x < NW; ++x) { uint8_t want[3]; native_px(x, y, want); if (!read_is(o, side + x, y, want)) ++wrong_hud; }
     for (x = 0; x < side; ++x) { if (!read_is(o, x, y, black)) ++wrong_margin; if (!read_is(o, side + NW + x, y, black)) ++wrong_margin; }
   }
@@ -104,6 +107,8 @@ static int check_case(SvHost *h, SvDisplayRatio ratio, SvSideStyle style, int si
   SDL_DestroySurface(o);
   return 0;
 }
+
+static int check_case(SvHost *h, SvDisplayRatio ratio, SvSideStyle style, int side, int left, uint64_t *seq, const char *label) { return check_case_band(h, ratio, style, side, left, BAND, seq, label); }
 
 static void through_host(void) {
   static const int lefts[4] = {0, 100, 238, 476};   /* 32:9: all-right, intermediate, centred, all-left */
@@ -148,6 +153,74 @@ static void through_host(void) {
       if (check_case(h, r219, styles[st], 101, l219[k], &seq, label) != 0) { sv_host_close(h); return; }
       snprintf(label, sizeof label, "16:9 %s, picture at %d", style_name[st], l169[k]);
       if (check_case(h, r169, styles[st], 39, l169[k], &seq, label) != 0) { sv_host_close(h); return; }
+    }
+  }
+
+
+  /* ---- a band as tall as the picture (band_y0 == 0): the whole picture is the centred row, black on both sides, at every placement and style ---- */
+  for (st = 0; st < 3; ++st)
+    for (k = 0; k < 4; ++k) {
+      char label[120];
+      snprintf(label, sizeof label, "32:9 %s, full-height band, picture at %d", style_name[st], lefts[k]);
+      if (check_case_band(h, r329, styles[st], 238, lefts[k], NH, &seq, label) != 0) { sv_host_close(h); return; }
+    }
+
+  /* ---- the menu thumbnail shows the native picture (HUD rows included) for a band of 0, 32 and NH rows, placed asymmetrically ---- */
+  {
+    static const int bands[3] = {0, BAND, NH};
+    SDL_Texture *target = SDL_CreateTexture(h->renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, NW, NH);
+    CHECK(target != NULL, "thumbnail render target");
+    for (k = 0; target != NULL && k < 3; ++k) {
+      SDL_Surface *t;
+      int wrong = 0;
+      char what[160];
+      build(2 * 238, 100);
+      configure(h, r329, SV_SIDE_RAW, NW + 2 * 238);
+      CHECK(present(h, 238, 100 - 238, bands[k], &seq) == 0 && sv_host_extension_side(h) == 238, "thumbnail: the placed surface is accepted");
+      SDL_SetRenderTarget(h->renderer, target);
+      SDL_SetRenderDrawColor(h->renderer, 255, 0, 255, 255);
+      SDL_RenderClear(h->renderer);
+      sv_host_draw_picture(h, 0.0f, 0.0f, (float)NW, (float)NH);
+      t = SDL_RenderReadPixels(h->renderer, NULL);
+      SDL_SetRenderTarget(h->renderer, NULL);
+      CHECK(t != NULL, "thumbnail read back");
+      if (t == NULL) continue;
+      for (y = 0; y < NH; ++y)
+        for (x = 0; x < NW; ++x) {
+          uint8_t want[3];
+          Uint8 r = 0, g = 0, b = 0, a = 0;
+          native_px(x, y, want);
+          (void)SDL_ReadSurfacePixel(t, x, y, &r, &g, &b, &a);
+          if (r != want[0] || g != want[1] || b != want[2]) ++wrong;
+        }
+      snprintf(what, sizeof what, "thumbnail with a %d-row band and the picture placed at 100 of 476 columns is the native picture exactly", bands[k]);
+      CHECK(wrong == 0, what);
+      SDL_DestroySurface(t);
+    }
+    if (target != NULL) SDL_DestroyTexture(target);
+  }
+
+  /* ---- overlay contract (ADR 0318): explicitly authored layers are drawn after the band and stay visible over its backdrop; the black guarantee is for background/plane content ---- */
+  {
+    static uint8_t red[16 * 8 * 4];
+    SvOverlayLayer lay;
+    SDL_Surface *o;
+    int in_red = 0, in_black = 0, i;
+    for (i = 0; i < 16 * 8; ++i) { red[i * 4] = 255; red[i * 4 + 1] = 0; red[i * 4 + 2] = 0; red[i * 4 + 3] = 255; }
+    memset(&lay, 0, sizeof lay);
+    lay.rgba = red; lay.w = 16; lay.h = 8; lay.anchor = SV_OVA_BOTTOM_LEFT; lay.reference = SV_OVREF_PRESENTATION; lay.dx = 0; lay.dy = 0;
+    build(2 * 238, 100);
+    configure(h, r329, SV_SIDE_RAW, NW + 2 * 238);
+    CHECK(present_layers(h, 238, 100 - 238, BAND, &seq, &lay, 1) == 0, "a positioned layer over the band margin is accepted");
+    o = shoot(h);
+    if (o != NULL) {
+      const uint8_t red3[3] = {255, 0, 0}, black[3] = {0, 0, 0};
+      for (y = NH - 8; y < NH; ++y) for (x = 0; x < 16; ++x) in_red += read_is(o, x, y, red3);
+      for (y = NH - BAND; y < NH - 8; ++y) for (x = 0; x < 16; ++x) in_black += read_is(o, x, y, black);
+      for (y = NH - 8; y < NH; ++y) for (x = 16; x < 238; ++x) in_black += read_is(o, x, y, black);
+      CHECK(in_red == 16 * 8, "the authored layer stays visible over the HUD-side backdrop (it is not masked)");
+      CHECK(in_black == 16 * (BAND - 8) + 8 * (238 - 16), "everything else beside the HUD in the band rows is still black");
+      SDL_DestroySurface(o);
     }
   }
 

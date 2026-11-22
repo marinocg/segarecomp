@@ -235,12 +235,12 @@ void sv_host_draw_picture(SvHost *h, float x, float y, float w, float hh) {
     int band_y0 = -1;
     if (h->ext_side > 0) { host_view(h, &ev); band_y0 = hud_band_y0(h, &ev); }
     src.x = (float)(h->ext_side + h->ext_shift); src.y = 0.0f; src.w = (float)h->last_w; src.h = (float)h->last_h;
-    if (band_y0 > 0 && h->ext_shift != 0) {   /* ADR 0318: the HUD band sits at the centre column, not where the picture is placed */
+    if (band_y0 >= 0 && h->ext_shift != 0) {   /* ADR 0318: the HUD band sits at the centre column, not where the picture is placed; band_y0 == 0 (a band as tall as the picture) has no upper part */
       SDL_FRect top_s = src, top_d = d, bot_s = src, bot_d = d;
       top_s.h = (float)band_y0; top_d.h = d.h * (float)band_y0 / (float)h->last_h;
       bot_s.x = (float)h->ext_side; bot_s.y = (float)band_y0; bot_s.h = (float)(h->last_h - band_y0);
       bot_d.y = d.y + top_d.h; bot_d.h = d.h - top_d.h;
-      SDL_RenderTexture(h->renderer, h->frame_tex, &top_s, &top_d);
+      if (band_y0 > 0) SDL_RenderTexture(h->renderer, h->frame_tex, &top_s, &top_d);
       SDL_RenderTexture(h->renderer, h->frame_tex, &bot_s, &bot_d);
     } else {
       SDL_RenderTexture(h->renderer, h->frame_tex, h->ext_side > 0 ? &src : NULL, &d);
@@ -1508,7 +1508,9 @@ static void note_reason_transition(SvHost *h) {
   const unsigned now = h->cov.last_reason;
   if (now == h->cov_reason_notified) return;
   h->cov_reason_notified = (uint8_t)now;
-  if (now != SV_REJ_NONE && now != SV_REJ_OVER_DECLARED) {   /* the geometry reasons already have their own once-per-entry notices */
+  /* the geometry reasons already have their own once-per-entry notices; "virtual sprites not presented" is a diagnostic only (coverage JSON, reason_frames, last_reason): it occurs in normal play and on mode
+   * changes, so it never raises a notice (cov_reason_notified is still updated above, so a later genuine reason is reported on its own transition) */
+  if (now != SV_REJ_NONE && now != SV_REJ_OVER_DECLARED && now != SV_REJ_VSPRITE_UNPRESENTED) {
     char text[120];
     snprintf(text, sizeof text, "Presentation: %s", reason_text(now));
     push_toast(h, text, 4000u);
@@ -1584,7 +1586,11 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
       const uint32_t pic_px = vs_total > side_px ? vs_total - side_px : 0u;
       /* an extension column is credited only when it is really displayed: the surface accepted, and a side treatment that shows the supplied columns (Comfort and Borders replace them with a fill, so a sprite
        * drawn there is discarded and counts for nothing) */
-      const int shown = ext_visible && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
+      /* ADR 0318: with a window-plane HUD band the presenter blacks out the band rows' side columns, and the compositor reports side pixels per frame, not per row, so the host cannot tell a pixel above the band
+       * (shown) from one inside it (removed). It therefore never credits side pixels of a frame whose HUD band is applied: a deliberate under-claim (side actors above the HUD are shown but not counted), like
+       * Comfort and Borders. Actors in the native picture are credited as before (the band keeps the picture row whole). */
+      const int hud_band = ext_visible && ext->hud_rows > 0;
+      const int shown = ext_visible && !hud_band && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
       vs_picture = pic_px > 0u && picture_admitted && ext->actor_picture != NULL;
       vs_left = left_px > 0u && shown && vis_l > 0;
       vs_right = right_px > 0u && shown && vis_r > 0;
