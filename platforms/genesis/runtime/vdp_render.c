@@ -1368,6 +1368,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   uint32_t compat_words = 0U;   /* ADR 0314: cells the provider actually answered with a word (a plane left to the generic extension answers none) */
   uint8_t authored_rows[(GENESIS_FRAME_MAX_HEIGHT + 7U) / 8U] = {0};
   uint16_t authored_row_count = 0U;
+  unsigned hud_rows = 0U;
   uint16_t compat_overlay_w = 0U, compat_overlay_h = 0U, compat_overlay_fx = 0U, compat_overlay_fy = 0U;
   uint32_t compat_layer_count = 0U, compat_layer_bad = 0U;
   GenesisCompatLayer compat_layers[GENESIS_COMPAT_LAYERS_MAX] = {{0}};
@@ -1465,7 +1466,16 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     placement_shift = (int)left_cols - (int)side;
   }
   groups = width / 16U;
+  /* ADR 0318: a window-plane HUD band is the run of rows at the bottom of the picture on which the window plane owns BOTH picture edges. The window plane does not exist off-screen, so beside the band there is nothing
+   * to show: the band's extension columns are the backdrop (no Plane A, no Plane B), never tiles of the level. Rows above the run, and a window that owns only one edge, keep the behaviour of ADR 0262. */
+  while (hud_rows < height) {
+    const unsigned r = height - 1U - hud_rows;
+    const GenesisRasterLine *hl = &raster->lines[geometry.im2 ? r / 2U : r];
+    if (!genesis_vdp_window_covers(hl->registers, &geometry, 0U, r) || !genesis_vdp_window_covers(hl->registers, &geometry, width - 1U, r)) break;
+    ++hud_rows;
+  }
   for (unsigned row = 0U; row < height; ++row) {
+    const int hud_row = row >= height - hud_rows;
     const unsigned field_line = geometry.im2 ? row / 2U : row;
     const GenesisRasterLine *line = &raster->lines[field_line];
     uint8_t *dst = target->pixels + (size_t)row * pitch;
@@ -1519,7 +1529,9 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
             a = genesis_vdp_plane_candidate_at(&ctx, &plane_a, x, ga, row);
           }
         }
-        {
+        if (hud_row) {
+          b = none;   /* ADR 0318: the backdrop beside a window-plane HUD band */
+        } else {
           const unsigned gb = plane_b.per_column ? group : 0U;
           uint16_t word = 0U;
           const int answer = (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U ? target->compat->scenery_word(target->compat_state, 1U, row, (int)x, (int)plane_b.hscroll, (int)plane_b.vscroll[gb], &word) : 0;
@@ -1605,6 +1617,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     vsprite_outcome.state_verified = (host_flags & GENESIS_VSPRITE_HOST_STATE_VERIFIED) != 0U ? 1U : 0U;
   }
   memset(out, 0, sizeof(*out));
+  out->hud_rows = (uint16_t)hud_rows;
   out->status = flags == 0U ? GENESIS_EXT_AVAILABLE : GENESIS_EXT_PARTIAL;
   out->flags = flags;
   out->mode = (uint8_t)(sprites ? GENESIS_EXT_MODE_SPRITES : GENESIS_EXT_MODE_BACKGROUNDS);

@@ -112,6 +112,7 @@ SvExtCheck sv_extended_surface_check(const SvExtendedSurface *e, int native_w, i
   if (native_w <= 0 || native_h <= 0 || max_w <= 0 || native_w > max_w || native_w > 4096 || native_h > 4096) return SV_EXT_GEOMETRY;
   if (e->side <= 0 || e->side > SV_EXT_MAX_SIDE || e->height != native_h || e->width != native_w + 2 * e->side) return SV_EXT_GEOMETRY;
   if (e->shift < -e->side || e->shift > e->side) return SV_EXT_GEOMETRY;   /* ADR 0315: the picture must lie inside the planned total */
+  if (e->hud_rows < 0 || e->hud_rows > e->height) return SV_EXT_GEOMETRY;   /* ADR 0318: the HUD band lies inside the picture */
   row_bytes = (int64_t)e->width * 3;
   if (e->pitch < row_bytes) return SV_EXT_PITCH;
   needed = (int64_t)e->pitch * (int64_t)(e->height - 1) + row_bytes;

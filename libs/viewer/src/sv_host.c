@@ -203,6 +203,23 @@ void sv_host_icon_draw(SvHost *h, const char *name, float x, float y, float size
   SDL_RenderTexture(h->renderer, tex, NULL, &d);
 }
 
+/* ADR 0315: where the picture and the visible part of the extension lie in the frame texture. `left` is the picture's texture column (ext_side + ext_shift), `vl` / `vr` the visible columns left / right of
+ * it. Symmetric surfaces: left == ext_side and vl == vr == the visible side (historical behaviour). An asymmetric one is shown whole or not at all (both 0 = native picture only). */
+typedef struct ExtView { int left, vl, vr, tex_w; } ExtView;
+static void host_view(const SvHost *h, ExtView *v) {
+  const int vis = sv_host_visible_side(h);
+  v->tex_w = h->last_w + 2 * h->ext_side;
+  v->left = h->ext_side + h->ext_shift;
+  if (h->ext_shift == 0) { v->vl = v->vr = vis; }
+  else if (vis == h->ext_side) { v->vl = v->left; v->vr = 2 * h->ext_side - v->left; }
+  else { v->vl = v->vr = 0; }
+}
+/* ADR 0318: a window-plane HUD band is shown centred in the planned total (picture column `ext_side`) with the backdrop on both sides, whatever the picture's placement above it. Only while the extension is
+ * visible (the native picture alone is shown as it is). Returns the first band row, or -1 when there is no band to draw. */
+static int hud_band_y0(const SvHost *h, const ExtView *v) {
+  if (h->ext_side <= 0 || h->ext_hud_rows <= 0 || h->ext_hud_rows > h->last_h || v->vl + v->vr <= 0) return -1;
+  return h->last_h - h->ext_hud_rows;
+}
 void sv_host_draw_picture(SvHost *h, float x, float y, float w, float hh) {
   SvRect r;
   SDL_FRect d;
@@ -214,8 +231,20 @@ void sv_host_draw_picture(SvHost *h, float x, float y, float w, float hh) {
   SDL_SetTextureBlendMode(h->frame_tex, SDL_BLENDMODE_NONE);
   { /* menu thumbnails show the native picture even when the texture holds an extended one */
     SDL_FRect src;
+    ExtView ev;
+    int band_y0 = -1;
+    if (h->ext_side > 0) { host_view(h, &ev); band_y0 = hud_band_y0(h, &ev); }
     src.x = (float)(h->ext_side + h->ext_shift); src.y = 0.0f; src.w = (float)h->last_w; src.h = (float)h->last_h;
-    SDL_RenderTexture(h->renderer, h->frame_tex, h->ext_side > 0 ? &src : NULL, &d);
+    if (band_y0 >= 0 && h->ext_shift != 0) {   /* ADR 0318: the HUD band sits at the centre column, not where the picture is placed; band_y0 == 0 (a band as tall as the picture) has no upper part */
+      SDL_FRect top_s = src, top_d = d, bot_s = src, bot_d = d;
+      top_s.h = (float)band_y0; top_d.h = d.h * (float)band_y0 / (float)h->last_h;
+      bot_s.x = (float)h->ext_side; bot_s.y = (float)band_y0; bot_s.h = (float)(h->last_h - band_y0);
+      bot_d.y = d.y + top_d.h; bot_d.h = d.h - top_d.h;
+      if (band_y0 > 0) SDL_RenderTexture(h->renderer, h->frame_tex, &top_s, &top_d);
+      SDL_RenderTexture(h->renderer, h->frame_tex, &bot_s, &bot_d);
+    } else {
+      SDL_RenderTexture(h->renderer, h->frame_tex, h->ext_side > 0 ? &src : NULL, &d);
+    }
   }
 }
 
@@ -545,17 +574,6 @@ static void render_picture(SvHost *h, SvCrtState *c, const SDL_FRect *src, SDL_F
   }
 }
 
-/* ADR 0315: where the picture and the visible part of the extension lie in the frame texture. `left` is the picture's texture column (ext_side + ext_shift), `vl` / `vr` the visible columns left / right of
- * it. Symmetric surfaces: left == ext_side and vl == vr == the visible side (historical behaviour). An asymmetric one is shown whole or not at all (both 0 = native picture only). */
-typedef struct ExtView { int left, vl, vr, tex_w; } ExtView;
-static void host_view(const SvHost *h, ExtView *v) {
-  const int vis = sv_host_visible_side(h);
-  v->tex_w = h->last_w + 2 * h->ext_side;
-  v->left = h->ext_side + h->ext_shift;
-  if (h->ext_shift == 0) { v->vl = v->vr = vis; }
-  else if (vis == h->ext_side) { v->vl = v->left; v->vr = 2 * h->ext_side - v->left; }
-  else { v->vl = v->vr = 0; }
-}
 static void render_game(SvHost *h, int out_w, int out_h) {
   const SvVideoSettings *v = &h->settings.video;
   SvRect dest;
@@ -1031,6 +1049,10 @@ static int legacy_overlay_rect(const SvHost *h, const ExtView *v, int hgt, int *
 
 /* The pixel below the overlays at texture position (tx, ty): the native picture, or the (treated or raw) side. */
 static const uint8_t *overlay_bg(const SvHost *h, SvSideTreatment t, const ExtView *v, int w, int hgt, int tx, int ty) {
+  static const uint8_t backdrop[3] = {0, 0, 0};
+  const int band_y0 = hud_band_y0(h, v);
+  if (band_y0 >= 0 && ty >= band_y0)   /* ADR 0318: the HUD band: the picture row at the centre column, the backdrop beside it */
+    return (tx >= h->ext_side && tx < h->ext_side + w) ? h->last_rgb + ((size_t)ty * (size_t)w + (size_t)(tx - h->ext_side)) * 3u : backdrop;
   if (tx < v->left) return (t == SV_TREAT_PASSTHROUGH || v->vl <= 0) ? h->ext_raw + ((size_t)ty * (size_t)v->tex_w + (size_t)tx) * 3u
                                                                      : h->side_buf + ((size_t)ty * (size_t)v->vl + (size_t)(tx - (v->left - v->vl))) * 3u;
   if (tx < v->left + w) return h->last_rgb + ((size_t)ty * (size_t)w + (size_t)(tx - v->left)) * 3u;
@@ -1121,6 +1143,27 @@ static int draw_overlays(SvHost *h, SvSideTreatment t, const ExtView *v, int w, 
   return draw_layers(h, t, v, w, hgt);
 }
 
+/* ADR 0318: draws the window-plane HUD band into the frame texture: over every visible column of the band's rows the backdrop (black), then the native-width picture row at the centre of the planned total
+ * (texture column ext_side). Done after the picture and the side treatment, so the band is the same in Raw, Comfort and Borders and a picture placed anywhere above it cannot move it. Returns 1 on success. */
+static int apply_hud_band(SvHost *h, const ExtView *v) {
+  const int y0 = hud_band_y0(h, v);
+  const int w = h->last_w, rows = h->last_h - (y0 < 0 ? 0 : y0);
+  SDL_Rect r;
+  void *px = NULL;
+  int pitch = 0, j;
+  if (y0 < 0) return 1;
+  r.x = v->left - v->vl; r.y = y0; r.w = v->vl + w + v->vr; r.h = rows;
+  if (h->ext_side < r.x || h->ext_side + w > r.x + r.w) return 1;   /* unreachable for validated geometry: the centre lies inside the visible columns */
+  if (!SDL_LockTexture(h->frame_tex, &r, &px, &pitch)) return 0;
+  for (j = 0; j < rows; ++j) {
+    uint8_t *row = (uint8_t *)px + (size_t)j * (size_t)pitch;
+    memset(row, 0, (size_t)r.w * 3u);
+    memcpy(row + (size_t)(h->ext_side - r.x) * 3u, h->last_rgb + (size_t)(y0 + j) * (size_t)w * 3u, (size_t)w * 3u);
+  }
+  SDL_UnlockTexture(h->frame_tex);
+  return 1;
+}
+
 /* SEG-123: builds the frame texture from the retained native picture (+ retained raw extension). Deterministic in (style, source, native pixels, raw
  * extension); the native pixels are always the centre; no allocation. Returns 1 on success. */
 static int upload_picture(SvHost *h) {
@@ -1163,6 +1206,7 @@ static int upload_picture(SvHost *h) {
     if (v.vr > 0 && !SDL_UpdateTexture(h->frame_tex, &r, h->side_buf + (size_t)v.vl * (size_t)hgt * 3u, v.vr * 3)) return 0;
   }
   if (!SDL_UpdateTexture(h->frame_tex, &centre, h->last_rgb, w * 3)) return 0; /* the native pixels always come from the native picture */
+  if (!apply_hud_band(h, &v)) return 0;
   if (!draw_overlays(h, t, &v, w, hgt)) return 0;
   h->side_applied = t;
   return 1;
@@ -1286,6 +1330,7 @@ static int present_frame_impl(SvHost *h, const uint8_t *rgb, int w, int hgt, int
   h->last_h = hgt;
   h->ext_side = side;
   h->ext_shift = ext != NULL ? ext->shift : 0;   /* ADR 0315 (validated with the surface; 0 without one) */
+  h->ext_hud_rows = ext != NULL ? ext->hud_rows : 0;   /* ADR 0318 (validated with the surface; 0 without one) */
   h->ovl_w = h->ovl_h = 0;
   if (ovl != NULL && ovl->overlay_rgba != NULL && ovl->overlay_w > 0 && ovl->overlay_w <= SV_OVERLAY_MAX && ovl->overlay_h > 0 && ovl->overlay_h <= SV_OVERLAY_MAX) {
     memcpy(h->ovl_rgba, ovl->overlay_rgba, (size_t)ovl->overlay_w * (size_t)ovl->overlay_h * 4u);
@@ -1463,7 +1508,9 @@ static void note_reason_transition(SvHost *h) {
   const unsigned now = h->cov.last_reason;
   if (now == h->cov_reason_notified) return;
   h->cov_reason_notified = (uint8_t)now;
-  if (now != SV_REJ_NONE && now != SV_REJ_OVER_DECLARED) {   /* the geometry reasons already have their own once-per-entry notices */
+  /* the geometry reasons already have their own once-per-entry notices; "virtual sprites not presented" is a diagnostic only (coverage JSON, reason_frames, last_reason): it occurs in normal play and on mode
+   * changes, so it never raises a notice (cov_reason_notified is still updated above, so a later genuine reason is reported on its own transition) */
+  if (now != SV_REJ_NONE && now != SV_REJ_OVER_DECLARED && now != SV_REJ_VSPRITE_UNPRESENTED) {
     char text[120];
     snprintf(text, sizeof text, "Presentation: %s", reason_text(now));
     push_toast(h, text, 4000u);
@@ -1539,7 +1586,11 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
       const uint32_t pic_px = vs_total > side_px ? vs_total - side_px : 0u;
       /* an extension column is credited only when it is really displayed: the surface accepted, and a side treatment that shows the supplied columns (Comfort and Borders replace them with a fill, so a sprite
        * drawn there is discarded and counts for nothing) */
-      const int shown = ext_visible && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
+      /* ADR 0318: with a window-plane HUD band the presenter blacks out the band rows' side columns, and the compositor reports side pixels per frame, not per row, so the host cannot tell a pixel above the band
+       * (shown) from one inside it (removed). It therefore never credits side pixels of a frame whose HUD band is applied: a deliberate under-claim (side actors above the HUD are shown but not counted), like
+       * Comfort and Borders. Actors in the native picture are credited as before (the band keeps the picture row whole). */
+      const int hud_band = ext_visible && ext->hud_rows > 0;
+      const int shown = ext_visible && !hud_band && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
       vs_picture = pic_px > 0u && picture_admitted && ext->actor_picture != NULL;
       vs_left = left_px > 0u && shown && vis_l > 0;
       vs_right = right_px > 0u && shown && vis_r > 0;

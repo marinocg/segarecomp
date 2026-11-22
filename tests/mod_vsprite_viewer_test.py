@@ -112,7 +112,9 @@ def main():
             want, d_auth, d_ver = model(base, sprites, budget)
             wrong = mismatches(img, want)
             check(wrong == 0, f"ABI 1 {name}: the presented frame equals the independent golden ({wrong} pixels differ)")
-            check(toast_shown(img, base) == (d_auth + d_ver == 0), f"ABI 1 {name}: the host says so (a visible notice) exactly when the set delivered nothing")
+            # ADR 0318 (review of #247): "virtual sprites not presented" is a diagnostic only: never a visible notice, but still reported in the coverage (last_reason / reason_frames) exactly when the set delivered nothing
+            check(not toast_shown(img, base), f"ABI 1 {name}: no visible notice for an unpresented set")
+            check((rep.get("last_reason") == "virtual_sprite_unpresented") == (d_auth + d_ver == 0), f"ABI 1 {name}: the coverage diagnoses the set as unpresented exactly when it delivered nothing")
             block = vs(rep)
             check(block.get("pixels_authored") == d_auth * rep["frames"] and block.get("pixels_verified", 0) == d_ver * rep["frames"] and block.get("sets") == rep["frames"],
                   f"ABI 1 {name}: authored {d_auth} / verified {d_ver} pixels per frame are reported separately and match the model: {block}")

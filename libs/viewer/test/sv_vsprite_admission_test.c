@@ -122,6 +122,98 @@ static void partial_rows_counters(void) {
   }
 }
 
+
+/* ADR 0318 (review of #247): the presenter blacks out the side columns of a window-plane HUD band, and the compositor reports side pixels per frame, not per row, so with a band the host credits NO side pixel
+ * (a conservative under-claim: side actors above the HUD are shown but not counted), keeps crediting the picture's pixels, and never credits what the band removed. Every style, with and without a band, centred and
+ * asymmetric (the picture placed at 100 of 476 columns). */
+static int toast_has(const SvHost *h, const char *needle) { int i; for (i = 0; i < h->toast_count; ++i) if (strstr(h->toasts[i].text, needle) != NULL) return 1; return 0; }
+
+static SvHost *band_host(SvSideStyle style) {
+  SvHost *h = open_host("max=32:9;scene=a:actors+hud");
+  SvSettings st = *sv_host_settings(h);
+  st.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY; st.video.widescreen_side_style = style; st.video.widescreen_width = 100;
+  st.video.widescreen_ratio.num = 32; st.video.widescreen_ratio.den = 9; st.video.aspect = SV_ASPECT_ORIGINAL; st.video.scale = SV_SCALE_INTEGER;
+  sv_host_apply_settings(h, &st);
+  sv_host_set_scene(h, "a");
+  return h;
+}
+static int band_present(SvHost *h, uint64_t seq, int shift, int hud_rows, uint32_t picture, uint32_t left, uint32_t right) {
+  SvExtendedSurface e;
+  const int side = side_for(32, 9);
+  memset(&e, 0, sizeof e);
+  e.rgb24 = g_ext; e.size = sizeof g_ext; e.width = W + 2 * side; e.height = H; e.pitch = (W + 2 * side) * 3; e.side = side; e.shift = shift; e.sequence = seq;
+  e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL; e.source = SV_EXTSRC_GENERIC; e.hud_rows = hud_rows;
+  e.actor_stage = SV_ACT_COMPOSED; e.actor_provenance = 2; e.actor_pixels_authored = picture + left + right; e.actor_left_authored = left; e.actor_right_authored = right; e.actor_picture = g_comp;
+  return sv_host_present_extended(h, g_native, W, H, W * 3, seq, &e);
+}
+
+static void hud_band_credit(void) {
+  static const SvSideStyle styles[3] = {SV_SIDE_RAW, SV_SIDE_COMFORT, SV_SIDE_BORDERS};
+  static const char *names[3] = {"Raw", "Comfort", "Borders"};
+  const int side = side_for(32, 9);
+  size_t k;
+  int placed;
+  for (k = 0; k < 3; ++k)
+    for (placed = 0; placed < 2; ++placed) {
+      const int shift = placed ? 100 - side : 0;   /* the picture at 100 of 476 columns, or centred */
+      char what[200];
+      SvHost *h;
+      /* no band: the previous accounting, exactly (Raw credits the margins, Comfort and Borders under-claim them) */
+      h = band_host(styles[k]);
+      CHECK(band_present(h, 20 + (uint64_t)k, shift, 0, 32, 16, 16) == 0, "no band: presented");
+      snprintf(what, sizeof what, "%s, %s, no band: picture 32 always, margins 16/16 only under Raw", names[k], placed ? "asymmetric" : "centred");
+      CHECK(vsn(json_of(h), "pixels_picture") == 32 && vsn(json_of(h), "pixels_left") == (k == 0 ? 16 : 0) && vsn(json_of(h), "pixels_right") == (k == 0 ? 16 : 0), what);
+      sv_host_close(h);
+      /* a band: the picture's pixels are credited, no side pixel is (shown above the band or removed inside it: not distinguishable) */
+      h = band_host(styles[k]);
+      CHECK(band_present(h, 30 + (uint64_t)k, shift, 32, 32, 16, 16) == 0, "band: presented");
+      snprintf(what, sizeof what, "%s, %s, HUD band: picture 32 credited, side pixels never credited", names[k], placed ? "asymmetric" : "centred");
+      CHECK(vsn(json_of(h), "pixels_picture") == 32 && vsn(json_of(h), "pixels_left") == 0 && vsn(json_of(h), "pixels_right") == 0, what);
+      sv_host_close(h);
+      /* an actor drawn only in the side columns (inside the masked margin or above it): nothing is credited, nothing is presented as composed */
+      h = band_host(styles[k]);
+      CHECK(band_present(h, 40 + (uint64_t)k, shift, 32, 0, 16, 16) == 0, "side-only actor with a band: presented");
+      snprintf(what, sizeof what, "%s, %s, side-only actor with a band: no pixel, no presentation credit, diagnosed as unpresented", names[k], placed ? "asymmetric" : "centred");
+      CHECK(vsn(json_of(h), "pixels_left") == 0 && vsn(json_of(h), "pixels_right") == 0 && vsn(json_of(h), "presented") == 0 && actors(json_of(h), "presented") == 0 &&
+                strstr(json_of(h), "\"last_reason\":\"virtual_sprite_unpresented\"") != NULL, what);
+      sv_host_close(h);
+    }
+  /* a band as tall as the picture behaves the same */
+  {
+    SvHost *h = band_host(SV_SIDE_RAW);
+    CHECK(band_present(h, 50, 100 - side, H, 32, 16, 16) == 0, "full-height band: presented");
+    CHECK(vsn(json_of(h), "pixels_picture") == 32 && vsn(json_of(h), "pixels_left") == 0 && vsn(json_of(h), "pixels_right") == 0, "full-height band: side pixels never credited");
+    sv_host_close(h);
+  }
+}
+
+/* the "virtual sprites not presented" diagnostic never raises a notice, but stays fully diagnosed; every other presentation failure still does, also right after it */
+static void unpresented_is_silent(void) {
+  SvHost *h = band_host(SV_SIDE_RAW);
+  SvExtendedSurface e;
+  int i;
+  const int side = side_for(32, 9);
+  for (i = 0; i < 60; ++i) {
+    CHECK(band_present(h, 100 + (uint64_t)i, 0, 32, 0, 16, 16) == 0, "an unpresented set is presented");
+    if (i == 0) sv_host_toast(h, "");   /* the host's one-time "Pause menu" hint on the very first picture is not what is under test */
+  }
+  CHECK(h->toast_count == 0 && !toast_has(h, "virtual sprites"), "virtual sprites not presented: no notice, however often it repeats");
+  CHECK(strstr(json_of(h), "\"last_reason\":\"virtual_sprite_unpresented\"") != NULL && strstr(json_of(h), "\"virtual_sprite_unpresented\":60") != NULL, "the diagnostic is intact: last_reason and 60 reason frames");
+  /* a genuine failure right after it is reported on its own transition */
+  memset(&e, 0, sizeof e);
+  e.rgb24 = g_ext; e.size = sizeof g_ext; e.width = W + 2 * side; e.height = H; e.pitch = (W + 2 * side) * 3 - 1; e.side = side; e.sequence = 200; e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL;
+  CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 200, &e) == 0 && toast_has(h, "extension surface invalid"), "a transition from the suppressed reason to a genuine one is reported");
+  /* and the suppressed reason after a genuine one stays silent while the genuine one is not repeated */
+  sv_host_toast(h, "");
+  CHECK(band_present(h, 201, 0, 32, 0, 16, 16) == 0 && h->toast_count == 0, "back to the unpresented set: still no notice");
+  /* a refused (virtual-sprite REJECTED) set is a genuine compositor rejection and is still announced */
+  memset(&e, 0, sizeof e);
+  e.rgb24 = g_ext; e.size = sizeof g_ext; e.width = W + 2 * side; e.height = H; e.pitch = (W + 2 * side) * 3; e.side = side; e.sequence = 202; e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL;
+  e.actor_stage = SV_ACT_REJECTED; e.actor_reject = 1;
+  CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 202, &e) == 0 && toast_has(h, "virtual sprites rejected"), "a compositor rejection is still announced");
+  sv_host_close(h);
+}
+
 int main(void) {
   static const Case cases[] = {
     /* name                         level num den surf stale pitch geom decl                          L  R  composed */
@@ -169,6 +261,8 @@ int main(void) {
     }
   }
   partial_rows_counters();
+  hud_band_credit();
+  unpresented_is_silent();
   if (failures != 0) { printf("%d failure(s)\n", failures); return 1; }
   printf("sv_vsprite_admission_test: ok\n");
   return 0;
