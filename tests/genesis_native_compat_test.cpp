@@ -287,6 +287,27 @@ void asymmetric_placement() {
   }
 }
 
+// SEG-152-T002 (ADR 0320 decision 4): what ABI 1 does today for a frame without a VRAM journal. The provider is STILL called and its HUD is STILL delivered; it receives the producer's own
+// end-of-frame VRAM (not the frame-start copy `raster->vram_start`), and only the authored-scenery credit is withheld (GENESIS_EXT_FLAG_NO_VRAM_JOURNAL). The exact-frame contract must therefore not decline
+// such a frame wholesale: it hands the same host-owned VRAM with an explicit "not frame-start" marker.
+void non_journaled_frame() {
+  Scene sc;
+  build_scene(sc, 77);
+  sc.raster->has_vram_journal = 0;
+  std::vector<uint8_t> later = sc.vram;   // the producer's input VRAM (what the runtime hands it) differs from the frame-start copy: mark a byte unmistakably
+  later[0x100] = 0x5A;
+  sc.raster->vram_start[0x100] = 0x00;
+  GenesisFrameExtension ext{}; attach(ext);
+  g_mock = Mock{}; g_mock.vram = later.data();
+  Scene use; use.vram = later; build_scene(use, 77); use.vram = later; use.raster->has_vram_journal = 0; std::memcpy(use.raster->vram_start, sc.vram.data(), GENESIS_VDP_VRAM_BYTES); use.raster->vram_start[0x100] = 0x00;
+  const Out o = produce(use, ext);
+  check(o.rc == 0 && g_mock.prepared == 1, "no VRAM journal: the provider is still called");
+  check(g_mock.seen_vram == use.vram.data(), "no VRAM journal: the provider receives the producer's own VRAM, not the frame-start copy");
+  check((o.res.flags & GENESIS_EXT_FLAG_NO_VRAM_JOURNAL) != 0U, "no VRAM journal: the extension result records it");
+  check(o.res.overlay_w == 12 && o.res.overlay_h == 9 && g_mock.huds == 1, "no VRAM journal: the HUD is still delivered");
+  check(o.res.authored == 0 && o.res.authored_row_count == 0, "no VRAM journal: authored-scenery credit is withheld");
+}
+
 void generic_hook() {
   Scene sc;
   build_scene(sc, 11);
@@ -625,6 +646,7 @@ void sdk_contract() {
 
 int main() {
   generic_hook();
+  non_journaled_frame();
   asymmetric_placement();
   runtime_snapshot();
   sdk_contract();

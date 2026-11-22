@@ -306,6 +306,15 @@ segarecomp_enable_warnings(genesis_native_compat_tests)
 add_test(NAME genesis_native_compat_tests COMMAND genesis_native_compat_tests)
 set_property(TEST genesis_native_compat_tests APPEND PROPERTY LABELS full fast)
 
+# SEG-152-T001 (ADR 0309/0313/0314): scenery window sufficiency over the shared ABI 1 / ABI 2 parity harness (abi_parity_harness.hpp, extended by SEG-152-T008); the production window limits and lookup come from
+# platforms/genesis/viewer/mod_scenery_window.hpp, the pixels from the real extension producer.
+add_executable(abi_parity_scenery_tests abi_parity_scenery_test.cpp)
+target_link_libraries(abi_parity_scenery_tests PRIVATE segarecomp::runtime_genesis)
+target_include_directories(abi_parity_scenery_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
+segarecomp_enable_warnings(abi_parity_scenery_tests)
+add_test(NAME abi_parity_scenery_tests COMMAND abi_parity_scenery_tests)
+set_property(TEST abi_parity_scenery_tests APPEND PROPERTY LABELS full)
+
 # SEG-140 (ADR 0303): authored virtual sprites. T002 differential decode against the VDP's own output; T003 layers, clipping and the original per-line budget.
 add_test(NAME genesis_vsprite_ownership_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_vsprite_ownership_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_vsprite_ownership_test APPEND PROPERTY LABELS full fast)
