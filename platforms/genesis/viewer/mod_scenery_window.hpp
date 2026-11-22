@@ -5,7 +5,8 @@
 #include <cstdint>
 #include <vector>
 
-namespace segarecomp::scenery {
+namespace segarecomp {
+namespace scenery {
 
 constexpr std::uint32_t kColsMax = 128U, kRowsMax = 64U, kWordsMax = 4096U, kWindowsPerPlane = 2U;   // ADR 0309 / ADR 0313
 constexpr std::int32_t kOriginMax = 1 << 20;
@@ -38,4 +39,5 @@ inline int lookup(const Window (&windows)[kWindowsPerPlane], int row, int x, int
   return 0;
 }
 
-}  // namespace segarecomp::scenery
+}  // namespace scenery
+}  // namespace segarecomp

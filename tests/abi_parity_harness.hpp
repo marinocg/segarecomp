@@ -157,7 +157,10 @@ inline int provider_word(void *state, unsigned plane, unsigned row, int x, int h
   return segarecomp::scenery::lookup(p->windows[plane], static_cast<int>(row), x, hscroll, vscroll, word);
 }
 inline int provider_hud(void *, GenesisCompatOverlay *) { return 0; }
-inline GenesisNativeCompat g_table = {GENESIS_NATIVE_COMPAT_ABI, "parity.twin", 1, GENESIS_COMPAT_SCENERY, provider_prepare, provider_word, provider_hud};
+inline GenesisNativeCompat &twin_table() {
+  static GenesisNativeCompat table = {GENESIS_NATIVE_COMPAT_ABI, "parity.twin", 1, GENESIS_COMPAT_SCENERY, provider_prepare, provider_word, provider_hud};
+  return table;
+}
 
 // ---- the ABI 2 window builder (the provider model) -------------------------------------------------------------------------------------
 enum class Timing { Exact, Predicted };
@@ -303,7 +306,7 @@ inline Produced produce(const Scene &sc, Provider &prov, unsigned side) {
   if (genesis_vdp_produce_frame_raster(sc.vram.data(), sc.raster.get(), native.get()) != 0) return o;
   GenesisFrameExtension ext{};
   ext.plan = plan_fn; ext.plan_ctx = &pc; ext.producer = genesis_vdp_produce_extension; ext.pixels = surface.data(); ext.capacity = surface.size(); ext.request = 2;
-  ext.compat = &g_table; ext.compat_state = &prov; ext.compat_components = GENESIS_COMPAT_SCENERY; ext.compat_caps = GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_FRAME_WORK_RAM;
+  ext.compat = &twin_table(); ext.compat_state = &prov; ext.compat_components = GENESIS_COMPAT_SCENERY; ext.compat_caps = GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_FRAME_WORK_RAM;
   ext.compat_ram = ram.data(); ext.compat_ram_valid = 1; ext.overlay_rgba = overlay.data(); ext.layer_rgba = nullptr;
   std::fill(surface.begin(), surface.end(), static_cast<uint8_t>(0xAA));
   o.rc = genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &o.res);
