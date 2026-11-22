@@ -63,6 +63,18 @@ PatchPreview verify_mod(const LibraryEntry &entry, const segarecomp::mod::Packag
     for (const auto &payload : m.payloads) if (payload.kind == "native-c11") { out.info.native_file = payload.path; out.info.native_sha256 = payload.sha256; break; }   // the first provider source names the executable code on the sheet
     if (out.info.native_sha256.empty()) { out.error = refusal_for("the package has no native source"); return out; }
   }
+  // Presentation defaults: explicit manifest values win. A package that omits them but VERIFIABLY claims widescreen support (a validated geometry declaration whose scenes cover
+  // scenery or actors) gets Enhanced Widescreen + Raw Extension, which is what the claim needs to be visible; any other mod states no default (no title, id or digest is consulted).
+  out.info.default_widescreen = m.default_widescreen;
+  out.info.default_side_style = m.default_side_style;
+  bool claims_widescreen = false;
+  if (m.has_geometry && !m.aspect_max.empty())
+    for (const auto &scene : m.geometry_scenes)
+      for (const std::string &component : scene.components) claims_widescreen = claims_widescreen || component == "scenery" || component == "actors";
+  if (claims_widescreen) {
+    if (out.info.default_widescreen.empty()) out.info.default_widescreen = "enhanced_gameplay";
+    if (out.info.default_side_style.empty()) out.info.default_side_style = "raw";
+  }
   out.already_installed = entry.find_patch(mp.identity) != nullptr;
   out.ok = true;
   if (package_bytes != nullptr) *package_bytes = std::move(bytes);

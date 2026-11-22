@@ -46,7 +46,7 @@ def main():
         def run(*args):
             return subprocess.run([str(cli), *map(str, args)], text=True, capture_output=True, timeout=300)
 
-        def package(name, script=None, caps=None, template=None, platform_id="genesis"):
+        def package(name, script=None, caps=None, template=None, platform_id="genesis", extra_toml=""):
             project = tmp / name
             if template is None:
                 shutil.copytree(example, project, ignore=shutil.ignore_patterns("fixture_rom.py", "README.md", "__pycache__"))
@@ -58,6 +58,8 @@ def main():
             else:
                 r = run("mod", "init", project, "--platform", platform_id, "--id", name, "--template", template, "--rom-sha256", rom_sha)
                 assert r.returncode == 0, r.stdout
+            if extra_toml:
+                (project / "mod.toml").write_text((project / "mod.toml").read_text() + extra_toml)
             out = tmp / (name + ".segapatch")
             r = run("mod", "pack", project, "--out", out)
             assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout
@@ -66,6 +68,10 @@ def main():
         script = (example / "scripts/main.luau").read_text()
         packages = [package("hud"), package("hud-v2", script=script.replace('"LUAU HUD"', '"HUD V2"')), package("native", template="c11-provider"),
                     package("wram", caps=("frame.work_ram", "host.log", "overlay.rgba")), package("syntax", script="function render(frame)\n  local = 1\nend\n")]
+        # presentation defaults (ROM-free): verified widescreen geometry without an explicit [presentation] (the shape of the published Castle 0.1.0 package), the same with an explicit one, a HUD-only geometry, and a mod with no geometry
+        geo = '\n[geometry]\naspect_max = "32:9"\n\n[[scene]]\nid = "main"\ncomponents = ["actors", "scenery"]\n'
+        packages += [package("ws-implicit", extra_toml=geo), package("ws-explicit", extra_toml=geo + '\n[presentation]\nwidescreen = "extended_backgrounds"\nside_style = "borders"\n'),
+                     package("hud-only", extra_toml='\n[geometry]\naspect_max = "21:9"\n\n[[scene]]\nid = "main"\ncomponents = ["hud"]\n')]
         env = dict(os.environ, LD_LIBRARY_PATH=str(sdl / "lib") + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""), SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
         r = subprocess.run([test_exe, str(install), str(rom), str(other), *map(str, packages)], text=True, capture_output=True, env=env, timeout=1500)
         sys.stdout.write(r.stdout)

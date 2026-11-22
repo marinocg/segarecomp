@@ -680,6 +680,8 @@ RomView view_for_variant(const LibraryEntry &entry, const std::string &identity)
     view.luau_approved = !view.luau_native || p->native_approved;
     view.luau_pin = view.luau_native ? std::string("native-abi") + std::to_string(p->native_abi) : view.luau_data ? std::string("data") : std::string(segarecomp::luau::compiler_pin());
     view.luau_label = p->name + (p->version.empty() ? std::string() : " " + p->version);
+    view.patch_widescreen = p->widescreen;   // one source of truth for both variant kinds: the verified, stored presentation defaults
+    view.patch_side_style = p->side_style;
   } else if (const InstalledPatch *p = entry.find_patch(identity); p != nullptr && entry.platform_id == "genesis") {
     view.patch_identity = p->identity;
     view.patch_package = patch_package_path(p->identity);

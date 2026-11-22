@@ -575,6 +575,20 @@ static void patch_tests(void) {
     got = patched_prefs(NULL, P1, "enhanced_gameplay", "raw", &act); CHECK(act == 0, "patch: without a game identity nothing is overridden (and nothing is saved globally)");
     after = read_text(g_settings); CHECK(after != NULL && strcmp(after, before_global) == 0, "patch: the global file is still untouched");
   }
+  /* an explicit global display ratio (21:9, 32:9) is the user's choice: a package's Level 3 + Raw defaults never replace it */
+  { static const char *const ratios[] = {"21:9", "32:9"};
+    size_t i;
+    for (i = 0; i < 2; ++i) {
+      char text[200];
+      SvHost *h;
+      snprintf(text, sizeof text, "video.widescreen=original\nvideo.widescreen_side_style=comfort\nvideo.widescreen_ratio=%s\n", ratios[i]);
+      write_text(g_settings, text);
+      h = open_patched(kB, "3333333333333333333333333333333333333333333333333333333333333333", "enhanced_gameplay", "raw"); /* a package with no profile of its own yet */
+      CHECK(h != NULL && sv_host_patch_defaults_active(h) == 1 && h->settings.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY && h->settings.video.widescreen_side_style == SV_SIDE_RAW, "patch: defaults activate with an explicit ratio set");
+      CHECK(h != NULL && h->settings.video.widescreen_ratio.num == (i == 0 ? 21 : 32) && h->settings.video.widescreen_ratio.den == 9, "patch: an explicit 21:9 / 32:9 global ratio is preserved");
+      if (h != NULL) sv_host_close(h);
+    }
+  }
 }
 
 int main(void) {

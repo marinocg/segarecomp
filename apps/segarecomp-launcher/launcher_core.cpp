@@ -318,6 +318,11 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID", rom.patch_identity.c_str(), true);
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN", rom.patch_widescreen.empty() ? "enhanced_gameplay" : rom.patch_widescreen.c_str(), true);
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE", rom.patch_side_style.empty() ? "raw" : rom.patch_side_style.c_str(), true);
+  } else if (rom.luau_mod() && (!rom.patch_widescreen.empty() || !rom.patch_side_style.empty())) {
+    // A schema 3 mod hands over exactly the defaults its verified record holds (explicit or derived at verification); a mod with none, like Vanilla, leaves the viewer's settings alone.
+    SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID", rom.luau_identity.c_str(), true);
+    if (rom.patch_widescreen.empty()) SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN"); else SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN", rom.patch_widescreen.c_str(), true);
+    if (rom.patch_side_style.empty()) SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE"); else SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE", rom.patch_side_style.c_str(), true);
   } else {
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID");
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");
