@@ -908,12 +908,14 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
         /* SEG-122: 3: the verified patch's defaults, 4: this variant's own profile. Fail closed: a bad identity or value means no override and the Vanilla behaviour. */
         char variant[1100];
         SvSettings probe = h->settings;
+        const int stated = (cfg->patch_widescreen != NULL && *cfg->patch_widescreen != '\0') || (cfg->patch_side_style != NULL && *cfg->patch_side_style != '\0');
+        /* A stated default must be valid (fail closed); a variant that states none (a mod without presentation defaults) still gets its own profile and inherits everything else. */
         if (sv_patch_profile_path(h->settings_path, cfg->platform_id, id, cfg->patch_id, variant, sizeof variant) == 0 &&
-            sv_patch_defaults_apply(&probe, cfg->patch_widescreen, cfg->patch_side_style) == 0) {
+            (!stated || sv_patch_defaults_apply(&probe, cfg->patch_widescreen, cfg->patch_side_style) == 0)) {
           h->settings = probe;
           (void)sv_profile_load(&h->settings, variant);
           snprintf(h->profile_path, sizeof h->profile_path, "%s", variant);   /* changes made now are saved here, not to the game's profile */
-          h->patch_defaults = 1;
+          h->patch_defaults = stated;
         }
       }
     } else {

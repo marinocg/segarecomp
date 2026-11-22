@@ -46,7 +46,22 @@ std::string select_luau_mod(RomView &rom, const std::filesystem::path &package) 
   return {};
 }
 
-std::string verify_installed_mod(const RomView &rom) {
+// The single rule for a schema 3 package's presentation defaults (install and launch both use it): explicit manifest values win; a package that verifiably claims widescreen (a geometry
+// declaration with aspect_max and a scene covering scenery or actors) but states none gets Enhanced Widescreen + Raw Extension per missing field; anything else states no default.
+PresentationDefaults mod_presentation_defaults(const segarecomp::mod::Manifest &m) {
+  PresentationDefaults d{m.default_widescreen, m.default_side_style};
+  bool claims_widescreen = false;
+  if (m.has_geometry && !m.aspect_max.empty())
+    for (const auto &scene : m.geometry_scenes)
+      for (const std::string &component : scene.components) claims_widescreen = claims_widescreen || component == "scenery" || component == "actors";
+  if (claims_widescreen) {
+    if (d.widescreen.empty()) d.widescreen = "enhanced_gameplay";
+    if (d.side_style.empty()) d.side_style = "raw";
+  }
+  return d;
+}
+
+std::string verify_installed_mod(const RomView &rom, PresentationDefaults *defaults) {
   if (!rom.luau_mod()) return {};
   const segarecomp::mod::Package p = segarecomp::mod::read_package_file(rom.luau_package);
   if (!p.ok) return "The installed mod package is not valid any more: " + p.rejection.message + ".";
@@ -59,6 +74,7 @@ std::string verify_installed_mod(const RomView &rom) {
   const segarecomp::mod::EffectiveImage effective = segarecomp::mod::effective_image(p, original);
   if (!effective.ok) return "This game is not one the mod supports: " + effective.rejection.message + ".";
   if (effective.original_sha256 != rom.sha256 || effective.effective_sha256 != rom.luau_effective_sha256) return "The original game or the effective image does not match the installed mod.";
+  if (defaults != nullptr) *defaults = mod_presentation_defaults(p.manifest);
   return {};
 }
 

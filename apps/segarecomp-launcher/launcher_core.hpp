@@ -15,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+namespace segarecomp::mod { struct Manifest; }
+
 namespace launcher {
 
 struct DataEnvironment;   // data_location.hpp (not included here: that header includes library_catalog.hpp, which needs this one)
@@ -129,7 +131,8 @@ struct RegionHint { std::string region = "usa"; bool ambiguous = false; };
 // Region profiles the runtime accepts: usa, japan and europe (Europe PAL runs on the 60 Hz schedule; 50 Hz timing is not implemented, see region_note).
 [[nodiscard]] bool region_executable(const std::string &region);
 // Empty when the game may be launched; otherwise the plain-language reason it must not be (an unknown region name).
-[[nodiscard]] std::string launch_refusal(const RomView &rom);
+struct PresentationDefaults { std::string widescreen, side_style; bool operator==(const PresentationDefaults &) const = default; };   // "" = none stated
+[[nodiscard]] std::string launch_refusal(const RomView &rom, PresentationDefaults *mod_defaults = nullptr);
 // Applies the per-launch environment of the child game to `environment` (never the launcher's own process environment).
 void apply_game_environment(SDL_Environment *environment, const RomView &rom);
 
@@ -263,7 +266,9 @@ void reset_policy_identity_memo_for_tests();
 [[nodiscard]] std::string select_luau_mod(RomView &rom, const std::filesystem::path &package);
 // SEG-143-T008: the build-time reverification of the selected schema 3 mod (`rom.luau_*`): the installed copy parses as a valid package whose identity is the selected one, its effective image for the
 // ORIGINAL game file is the recorded one, and native code is approved for exactly this identity. Returns "" or the plain-language refusal; nothing is modified.
-[[nodiscard]] std::string verify_installed_mod(const RomView &rom);
+// `defaults`, when given and verification passes, receives the presentation defaults of the VERIFIED stored package (explicit, else the geometry-derived fallback).
+[[nodiscard]] PresentationDefaults mod_presentation_defaults(const segarecomp::mod::Manifest &manifest);
+[[nodiscard]] std::string verify_installed_mod(const RomView &rom, PresentationDefaults *defaults = nullptr);
 // SEG-122: the package identity a finished build recorded in metadata.json ("" for a Vanilla build).
 [[nodiscard]] std::string read_variant_identity(const std::filesystem::path &entry);
 // ---- SEG-057-T002 (ADR 0119): the Optimized -> Compatibility restart contract (shared by the window and the headless `--run`) ----

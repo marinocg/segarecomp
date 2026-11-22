@@ -16,7 +16,11 @@
 #include <thread>
 #include <vector>
 
+#include <SDL3/SDL.h>
+
 #include "launcher_core.hpp"
+#include "library_catalog.hpp"
+#include "patch_library.hpp"
 #include "segarecomp/sha256.hpp"
 
 namespace fs = std::filesystem;
@@ -62,11 +66,11 @@ BuildOutcome build(const RomView &rom, const Layout &layout, std::string *messag
 }  // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 9) {
-    std::cerr << "usage: launcher_mod_variant_test <install-root> <rom> <other-rom> <hud> <hud-v2> <native> <wram> <syntax>\n";
+  if (argc < 12) {
+    std::cerr << "usage: launcher_mod_variant_test <install-root> <rom> <other-rom> <hud> <hud-v2> <native> <wram> <syntax> <ws-implicit> <ws-explicit> <hud-only>\n";
     return 2;
   }
-  const fs::path root = argv[1], rom_path = argv[2], other_rom_path = argv[3], hud = argv[4], hud2 = argv[5], native = argv[6], wram = argv[7], syntax = argv[8];
+  const fs::path root = argv[1], rom_path = argv[2], other_rom_path = argv[3], hud = argv[4], hud2 = argv[5], native = argv[6], wram = argv[7], syntax = argv[8], ws_implicit = argv[9], ws_explicit = argv[10], hud_only = argv[11];
   const fs::path cache = root.parent_path() / "cache";
   fs::create_directories(cache);
   set_env("SEGARECOMP_HOME", root.string());
@@ -184,6 +188,62 @@ int main(int argc, char **argv) {
              entry_ready_for(entry_a, a, layout) && entry_ready_for(entry_b, b, layout) && entry_ready_for(vanilla_entry, vanilla, layout),
          "Vanilla, the earlier mod entries and their cached executables are byte-identical and still valid");
   expect(!fs::exists(genesis_save_dir(a)) || fs::is_empty(genesis_save_dir(a)), "no save data was created or touched by the builds");
+
+  // ---- a schema 3 mod's presentation defaults travel install -> library reload -> selected variant -> launch environment (ROM-free; the viewer side is sv_width_profile_test) ----
+  {
+    const fs::path lib = root.parent_path() / "library";
+    fs::create_directories(lib);
+    Catalog catalog(lib / "library.json");
+    catalog.load();
+    Catalog::ImportResult imported = catalog.import_rom(vanilla, 1000);
+    expect(imported.entry != nullptr, "the presentation fixture game is in the library: " + imported.error);
+    if (imported.entry != nullptr) {
+      LibraryEntry *entry = imported.entry;
+      const auto install = [&](const fs::path &package, long long when) { return install_patch(*entry, package, rom_path, lib, when, false); };
+      const PatchInstall implicit = install(ws_implicit, 1001), expl = install(ws_explicit, 1002), plain = install(hud_only, 1003), nogeo = install(hud, 1004);
+      expect(implicit.ok && expl.ok && plain.ok && nogeo.ok, "the presentation packages install: " + implicit.error + expl.error + plain.error + nogeo.error);
+      const auto defaults = [&](const LibraryEntry &e, const std::string &id) { const RomView v = view_for_variant(e, id); return v.patch_widescreen + "/" + v.patch_side_style; };
+      const auto launch_env = [&](const RomView &view) {
+        SDL_Environment *env = SDL_CreateEnvironment(false);
+        apply_game_environment(env, view);
+        const auto get = [&](const char *k) { const char *v = SDL_GetEnvironmentVariable(env, k); return std::string(v != nullptr ? v : "<unset>"); };
+        const std::string text = get("SEGARECOMP_PATCH_ID") + "|" + get("SEGARECOMP_PATCH_WIDESCREEN") + "|" + get("SEGARECOMP_PATCH_SIDE_STYLE") + "|" + get("SEGARECOMP_PROFILE_ID");
+        SDL_DestroyEnvironment(env);
+        return text;
+      };
+      expect(defaults(*entry, implicit.identity) == "enhanced_gameplay/raw", "verified widescreen geometry without a [presentation] defaults to Enhanced Widescreen + Raw Extension: " + defaults(*entry, implicit.identity));
+      expect(defaults(*entry, expl.identity) == "extended_backgrounds/borders", "explicit presentation values win over the geometry fallback: " + defaults(*entry, expl.identity));
+      expect(defaults(*entry, plain.identity) == "/" && defaults(*entry, nogeo.identity) == "/", "a HUD-only geometry or a mod without geometry states no default (never forced into Level 3)");
+      expect(catalog.save(), "the library saves");
+      Catalog again(lib / "library.json");
+      again.load();
+      const LibraryEntry *reloaded = again.find("genesis", vanilla.sha256);
+      expect(reloaded != nullptr && defaults(*reloaded, implicit.identity) == "enhanced_gameplay/raw" && defaults(*reloaded, expl.identity) == "extended_backgrounds/borders" && defaults(*reloaded, plain.identity) == "/", "the defaults survive a library save and reload");
+      const std::string profile = vanilla.sha256;
+      expect(launch_env(view_for_variant(*entry, implicit.identity)) == implicit.identity + "|enhanced_gameplay|raw|" + profile, "the launch environment carries the identity and defaults: " + launch_env(view_for_variant(*entry, implicit.identity)));
+      expect(launch_env(view_for_variant(*entry, expl.identity)) == expl.identity + "|extended_backgrounds|borders|" + profile, "the explicit defaults reach the launch environment");
+      expect(launch_env(view_for_variant(*entry, plain.identity)) == plain.identity + "|<unset>|<unset>|" + profile && launch_env(view_for_variant(*entry, nogeo.identity)) == nogeo.identity + "|<unset>|<unset>|" + profile, "a mod without defaults still exports its own identity (its own viewer profile) and no defaults");
+      expect(launch_env(view_for_variant(*entry, "")) == "<unset>|<unset>|<unset>|<unset>", "Vanilla exports no presentation defaults and no variant profile");
+      {  // one inherited environment across switches: nothing of the previous variant survives
+        SDL_Environment *env = SDL_CreateEnvironment(false);
+        apply_game_environment(env, view_for_variant(*entry, implicit.identity));
+        apply_game_environment(env, view_for_variant(*entry, plain.identity));
+        expect(SDL_GetEnvironmentVariable(env, "SEGARECOMP_PATCH_WIDESCREEN") == nullptr && SDL_GetEnvironmentVariable(env, "SEGARECOMP_PATCH_SIDE_STYLE") == nullptr, "switching to a mod without defaults clears the previous mod's defaults");
+        apply_game_environment(env, view_for_variant(*entry, ""));
+        expect(SDL_GetEnvironmentVariable(env, "SEGARECOMP_PATCH_ID") == nullptr && SDL_GetEnvironmentVariable(env, "SEGARECOMP_PATCH_WIDESCREEN") == nullptr, "switching back to Vanilla clears the variant identity and defaults");
+        SDL_DestroyEnvironment(env);
+      }
+      // a tampered stored package fails the launch refusal before any environment is used; the defaults of one package never reach another
+      const fs::path stored = lib / "patches" / (implicit.identity + ".segapatch");
+      const std::string good = slurp(stored);
+      std::string bad = good;
+      bad[bad.size() / 2] = static_cast<char>(bad[bad.size() / 2] ^ 0x55);
+      { std::ofstream out(stored, std::ios::binary | std::ios::trunc); out << bad; }
+      expect(!launch_refusal(view_for_variant(*entry, implicit.identity)).empty(), "a tampered package is refused at launch, so its defaults are never activated");
+      { std::ofstream out(stored, std::ios::binary | std::ios::trunc); out << good; }
+      expect(launch_refusal(view_for_variant(*entry, implicit.identity)).empty(), "the unaltered package launches again: " + launch_refusal(view_for_variant(*entry, implicit.identity)));
+    }
+  }
 
   if (failures != 0) {
     std::cerr << failures << " check(s) failed\n";

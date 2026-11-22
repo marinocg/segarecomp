@@ -63,6 +63,10 @@ PatchPreview verify_mod(const LibraryEntry &entry, const segarecomp::mod::Packag
     for (const auto &payload : m.payloads) if (payload.kind == "native-c11") { out.info.native_file = payload.path; out.info.native_sha256 = payload.sha256; break; }   // the first provider source names the executable code on the sheet
     if (out.info.native_sha256.empty()) { out.error = refusal_for("the package has no native source"); return out; }
   }
+  // Presentation defaults: one shared rule (explicit values win, else the verified-widescreen-geometry fallback), also applied to already-installed records at launch.
+  const PresentationDefaults defaults = mod_presentation_defaults(m);
+  out.info.default_widescreen = defaults.widescreen;
+  out.info.default_side_style = defaults.side_style;
   out.already_installed = entry.find_patch(mp.identity) != nullptr;
   out.ok = true;
   if (package_bytes != nullptr) *package_bytes = std::move(bytes);
@@ -169,6 +173,21 @@ ModStatus mod_status(const InstalledPatch &patch, const ModStatusInput &in) {
   return s;
 }
 
+std::string prepare_variant_launch(LibraryEntry &entry, RomView &view, bool *record_changed) {
+  if (record_changed != nullptr) *record_changed = false;
+  PresentationDefaults verified;
+  if (const std::string refusal = launch_refusal(view, &verified); !refusal.empty()) return refusal;
+  if (!view.luau_mod() || (verified.widescreen == view.patch_widescreen && verified.side_style == view.patch_side_style)) return {};
+  view.patch_widescreen = verified.widescreen;
+  view.patch_side_style = verified.side_style;
+  if (InstalledPatch *record = entry.find_patch(view.luau_identity); record != nullptr && (record->widescreen != verified.widescreen || record->side_style != verified.side_style)) {
+    record->widescreen = verified.widescreen;
+    record->side_style = verified.side_style;
+    if (record_changed != nullptr) *record_changed = true;
+  }
+  return {};
+}
+
 PatchPreview preview_patch(const LibraryEntry &entry, const fs::path &package, const fs::path &original_rom) { return verify(entry, package, original_rom, nullptr); }
 
 PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const fs::path &original_rom, const fs::path &library_root, long long now, bool trust_native) {
@@ -181,6 +200,7 @@ PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const f
   if (entry.platform_id != "genesis") { result.error = "Patches are supported for Genesis / Mega Drive games only."; return result; }
   if (InstalledPatch *existing = const_cast<InstalledPatch *>(entry.find_patch(checked.info.identity)); existing != nullptr) {   // the identical package
     if (existing->has_native() && trust_native && !existing->native_approved) { existing->native_approved = true; result.added = true; }   // an unapproved record is approved by the user's explicit action
+    if (existing->schema3) { existing->widescreen = checked.info.default_widescreen; existing->side_style = checked.info.default_side_style; }   // the verified package decides its presentation defaults; a stale record is refreshed in place
     result.ok = true;
     return result;
   }

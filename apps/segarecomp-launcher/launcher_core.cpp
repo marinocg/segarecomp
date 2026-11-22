@@ -284,9 +284,9 @@ std::string region_note(const std::string &region) {
   return region == "europe" ? "PAL enabled, but 60 Hz is forced: 50 Hz is not supported." : std::string();
 }
 
-std::string launch_refusal(const RomView &rom) {
+std::string launch_refusal(const RomView &rom, PresentationDefaults *mod_defaults) {
   if (rom.supports_region() && !region_executable(rom.region)) return "Unknown console region: choose USA, Japan or Europe.";
-  if (rom.luau_mod()) return verify_installed_mod(rom);   // SEG-143-T008: a mod (native code above all) runs only while its installed bytes are still the approved package
+  if (rom.luau_mod()) return verify_installed_mod(rom, mod_defaults);   // SEG-143-T008: a mod (native code above all) runs only while its installed bytes are still the approved package
   return {};
 }
 
@@ -318,6 +318,11 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID", rom.patch_identity.c_str(), true);
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN", rom.patch_widescreen.empty() ? "enhanced_gameplay" : rom.patch_widescreen.c_str(), true);
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE", rom.patch_side_style.empty() ? "raw" : rom.patch_side_style.c_str(), true);
+  } else if (rom.luau_mod()) {
+    // A selected schema 3 mod always names its identity (its own viewer profile) and hands over exactly the defaults its verified record holds (explicit or derived); absent defaults stay absent.
+    SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID", rom.luau_identity.c_str(), true);
+    if (rom.patch_widescreen.empty()) SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN"); else SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN", rom.patch_widescreen.c_str(), true);
+    if (rom.patch_side_style.empty()) SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE"); else SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE", rom.patch_side_style.c_str(), true);
   } else {
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID");
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");

@@ -79,6 +79,7 @@ struct LibraryEntry {
   std::vector<InstalledPatch> patches;
   std::string selected_variant;
   [[nodiscard]] const InstalledPatch *find_patch(const std::string &identity) const;
+  [[nodiscard]] InstalledPatch *find_patch(const std::string &identity) { return const_cast<InstalledPatch *>(static_cast<const LibraryEntry *>(this)->find_patch(identity)); }
   [[nodiscard]] const InstalledPatch *selected_patch() const { return selected_variant.empty() ? nullptr : find_patch(selected_variant); }
   // Is `key` the build the entry currently stands behind (Vanilla's current build or an installed patch's published build)?
   [[nodiscard]] bool is_current_key(const std::string &key) const;

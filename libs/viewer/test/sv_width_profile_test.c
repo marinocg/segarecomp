@@ -570,10 +570,57 @@ static void patch_tests(void) {
     }
     got = patched_prefs(kB, P1, "turbo", "raw", &act); CHECK(act == 0 && same(got, van), "patch: an unknown widescreen name activates nothing");
     got = patched_prefs(kB, P1, "enhanced_gameplay", "sparkly", &act); CHECK(act == 0 && same(got, van), "patch: an unknown side style activates nothing");
-    got = patched_prefs(kB, P1, NULL, NULL, &act); CHECK(act == 0 && same(got, van), "patch: a patch without presentation defaults activates nothing");
+    got = patched_prefs(kB, P1, NULL, NULL, &act); CHECK(act == 0 && same(got, mine), "patch: a variant without presentation defaults applies none (defaults stay inactive) but still uses its own saved profile");
     got = patched_prefs(kB, NULL, "enhanced_gameplay", "raw", &act); CHECK(act == 0 && same(got, van), "patch: defaults without a patch identity activate nothing");
     got = patched_prefs(NULL, P1, "enhanced_gameplay", "raw", &act); CHECK(act == 0, "patch: without a game identity nothing is overridden (and nothing is saved globally)");
     after = read_text(g_settings); CHECK(after != NULL && strcmp(after, before_global) == 0, "patch: the global file is still untouched");
+  }
+  /* an explicit global display ratio (21:9, 32:9) is the user's choice: a package's Level 3 + Raw defaults never replace it */
+  { static const char *const ratios[] = {"21:9", "32:9"};
+    size_t i;
+    for (i = 0; i < 2; ++i) {
+      char text[200];
+      SvHost *h;
+      snprintf(text, sizeof text, "video.widescreen=original\nvideo.widescreen_side_style=comfort\nvideo.widescreen_ratio=%s\n", ratios[i]);
+      write_text(g_settings, text);
+      h = open_patched(kB, "3333333333333333333333333333333333333333333333333333333333333333", "enhanced_gameplay", "raw"); /* a package with no profile of its own yet */
+      CHECK(h != NULL && sv_host_patch_defaults_active(h) == 1 && h->settings.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY && h->settings.video.widescreen_side_style == SV_SIDE_RAW, "patch: defaults activate with an explicit ratio set");
+      CHECK(h != NULL && h->settings.video.widescreen_ratio.num == (i == 0 ? 21 : 32) && h->settings.video.widescreen_ratio.den == 9, "patch: an explicit 21:9 / 32:9 global ratio is preserved");
+      if (h != NULL) sv_host_close(h);
+    }
+  }
+  /* a mod that states NO defaults still has its own profile: inherited settings first, no fabricated Level 3 + Raw, changes saved only to the variant */
+  { static const char *const P4 = "4444444444444444444444444444444444444444444444444444444444444444", *const P5 = "5555555555555555555555555555555555555555555555555555555555555555";
+    char variant4[1100], variant5[1100], before_vanilla_profile_text[4096];
+    const Prefs edited = {SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_SIDE_RAW, 31};
+    char *text;
+    SvHost *h;
+    snprintf(variant4, sizeof variant4, "%s/genesis-%s+%s.cfg", dir, kB, P4);
+    snprintf(variant5, sizeof variant5, "%s/genesis-%s+%s.cfg", dir, kB, P5);
+    remove(variant4); remove(variant5);
+    write_text(g_settings, "video.widescreen=original\nvideo.widescreen_side_style=comfort\nvideo.widescreen_width=77\n");
+    edit_game(SV_SYSTEM_GENESIS, "genesis", kB, van);
+    text = read_text(file); snprintf(before_vanilla_profile_text, sizeof before_vanilla_profile_text, "%s", text != NULL ? text : "");
+    got = patched_prefs(kB, P4, NULL, NULL, &act);
+    CHECK(act == 0 && same(got, van), "mod: a mod without defaults inherits the original game's settings and introduces no Level 3 + Raw");
+    CHECK(!file_exists(variant4), "mod: opening creates no profile");
+    h = open_patched(kB, P4, NULL, NULL);
+    CHECK(h != NULL && sv_host_profile_path(h) != NULL && strstr(sv_host_profile_path(h), P4) != NULL, "mod: the variant has its own profile path");
+    if (h != NULL) sv_host_close(h);
+    patched_edit(kB, P4, NULL, NULL, edited);
+    CHECK(file_exists(variant4), "mod: a change made while playing is saved in the variant's profile");
+    text = read_text(file); CHECK(text != NULL && strcmp(text, before_vanilla_profile_text) == 0, "mod: the original game's profile is untouched");
+    got = open_prefs(SV_SYSTEM_GENESIS, "genesis", kB, NULL); CHECK(same(got, van), "mod: returning to Vanilla restores its previous preferences");
+    got = patched_prefs(kB, P4, NULL, NULL, &act); CHECK(act == 0 && same(got, edited), "mod: returning to the mod restores its own preferences");
+    got = patched_prefs(kB, P5, NULL, NULL, &act); CHECK(act == 0 && same(got, van), "mod: a second mod does not see the first mod's preferences");
+    h = open_patched(kB, P5, NULL, NULL);
+    CHECK(h != NULL && sv_host_profile_path(h) != NULL && strcmp(sv_host_profile_path(h), variant4) != 0 && strstr(sv_host_profile_path(h), P5) != NULL, "mod: a second mod has a different profile");
+    if (h != NULL) sv_host_close(h);
+    h = open_patched(kB, "short", NULL, NULL);
+    CHECK(h != NULL && sv_host_profile_path(h) != NULL && strchr(strrchr(sv_host_profile_path(h), '/') != NULL ? strrchr(sv_host_profile_path(h), '/') : "", '+') == NULL, "mod: an invalid identity selects no variant profile");
+    if (h != NULL) sv_host_close(h);
+    /* defaults stated on top of a saved variant profile: the saved profile still wins (precedence 4 over 3) */
+    got = patched_prefs(kB, P4, "enhanced_gameplay", "borders", &act); CHECK(act == 1 && same(got, edited), "mod: a saved variant preference overrides package defaults");
   }
 }
 

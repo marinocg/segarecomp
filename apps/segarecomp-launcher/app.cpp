@@ -1202,7 +1202,9 @@ bool App::launch(const std::string &id, bool restarted) {
   if (entry == nullptr || game_) return false;
   if (entry->platform_id == "sega-cd") { scd_play(id, 0); return true; }  // SEG-078-T002: verified program, not a cache entry
   RomView view = view_for(*entry);
-  if (const std::string refusal = launch_refusal(view); !refusal.empty()) { failures_[id] = refusal; diagnostics_[id] = refusal; return false; }
+  bool record_changed = false;
+  if (const std::string refusal = prepare_variant_launch(*entry, view, &record_changed); !refusal.empty()) { failures_[id] = refusal; diagnostics_[id] = refusal; return false; }
+  if (record_changed && !catalog_.read_only()) save_catalog();   // a record stored by an earlier release was corrected from its verified package; saved once, never rewritten when unchanged
   fs::path dir = entry_dir(view, layout_);
   bool older_build = false;
   if (!entry_ready_for(dir, view, layout_)) {

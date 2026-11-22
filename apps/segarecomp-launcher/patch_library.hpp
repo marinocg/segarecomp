@@ -38,6 +38,11 @@ struct PatchInstall {
 // (temporary file + rename) and records it on the entry. A failure leaves neither a file nor a record behind.
 // A package that carries executable source (a trusted native-source patch) is installed only with `trust_native` (the user's explicit approval of that exact package identity, given by the
 // code-bearing install sheet); installing the same package again with `trust_native` approves an unapproved record. The approval never transfers to another identity.
+// The launch gate of the selected variant: `launch_refusal` plus, for a schema 3 mod, the reconciliation of its presentation defaults with the freshly VERIFIED stored package (a record written by an
+// earlier release has none or outdated ones). The defaults reach `view` before the launch and the entry's record is corrected in place; `*record_changed` tells the caller to save the catalog (a
+// verified, unchanged record is never rewritten). Returns "" or the plain-language refusal (nothing is modified on a refusal).
+[[nodiscard]] std::string prepare_variant_launch(LibraryEntry &entry, RomView &view, bool *record_changed);
+
 PatchInstall install_patch(LibraryEntry &entry, const std::filesystem::path &package, const std::filesystem::path &original_rom,
                            const std::filesystem::path &library_root, long long now, bool trust_native = false);
 
