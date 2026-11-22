@@ -11,6 +11,7 @@
 // after that guest frame; the run then continues, so equal final digests with and without it prove the restore lost nothing.
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/sha256.hpp"
+#include "mod_scenery_window.hpp"
 #ifndef SEGARECOMP_MOD_NATIVE
 #include "segarecomp/luau_phase_provider.hpp"
 #endif
@@ -92,12 +93,7 @@ struct Mod {
   std::uint64_t visible_set_frame = 0, visible_set_digest = 0;
   bool visible_set_digest_valid = false;
   // SEG-140-T011 (ADR 0309): the typed scenery_window feature. One bounded name-table window per plane, staged during the render callback, committed with it, bound to the one frame it was rendered for.
-  struct SceneryWindow {
-    bool present = false;
-    std::int32_t x0 = 0, y0 = 0;
-    std::uint32_t cols = 0, rows = 0;
-    std::vector<std::uint16_t> words;
-  };
+  using SceneryWindow = segarecomp::scenery::Window;   // mod_scenery_window.hpp: the limits and the lookup shared with the ABI 1 / ABI 2 parity harness
   SceneryWindow staged_scenery[2][2], visible_scenery[2][2];   // [plane][window]: ADR 0313, up to two windows per plane (the playfield rows and a split-scroll band can need disjoint cell ranges)
   std::uint64_t visible_scenery_frame = 0;   // the guest frame whose render callback committed `visible_scenery` (and the ADR 0315 placement below: they are committed together)
   // ADR 0315: the frame-bound asymmetric placement. `margin` is the per-side margin the provider saw when it chose `left_px`; -1 = none declared.
@@ -222,12 +218,10 @@ std::uint64_t fnv1a64(const std::uint8_t *data, std::size_t n) {
   for (std::size_t i = 0; i < n; ++i) { h ^= data[i]; h *= 1099511628211ULL; }
   return h;
 }
-constexpr std::uint32_t kSceneryColsMax = 128U, kSceneryRowsMax = 64U, kSceneryWordsMax = 4096U;
 int api_scenery_window(std::uint32_t plane, std::int32_t cell_x0, std::int32_t cell_y0, std::uint32_t cols, std::uint32_t rows, const std::uint16_t *words) {
   if (!in_render()) return refused_phase();
   if (!sega_mod_is_granted(&g.scheduler->host, SEGA_MOD_CAP_SCENERY_WORDS)) { genesis_mod_fault_current("capability"); return SEGA_MOD_E_CAPABILITY; }
-  if (plane > 1U || words == nullptr || cols == 0U || rows == 0U || cols > kSceneryColsMax || rows > kSceneryRowsMax || cols * rows > kSceneryWordsMax || (g.staged_scenery[plane][0].present && g.staged_scenery[plane][1].present) ||
-      cell_x0 < -(1 << 20) || cell_x0 > (1 << 20) || cell_y0 < -(1 << 20) || cell_y0 > (1 << 20)) {
+  if (!segarecomp::scenery::submission_in_range(plane, cell_x0, cell_y0, cols, rows, words, plane < 2U && g.staged_scenery[plane][0].present && g.staged_scenery[plane][1].present)) {
     genesis_mod_fault_current("range");   // one window per plane per callback, inside the declared bounds
     return SEGA_MOD_E_RANGE;
   }
@@ -493,16 +487,7 @@ int scenery_word(void *, unsigned plane, unsigned row, int x, int hscroll, int v
 #ifdef SEGARECOMP_MOD_NATIVE
   if (!p.scenery || plane > 1U || word == nullptr) return 0;
   if (!g.visible_scenery[plane][0].present && !g.visible_scenery[plane][1].present) return GENESIS_COMPAT_WORD_GENERIC;   // ADR 0314: this plane has no window: the VDP-derived extension answers it, not a failure
-  const auto cell = [](long long pixel) { return static_cast<long long>(pixel >= 0 ? pixel / 8 : -((-pixel + 7) / 8)); };   // floor division by 8
-  const long long wx = cell(static_cast<long long>(x) - hscroll), wy = cell(static_cast<long long>(row) + vscroll);
-  for (const Mod::SceneryWindow &w : g.visible_scenery[plane]) {   // ADR 0313: the first window of the plane that contains the cell answers it
-    if (!w.present) continue;
-    const long long cx = wx - w.x0, cy = wy - w.y0;
-    if (cx < 0 || cy < 0 || cx >= static_cast<long long>(w.cols) || cy >= static_cast<long long>(w.rows)) continue;
-    *word = w.words[static_cast<std::size_t>(cy) * w.cols + static_cast<std::size_t>(cx)];
-    return 1;
-  }
-  return 0;
+  return segarecomp::scenery::lookup(g.visible_scenery[plane], static_cast<int>(row), x, hscroll, vscroll, word);
 #else
   (void)plane; (void)row; (void)x; (void)hscroll; (void)vscroll; (void)word;
   return 0;

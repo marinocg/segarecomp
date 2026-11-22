@@ -85,7 +85,7 @@ Legality by phase uses the phase names of [mod-execution-phases.md](mod-executio
 |---|---|---|---|---|---|---|
 | 1 | `host.log` | all | S | none beyond class | G, S, C | `sega.log` |
 | 2 | `frame.work_ram` | `render` | R (copy) | none | G, S, C (copy of the platform's work RAM) | `sega.frame.work_ram` |
-| 3 | `frame.vdp` | `render` | R (copy) | none | G, C | `sega.frame.vdp` |
+| 3 | `frame.vdp` | `render` (exact-frame, see section 11) | R (copy) | none; **required-only**: it selects the exact-frame callback timing, so it may not be declared optional (`E_CAPABILITY_INCONSISTENT`) | G, C | `sega.frame.vdp` |
 | 4 | `frame.sms_vdp` | `render` | R (copy) | none | S | `sega.frame.sms_vdp` |
 | 5 | `scenery.words` | `render` | O | none | G, C | not bound (native only) |
 | 6 | `overlay.rgba` | `render` | O | none | G, S, C | `sega.overlay` |
@@ -166,3 +166,15 @@ SEG-135-T003 (build integration, multi-file sources), SEG-146-T002 and T003 (ada
 * The core header adds the preprocessor ids `SEGA_MOD_PLATFORM_ID_*`, the capability id constants `SEGA_MOD_CAP_*`, and the host-side `sega_mod_negotiate(provider, host, required)` with `sega_mod_negotiation_class` (the stable class names of the table in section 5 for the load-time classes). Platform feature tables are `SegaGenesisFeatures`, `SegaMasterSystemFeatures` and `SegaCdFeatures` (lifecycle and capability reporting only for Master System and Sega CD until SEG-147-T004 / SEG-148-T005).
 * Build-time rejection: the host compiles each unit with `-DSEGA_MOD_TARGET_PLATFORM=<id> -DSEGA_MOD_TARGET_ABI_MAJOR=2U`; a platform header for another platform fails with `E_ABI_PLATFORM` in its `#error` text, a mismatched ABI major with `E_ABI_HEADER_MISMATCH`. The include scan reports another platform's header as `E_ABI_PLATFORM` and the ABI 1 header as `E_ABI_MIXED` before compiling.
 * Test: `tests/mod_sources_test.py` with the synthetic providers and `negotiate_harness.c` under `tests/fixtures/mod_sdk/`.
+
+## 11. Exact-frame presentation and ABI 1 parity (decided, [ADR 0320](../decisions/0320-abi-2-exact-frame-presentation-and-parity-contract.md); implemented by SEG-152-T003 to T006)
+
+The ABI 2 host already serves ABI 2 output through the ABI 1 producer; what ABI 2 lacks is the **exact frame**: `render(N)` runs before the raster of the frame it describes exists. The parity matrix is [abi2-abi1-parity.md](abi2-abi1-parity.md). Decided (not yet implemented; nothing below is available in the current header):
+
+* **Exact-frame `render`.** A provider that **requires** `frame.vdp` has its `render` callback run at the producer seam, once per frame produced for presentation, instead of after the snapshot. `host->frame` is the produced frame; work RAM is the previous-onset copy (the bytes the ABI 1 `prepare` sees); everything it submits is consumed by the same producer invocation (no `N + 2` binding). It cannot also use the predicted `render`. Optional `frame.vdp` is refused; providers that do not require it keep every callback bit-for-bit. *Implemented by SEG-152-T003.*
+* **Frame view.** `SegaGenesisFeatures::frame` (appended): a `const SegaGenesisFrameView *` valid only inside that callback: picture size, planned `side`, requested components, `work_ram` (with `frame.work_ram`), frame-start `vram` (host-owned copy; a frame without a VRAM journal is declined, never given a live pointer) and per-line registers (24 x u16), CRAM (128 B), VSRAM (80 B) for up to 224 lines. VDP spaces stay `SEGA_MOD_E_SPACE`. *T003.*
+* **Helpers.** `SegaGenesisFeatures::vdp` (appended, with `frame.vdp`): `read_hscroll`, `read_vscroll`, `vscroll_is_per_column`, `cram_rgb`, the host's own functions. *T004.*
+* **Bitmap.** `overlay_bitmap`, `overlay_layer_bitmap`, `overlay_layer_clip`, `overlay_fallback` (appended to `SegaGenesisRenderApi`): copied RGBA8 pixels in the existing overlay op list, bitmap-specific limits (8 requests, 393216 bytes, layers up to 256 x 256 inside the 65536-pixel transport), shared constants unchanged. *T005.*
+* **Refusal.** `decline(components, reason)` (appended): a non-fault, bounded reason vocabulary equal to ABI 1's; faults stay for invalid calls. *T006.*
+* **Scenery.** `scenery_window` is sufficient (two windows per plane, column-sliced where a plane needs more than one): [widescreen-scenery-window-sufficiency.md](widescreen-scenery-window-sufficiency.md). No scenery API change.
+* **Version.** `SEGA_MOD_ABI_MINOR` becomes 1; the manifest `abi` object gains an additive `minor` (default 0): an older product refuses it with `E_FIELD_UNKNOWN`, a newer one with `E_ABI_MINOR_TOO_NEW` when it exceeds its own, and the build compiles with `-DSEGA_MOD_TARGET_ABI_MINOR`, so a source using a member beyond its declared minor fails with a readable `#error`. Older providers are unaffected. *T003.*
