@@ -19,7 +19,7 @@ extern "C" {
 int segarecomp_capture_mod_begin(GenesisRuntime *runtime);
 void segarecomp_capture_mod_end(GenesisRuntime *runtime);
 const GenesisNativeCompat *segarecomp_patch_provider(void **state_out);
-enum { OP_RECT = 1, OP_TEXT, OP_BITMAP, OP_TARGET, OP_LAYER, OP_LAYER_BITMAP, OP_CLIP, OP_FALLBACK, OP_DECLINE, OP_SCENE, OP_WINDOW, OP_SPRITES };
+enum { OP_RECT = 1, OP_TEXT, OP_BITMAP, OP_TARGET, OP_LAYER, OP_LAYER_BITMAP, OP_CLIP, OP_FALLBACK, OP_DECLINE, OP_SCENE, OP_WINDOW, OP_SPRITES, OP_LAYER_LEGACY_RAW, OP_MASK };
 typedef struct ScriptOp {
   uint32_t kind;
   int32_t a[8];
@@ -30,6 +30,8 @@ typedef struct OverlayScript {
   unsigned count, calls, ran;
   uint64_t last_frame;
   uint32_t has_render_api, has_frame;
+  uint32_t probe_phase, phase_seen;
+  int phase_status;
   int statuses[96];
   ScriptOp ops[96];
 } OverlayScript;
@@ -77,6 +79,7 @@ struct Script {
   void scene(const char *s) { ScriptOp &o = add(OP_SCENE); o.px = reinterpret_cast<const uint8_t *>(s); o.len = static_cast<uint32_t>(std::strlen(s)); }
   void window(unsigned plane, int cx, int cy, unsigned word) { ScriptOp &o = add(OP_WINDOW); o.a[0] = static_cast<int32_t>(plane); o.a[1] = cx; o.a[2] = cy; o.a[3] = static_cast<int32_t>(word); }
   void sprites() { add(OP_SPRITES); }
+  void mask(unsigned plane, unsigned rows, unsigned mask_bytes, const uint8_t *bits) { ScriptOp &o = add(OP_MASK); o.a[0] = static_cast<int32_t>(plane); o.a[1] = static_cast<int32_t>(rows); o.a[2] = static_cast<int32_t>(mask_bytes); o.px = bits; }
 };
 
 // ---- an attached adapter over a synthetic runtime (fresh per scenario: a fault disables the mod for good) ----
@@ -669,6 +672,158 @@ void capability_tests() {
     check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), std::string(g.name) + ": the mod is disabled and presents nothing");
   }
 }
+
+// ---- SEG-152-T007: the per-row generic scenery mask through the real adapter -----------------------------------------------------------------------------------------------
+constexpr int kVdpStart = GENESIS_COMPAT_WORD_VDP_START;
+// One scenery answer of the committed output of the frame `produce` described (plane, produced screen row, screen column, no scroll).
+int answer_at(Harness &h, unsigned plane, unsigned row, int x, uint16_t *word) { return h.table->scenery_word(h.state, plane, row, x, 0, 0, word); }
+std::vector<uint8_t> rows_bits(std::initializer_list<unsigned> set, unsigned rows) {
+  std::vector<uint8_t> bits((rows + 7U) / 8U, 0U);
+  for (const unsigned r : set) if (r < rows) bits[r >> 3U] = static_cast<uint8_t>(bits[r >> 3U] | (1U << (r & 7U)));
+  return bits;
+}
+
+void rows_tests(bool exact) {
+  const auto commit = [&](Harness &h) -> Transport {   // exact route: the produced frame is its own callback; ordinary route: the callback of guest frame N describes the frame the runtime counts N + 2
+    if (!exact) { run_frames(*h.rt, h.rt->virtual_frame_count + 4U); h.rt->virtual_frame_count = g_script.last_frame + 2U; }
+    return h.produce(0x11U, GENESIS_COMPAT_SCENERY);
+  };
+  const auto fault_case = [&](const char *what, void (*build)(Script &, const uint8_t *)) {
+    Harness h;
+    static const uint8_t ok[1] = {0x01U};
+    Script s; s.window(0, -1, 0, 0x2011U); s.mask(0, 8, 1, ok);   // a valid window and mask first: the fault must discard them together
+    build(s, ok);
+    const Transport t = commit(h);
+    check(g_script.statuses[g_script.ran - 1U] == SEGA_MOD_E_RANGE, std::string(what) + ": a range fault");
+    check(faulted(t) && t.word_status == -1, std::string(what) + ": the whole callback is discarded (no partial staging: windows and masks together), the mod is disabled and nothing is presented");
+  };
+  // ---- the answer: a marked row is the host-private code 3, before any window; an unmarked row follows the window rules; a plane without a window is generic (ADR 0314) ----
+  {
+    Harness h;
+    const std::vector<uint8_t> m = rows_bits({5, 6, 200}, 224);
+    Script s; s.mask(0, 224, 28, m.data());
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(g_script.statuses[0] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY, "a mask with a set bit and no window serves the frame (an all-own_plane frame is authored under ABI 1)");
+    check(answer_at(h, 0, 5, -3, &w) == kVdpStart && answer_at(h, 0, 6, -300, &w) == kVdpStart && answer_at(h, 0, 200, 400, &w) == kVdpStart, "marked screen rows answer the private code, whatever the column");
+    check(answer_at(h, 0, 7, -3, &w) == GENESIS_COMPAT_WORD_GENERIC && answer_at(h, 0, 4, -3, &w) == GENESIS_COMPAT_WORD_GENERIC, "unmarked rows of a plane without a window are left to the generic extension");
+    check(answer_at(h, 1, 5, -3, &w) == GENESIS_COMPAT_WORD_GENERIC, "the other plane is independent: it submitted no mask");
+    check(answer_at(h, 0, 224, -3, &w) == GENESIS_COMPAT_WORD_GENERIC && answer_at(h, 0, 447, -3, &w) == GENESIS_COMPAT_WORD_GENERIC && answer_at(h, 0, 100000, -3, &w) == GENESIS_COMPAT_WORD_GENERIC, "rows at or beyond `rows` are not marked");
+  }
+  {
+    Harness h;   // an empty mask has no effect and does not count toward the served rule
+    const std::vector<uint8_t> none(28, 0);
+    Script s; s.mask(0, 224, 28, none.data());
+    const Transport t = commit(h);
+    check(g_script.statuses[0] == 0 && (t.dec.accepted & GENESIS_COMPAT_SCENERY) == 0U, "a mask without a set bit does not serve the frame");
+  }
+  for (const bool mask_first : {true, false}) {   // independent of windows, in either order
+    Harness h;
+    const std::vector<uint8_t> m = rows_bits({3}, 8);
+    Script s;
+    if (mask_first) { s.mask(0, 8, 1, m.data()); s.window(0, -1, 0, 0x2011U); } else { s.window(0, -1, 0, 0x2011U); s.mask(0, 8, 1, m.data()); }
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(g_script.statuses[0] == 0 && g_script.statuses[1] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY, "mask and window are both accepted in either order");
+    check(answer_at(h, 0, 3, -4, &w) == kVdpStart && answer_at(h, 0, 3, -300, &w) == kVdpStart, "a marked row skips the plane's windows (authored words of that row are ignored)");
+    check(answer_at(h, 0, 4, -4, &w) == 1 && w == 0x2011U && answer_at(h, 0, 4, -20, &w) == 0, "an unmarked row of a windowed plane is still answered by its window; a cell outside every window is a failed answer");
+  }
+  // ---- accepted sizes ----
+  for (const unsigned rows : {1U, 7U, 8U, 9U, 224U, 448U}) {
+    Harness h;
+    const std::vector<uint8_t> m = rows_bits({0, rows - 1U}, rows);
+    Script s; s.mask(1, rows, (rows + 7U) / 8U, m.data());
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(g_script.statuses[0] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY && answer_at(h, 1, 0, -3, &w) == kVdpStart, "rows " + std::to_string(rows) + " is accepted");
+    if (rows - 1U < 224U) check(answer_at(h, 1, rows - 1U, -3, &w) == kVdpStart, "the last covered row is marked, rows " + std::to_string(rows));
+    else check(answer_at(h, 1, rows - 1U, -3, &w) == kVdpStart, "a 448-row mask marks a row above row 223 as well (interlace mode 2 frames), rows 448");
+  }
+  {
+    Harness h;   // a 448-bit mask with marks above and below row 224, all rows generic, and a mask longer than a 224-row frame
+    std::vector<uint8_t> all(56, 0xFFU);
+    Script s; s.mask(0, 448, 56, all.data()); s.mask(1, 224, 28, all.data());
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(g_script.statuses[0] == 0 && g_script.statuses[1] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY && answer_at(h, 0, 0, -3, &w) == kVdpStart && answer_at(h, 0, 223, -3, &w) == kVdpStart && answer_at(h, 0, 224, -3, &w) == kVdpStart && answer_at(h, 0, 447, -3, &w) == kVdpStart && answer_at(h, 1, 223, -3, &w) == kVdpStart && answer_at(h, 1, 224, -3, &w) == GENESIS_COMPAT_WORD_GENERIC, "all rows generic on both planes; rows 224..447 are marked by a 448-row mask only");
+  }
+  {
+    Harness h;   // no rows generic: a full-length empty mask next to a window changes nothing
+    const std::vector<uint8_t> none(56, 0);
+    Script s; s.window(0, -1, 0, 0x2011U); s.mask(0, 448, 56, none.data());
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(g_script.statuses[1] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY && answer_at(h, 0, 3, -4, &w) == 1 && w == 0x2011U, "no rows generic: the window answers as it does without a mask");
+  }
+  // ---- range faults, each rolled back with the valid window and mask staged before it ----
+  static const uint8_t pad[1] = {0x20U};
+  fault_case("bad plane", [](Script &s, const uint8_t *b) { s.mask(2, 8, 1, b); });
+  fault_case("rows 0", [](Script &s, const uint8_t *b) { s.mask(1, 0, 0, b); });
+  fault_case("rows 449", [](Script &s, const uint8_t *b) { static const uint8_t big[57] = {1}; (void)b; s.mask(1, 449, 57, big); });
+  fault_case("NULL mask", [](Script &s, const uint8_t *) { s.mask(1, 8, 1, nullptr); });
+  fault_case("mask_bytes too short", [](Script &s, const uint8_t *) { static const uint8_t two[2] = {1, 0}; s.mask(1, 16, 1, two); });
+  fault_case("mask_bytes too long", [](Script &s, const uint8_t *b) { s.mask(1, 8, 2, b); });
+  fault_case("mask_bytes zero", [](Script &s, const uint8_t *b) { s.mask(1, 8, 0, b); });
+  fault_case("non-zero padding bits", [](Script &s, const uint8_t *) { s.mask(1, 5, 1, pad); });
+  fault_case("duplicate submission for one plane", [](Script &s, const uint8_t *b) { s.mask(0, 8, 1, b); });
+  {
+    Harness h;   // a fault after a valid mask does not resurrect the previous frame's committed state
+    const std::vector<uint8_t> m = rows_bits({3}, 8);
+    Script s; s.mask(0, 8, 1, m.data());
+    commit(h);
+    Script s2; s2.mask(0, 8, 1, m.data()); s2.mask(0, 0, 0, nullptr);
+    const Transport t = commit(h);
+    check(faulted(t) && t.word_status == -1, "a fault discards the new mask and does not resurrect the previous one");
+  }
+  if (!exact) {
+    // ---- frame binding (ordinary route): the mask is never served for a frame other than the one its callback described ----
+    Harness h;
+    const std::vector<uint8_t> m = rows_bits({3}, 8);
+    Script s; s.mask(0, 8, 1, m.data());
+    run_frames(*h.rt, 8U);
+    const uint64_t frame = g_script.last_frame;
+    h.rt->virtual_frame_count = frame + 2U;
+    uint16_t w = 0;
+    const Transport own = h.produce(0x11U, GENESIS_COMPAT_SCENERY);
+    check((own.dec.accepted & GENESIS_COMPAT_SCENERY) != 0U && answer_at(h, 0, 3, -4, &w) == kVdpStart, "the frame the callback described is served");
+    h.rt->virtual_frame_count = frame + 7U;   // a skipped callback
+    check((h.produce(0x12U, GENESIS_COMPAT_SCENERY).dec.accepted & GENESIS_COMPAT_SCENERY) == 0U, "after a skipped callback the mask is not served");
+    h.rt->virtual_frame_count = frame;   // restore / rewind
+    check((h.produce(0x13U, GENESIS_COMPAT_SCENERY).dec.accepted & GENESIS_COMPAT_SCENERY) == 0U, "after a restore or rewind the mask is not served");
+    h.rt->virtual_frame_count = frame + 2U;   // the same epoch again (presentation re-enabled)
+    check((h.produce(0x14U, GENESIS_COMPAT_SCENERY).dec.accepted & GENESIS_COMPAT_SCENERY) != 0U, "the same epoch is served again");
+    h.frame->make(0x15U, 40U, GENESIS_COMPAT_SCENERY);   // an aspect change keeps the callback's own frame
+    Transport side; h.table->prepare(h.state, &h.frame->cf, &side.dec);
+    check((side.dec.accepted & GENESIS_COMPAT_SCENERY) != 0U && answer_at(h, 0, 3, -4, &w) == kVdpStart, "an aspect change re-asks with the same callback");
+    Script s2; s2.mask(1, 8, 1, m.data());   // the next callback replaces the mask: plane A's mark is gone, plane B's is present
+    run_frames(*h.rt, h.rt->virtual_frame_count + 4U);
+    h.rt->virtual_frame_count = g_script.last_frame + 2U;
+    h.produce(0x16U, GENESIS_COMPAT_SCENERY);
+    check(answer_at(h, 0, 3, -4, &w) == GENESIS_COMPAT_WORD_GENERIC && answer_at(h, 1, 3, -4, &w) == kVdpStart, "a later callback replaces the earlier mask: nothing of it survives");
+  }
+}
+
+// Without scenery.words the call is SEGA_MOD_E_CAPABILITY (a fault of the callback), like scenery_window.
+void rows_capability_tests() {
+  Harness h;
+  const std::vector<uint8_t> m = rows_bits({3}, 8);
+  Script s; s.mask(0, 8, 1, m.data());
+  run_frames(*h.rt, 8U);
+  check(g_script.has_render_api == 1U && g_script.statuses[0] == SEGA_MOD_E_CAPABILITY, "scenery_generic_rows without scenery.words is SEGA_MOD_E_CAPABILITY");
+  h.rt->virtual_frame_count = g_script.last_frame + 2U;
+  check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), "the callback faulted: the mod presents nothing");
+}
+
+// Outside the render phase the call is SEGA_MOD_E_PHASE (a fault of the callback), distinct from SEGA_MOD_E_CAPABILITY, which needs the render phase first.
+void rows_phase_tests() {
+  Harness h;
+  Script s;
+  g_script.probe_phase = SEGA_MOD_PHASE_FRAME_END;
+  run_frames(*h.rt, 8U);
+  check(g_script.phase_seen == 1U && g_script.phase_status == SEGA_MOD_E_PHASE && g_script.phase_status != SEGA_MOD_E_CAPABILITY, "scenery_generic_rows outside the render phase is SEGA_MOD_E_PHASE (not SEGA_MOD_E_CAPABILITY)");
+  h.rt->virtual_frame_count = g_script.last_frame + 2U;
+  check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), "the out-of-phase call faulted the callback: the mod presents nothing");
+}
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -677,6 +832,10 @@ int main(int argc, char **argv) {
   else if (mode == "refusal") refusal_tests();
   else if (mode == "ordinary") ordinary_tests();
   else if (mode == "capability") capability_tests();
+  else if (mode == "rows_exact") rows_tests(true);
+  else if (mode == "rows_ordinary") rows_tests(false);
+  else if (mode == "rows_capability") rows_capability_tests();
+  else if (mode == "rows_phase") rows_phase_tests();
   else { std::puts("usage: genesis_mod_overlay_script_tests bitmap|refusal"); return 2; }
   if (failures != 0) { std::printf("genesis_mod_overlay_script_tests %s: %d FAILED\n", mode.c_str(), failures); return 1; }
   std::printf("genesis_mod_overlay_script_tests %s: OK\n", mode.c_str());

@@ -62,7 +62,7 @@ typedef struct SegaGenesisRenderApi {
   void *reserved[4];                          /* NULL */
   /* Appended by SEG-152-T005/T006 (ABI minor 1, ADR 0320 decisions 6 and 7; a provider reads these only when `size` covers them and its manifest declares abi.minor >= 1). */
 #if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR < 1)
-  void *e_abi_minor_1_required_render[5]; /* a source that declares no abi.minor does not see overlay_bitmap, overlay_layer_bitmap, overlay_layer_clip, overlay_fallback or decline */
+  void *e_abi_minor_1_required_render[6]; /* a source that declares no abi.minor does not see overlay_bitmap, overlay_layer_bitmap, overlay_layer_clip, overlay_fallback, decline or scenery_generic_rows */
 #else
   /* Bounded RGBA bitmap (decision 6). `overlay_bitmap` copies w x h RGBA8 pixels (byte order R,G,B,A, straight alpha, `stride_bytes` >= 4 * w, rows top to bottom; the buffer may be reused at once) into the current target
    * (overlay_target) at (x, y). The pixels REPLACE the destination bytes (alpha 0 and its RGB included, as the ABI 1 transport carries raw bytes); rect and text keep blending, in submission order. 1 <= w,h <= the target's size,
@@ -79,6 +79,20 @@ typedef struct SegaGenesisRenderApi {
    * STALE_STATE, FAULT, OK, an unknown reason, or an empty/unknown component mask is a range fault (a provider must not impersonate a failure only the host observes). A second call declares the union of the components
    * and the first reason wins. Returns SEGA_MOD_OK for a valid argument. */
   int (*decline)(uint32_t components, uint32_t reason);
+  /* Appended by SEG-152-T007 (ABI minor 2, ADR 0320 decision 8 addendum; declare abi.minor = 2 and required_minor = 2, and read it only when `size` covers it). */
+#if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR < 2)
+  void *e_abi_minor_2_required_render; /* a source that declares abi.minor < 2 does not see scenery_generic_rows */
+#else
+  /* Per-row generic scenery fallback (the ABI 1 `own_plane` lines). Available only when `scenery.words` was granted (otherwise SEGA_MOD_E_CAPABILITY, a fault of the callback); legal only inside a `render` callback.
+   * For plane 0 (A) or 1 (B), marks produced SCREEN rows as answered by the VDP's own plane: the host answers every off-picture cell of a marked row with the plane's own name-table word read from the frame-start VRAM and
+   * counts it as a provider-answered word (exactly what an ABI 1 provider returning 1 with the VDP's word does); authored windows of that plane and row are ignored. `mask` is indexed by produced screen row r (the row
+   * the picture shows: line 0 is the first row of the native picture, not a world or plane cell row and not relative to `left_px`), bit (r & 7) of byte (r >> 3), LSB first; a set bit = the VDP's own word for that row.
+   * `rows` is the number of rows the mask covers, 1..448 (448 = the interlace-mode-2 frame; marks beyond the current frame height are harmless) and `mask_bytes` must equal (rows + 7) / 8 (at most 56); the host reads exactly
+   * `mask_bytes` bytes and copies them. Padding bits at row >= `rows` must be zero. NULL, a bad plane, rows 0 or above 448, a wrong `mask_bytes` or non-zero padding bits are range faults, as is a second submission for
+   * the same plane in one callback. A mask is independent of windows (before or after scenery_window, on a plane with or without windows); a mask with a set bit counts toward the frame being served, one without has no effect.
+   * Committed with the callback's other output and bound to exactly the frame it described, like the windows. */
+  int (*scenery_generic_rows)(uint32_t plane, const uint8_t *mask, uint32_t rows, uint32_t mask_bytes);
+#endif
 #endif
 } SegaGenesisRenderApi;
 

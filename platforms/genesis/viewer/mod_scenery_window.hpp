@@ -3,6 +3,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace segarecomp {
@@ -37,6 +38,40 @@ inline int lookup(const Window (&windows)[kWindowsPerPlane], int row, int x, int
     return 1;
   }
   return 0;
+}
+
+// SEG-152-T007 (ADR 0320 decision 8 addendum): the per-row generic mask of one plane. Bit `r & 7` of byte `r >> 3` (LSB first, the producer's `authored_rows` convention) marks produced SCREEN row `r` as answered by the VDP's own
+// plane as a provider word (the ABI 1 `own_plane` semantics). At most 448 rows (GENESIS_FRAME_MAX_HEIGHT), 56 bytes per plane.
+constexpr std::uint32_t kMaskRowsMax = 448U, kMaskBytesMax = 56U;
+
+struct RowMask {
+  bool any = false;   // at least one bit set: only such a mask counts toward the frame-served rule
+  std::uint8_t bits[kMaskBytesMax] = {};
+};
+
+// The submission is in range (the adapter faults the callback with `range` otherwise): plane 0/1, non-NULL mask, 1..448 rows, `mask_bytes` exactly (rows + 7) / 8 and zero padding bits beyond `rows`.
+inline bool mask_in_range(std::uint32_t plane, const std::uint8_t *mask, std::uint32_t rows, std::uint32_t mask_bytes) {
+  if (plane > 1U || mask == nullptr || rows == 0U || rows > kMaskRowsMax || mask_bytes != (rows + 7U) / 8U) return false;
+  if ((rows & 7U) != 0U && (mask[mask_bytes - 1U] >> (rows & 7U)) != 0U) return false;   // padding bits of the last byte must be zero
+  return true;
+}
+
+// Copies a validated submission (the caller checked mask_in_range) into fixed storage; bytes beyond `mask_bytes` stay zero, so rows >= `rows` are not marked.
+inline void mask_store(RowMask &out, const std::uint8_t *mask, std::uint32_t mask_bytes) {
+  out = RowMask{};
+  std::memcpy(out.bits, mask, mask_bytes);
+  for (std::uint32_t i = 0; i < mask_bytes; ++i) out.any = out.any || mask[i] != 0U;
+}
+
+// The row test: is produced screen row `row` marked generic? One bit test; rows beyond the stored mask are not marked.
+inline bool row_generic(const RowMask &m, unsigned row) { return row < kMaskRowsMax && ((m.bits[row >> 3U] >> (row & 7U)) & 1U) != 0U; }
+
+// The whole host answer for one off-picture cell of one plane (the adapter's `scenery_word` after its frame checks, shared with the parity harness): a marked screen row answers `vdp_code` (the host-private
+// GENESIS_COMPAT_WORD_VDP_START, before any window of the plane is consulted); a plane without a window answers `generic_code` (ADR 0314); otherwise the first containing window answers, or the cell fails (0).
+inline int answer(const RowMask &mask, const Window (&windows)[kWindowsPerPlane], int row, int x, int hscroll, int vscroll, std::uint16_t *word, int vdp_code, int generic_code) {
+  if (row >= 0 && row_generic(mask, static_cast<unsigned>(row))) return vdp_code;
+  if (!windows[0].present && !windows[1].present) return generic_code;
+  return lookup(windows, row, x, hscroll, vscroll, word);
 }
 
 }  // namespace scenery

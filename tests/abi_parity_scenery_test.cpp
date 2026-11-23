@@ -269,6 +269,264 @@ void maximum_side() {
   }
 }
 
+
+// ---- SEG-152-T007: the per-row generic mask (ABI 1 own_plane lines) -------------------------------------------------------------------------------------------------------
+// Every fixture is run through the ABI 1 reference (which answers a fallback line with 1 and the VDP's own frame-start word, never GENESIS_COMPAT_WORD_GENERIC) and the mask-using ABI 2 builder, whose twin answers
+// through the PRODUCTION `scenery::answer` and the host-private code 3. Equality is asserted on pixels AND on compat_accepted/reason, authored, authored_rows and authored_row_count (no tolerance).
+struct MaskFixture { Spec spec; const char *what; };
+Spec base_spec(const char *id) { Spec s; s.id = id; set_plane(s, 0, [](int) { return -300; }); set_plane(s, 1, [](int) { return -150; }); return s; }
+std::vector<MaskFixture> mask_fixtures() {
+  std::vector<MaskFixture> v;
+  {   // the T001 failing fixture (own_plane from line 100 on plane B; line 100 is inside plane cell row 12)
+    Spec s = base_spec("fallback-mid-cell");
+    for (int r = 100; r < H; ++r) s.fallback[1][r] = 1;
+    v.push_back({s, "T001 fallback-mid-cell"});
+  }
+  { Spec s = base_spec("plane-a-only"); for (int r = 60; r < H; ++r) s.fallback[0][r] = 1; v.push_back({s, "per-row fallback on plane A only (B authored: credited)"}); }
+  { Spec s = base_spec("plane-b-only"); for (int r = 60; r < 190; ++r) s.fallback[1][r] = 1; v.push_back({s, "per-row fallback on plane B only (A authored: credited)"}); }
+  { Spec s = base_spec("different-masks"); for (int r = 40; r < 80; ++r) s.fallback[0][r] = 1; for (int r = 100; r < H; ++r) s.fallback[1][r] = 1; v.push_back({s, "different masks on the two planes"}); }
+  { Spec s = base_spec("shared-cell"); s.fallback[1][35] = 1; v.push_back({s, "one generic row sharing a plane cell coordinate with authored rows"}); }
+  { Spec s = base_spec("alternating"); for (int r = 0; r < H; r += 2) s.fallback[1][r] = 1; v.push_back({s, "alternating authored and generic rows"}); }
+  { Spec s = base_spec("boundary-in-cell"); for (int r = 103; r < H; ++r) s.fallback[1][r] = 1; v.push_back({s, "fallback boundary inside an 8-pixel cell row"}); }
+  { Spec s = base_spec("both-masked"); for (int r = 120; r < H; ++r) s.fallback[0][r] = s.fallback[1][r] = 1; v.push_back({s, "both planes masked on a row (credited like ABI 1, which GENERIC would lose)"}); }
+  { Spec s = base_spec("all-rows-masked"); for (int p = 0; p < 2; ++p) for (int r = 0; r < H; ++r) s.fallback[p][r] = 1; v.push_back({s, "every row masked on both planes (authored stays 1)"}); }
+  {   // no authored windows anywhere: plane A is left to the generic extension on every row (the ABI 1 provider returns GENERIC), plane B marks rows 100+ and leaves the others generic
+    Spec s = base_spec("mask-only");
+    for (int r = 0; r < H; ++r) s.generic2[0][r] = 1;
+    for (int r = 0; r < H; ++r) { if (r >= 100) s.fallback[1][r] = 1; else s.generic2[1][r] = 1; }
+    v.push_back({s, "mask without any window: frame served by the set bit, unmarked rows generic and uncredited"});
+  }
+  {   // mask on one plane, windows (authored words) on the other
+    Spec s = base_spec("mask-one-plane-windows-other");
+    for (int r = 0; r < H; ++r) { if (r >= 100) s.fallback[1][r] = 1; else s.generic2[1][r] = 1; }
+    v.push_back({s, "plane B mask only, plane A authored windows"});
+  }
+  {   // a window-plane status band: plane A is left out on its rows and plane B is none (the producer's own rule): no credit, whatever the mask says
+    Spec s = base_spec("window-band"); s.window_from_row = 192; for (int r = 100; r < H; ++r) s.fallback[1][r] = 1; v.push_back({s, "window-plane edge / HUD band rows keep the producer's behaviour"});
+  }
+  {   // a name-table write above a masked row: the frame-start word is what ABI 1 reads (cell row 15 is rows 120..127)
+    Spec s = base_spec("journal-write"); for (int r = 100; r < H; ++r) s.fallback[1][r] = 1; s.journal.push_back({50, 1, 15}); v.push_back({s, "mid-frame name-table write on cells of masked rows"});
+  }
+  {   // a frame without a VRAM journal: authored credit withheld for every provider
+    Spec s = base_spec("no-journal"); for (int r = 100; r < H; ++r) s.fallback[1][r] = 1; s.no_journal = true; v.push_back({s, "non-journaled frame"});
+  }
+  {   // the scroll and vscroll vary: the answer comes from the line's own scroll in both providers
+    Spec s = base_spec("parallax-mask"); set_plane(s, 1, [](int r) { return -(100 + (r / 38) * 40); }); s.vs[1] = 12; for (int r = 90; r < 170; ++r) s.fallback[1][r] = 1; v.push_back({s, "parallax plane with a vertical scroll and a masked band"});
+  }
+  return v;
+}
+
+Options mask_options() { Options o; o.use_mask = true; return o; }
+
+void mask_parity_matrix(Tally &t) {
+  for (const MaskFixture &f : mask_fixtures())
+    for (int ai = 0; ai < 3; ++ai) {
+      const Aspect &asp = kAspects[ai];
+      const int side = asp.side;
+      for (const int left : {0, side / 2, side, side + side / 2, 2 * side}) {
+        const Verdict v = run_case(f.spec, side, left, Timing::Exact, -1, mask_options());
+        ++t.cases;
+        char what[256];
+        std::snprintf(what, sizeof what, "%s %s left_px=%d: %s (rows differing %u; authored %u/%u rows %u/%u accepted %u/%u reason %u/%u)", f.spec.id.c_str(), asp.name, left, v.scenario.c_str(), v.rows_differ, v.authored1, v.authored2,
+                      v.authored_rows1, v.authored_rows2, v.accepted1, v.accepted2, v.reason1, v.reason2);
+        std::printf("PARITY mask %s\n", what);
+        check(v.scenario == "PASS" && v.rows_differ == 0 && v.digest1 == v.digest2, std::string("pixel-identical to ABI 1: ") + what);
+        check(v.coverage_equal && v.accepted1 == v.accepted2 && v.reason1 == v.reason2 && v.authored1 == v.authored2 && v.authored_rows1 == v.authored_rows2, std::string("coverage equal to ABI 1: ") + what);
+        check(v.abi1_calls == v.abi2_calls, std::string("no additional host cell queries / provider calls: ") + what);
+        if (v.scenario == "PASS") ++t.pass; else ++t.limit;
+      }
+    }
+}
+
+void mask_accounting_cases() {
+  const int side = kAspects[2].side;   // 32:9
+  const auto run = [&](const Spec &s, const Options &o, int left = 238) { return run_case(s, side, left, Timing::Exact, -1, o); };
+  const auto fixture = [&](const char *id) -> const Spec & { static const std::vector<MaskFixture> all = mask_fixtures(); for (const MaskFixture &f : all) if (f.spec.id == id) return f.spec; std::abort(); };
+  // (1)/(2): one plane masked, the other authored: credited rows (and they are not zero)
+  check(run(fixture("plane-a-only"), mask_options()).authored_rows2 > 0 && run(fixture("plane-b-only"), mask_options()).authored_rows2 > 0, "case 1/2: a row masked on one plane and authored on the other is credited");
+  // (3): both planes masked: credited, equal to ABI 1; the GENERIC control loses the credit (the mask is not equivalent to ADR 0314)
+  {
+    Options g = mask_options(); g.mask_code = GENESIS_COMPAT_WORD_GENERIC;
+    const Verdict ok = run(fixture("both-masked"), mask_options()), generic = run(fixture("both-masked"), g);
+    std::printf("PARITY mask accounting both-masked: authored_rows abi1 %u, code 3 %u, GENERIC control %u\n", ok.authored_rows1, ok.authored_rows2, generic.authored_rows2);
+    check(ok.authored_rows1 > 0 && ok.authored_rows1 == ok.authored_rows2, "case 3: both planes masked, the rows are credited as under ABI 1");
+    check(generic.authored_rows2 < ok.authored_rows1 && !generic.coverage_equal, "case 3 negative control: answering GENERIC for masked rows loses the credit");
+  }
+  // (4): mask-only: the frame is served by the set bit and unmarked rows are uncredited; a mask without a set bit changes nothing (here: no plane marks => nothing served)
+  {
+    const Verdict v = run(fixture("mask-only"), mask_options());
+    check(v.accepted2 == GENESIS_COMPAT_SCENERY && v.authored_rows2 == v.authored_rows1 && v.authored_rows2 == static_cast<unsigned>(H - 100) && v.authored2 == v.authored1 && v.coverage_equal, "case 4: mask only: marked rows credited (124 of 224), unmarked rows generic uncredited, frame served");
+  }
+  // all rows masked: authored stays 1
+  check(run(fixture("all-rows-masked"), mask_options()).authored2 == 1, "an all-rows-masked frame is authored");
+  // (5): HUD band rows are not credited
+  {
+    const Verdict v = run(fixture("window-band"), mask_options());
+    check(v.coverage_equal && v.authored_rows2 <= 192U, "case 5: window-plane band rows earn no credit");
+  }
+  // (6): a non-journaled frame withholds the authored claim and the rows
+  {
+    const Verdict v = run(fixture("no-journal"), mask_options());
+    check(v.coverage_equal && v.authored2 == 0 && v.authored_rows2 == 0, "case 6: a non-journaled frame: authored 0 and no authored rows, exactly as ABI 1");
+  }
+  // (7): mid-frame write: identical to ABI 1 (frame-start word); the GENERIC path (evolving VRAM) differs
+  {
+    Options g = mask_options(); g.mask_code = GENESIS_COMPAT_WORD_GENERIC;
+    const Verdict ok = run(fixture("journal-write"), mask_options()), generic = run(fixture("journal-write"), g);
+    std::printf("PARITY mask journal: code 3 rows differing %u, GENERIC control rows differing %u\n", ok.rows_differ, generic.rows_differ);
+    check(ok.rows_differ == 0 && ok.digest1 == ok.digest2, "case 7: the masked cell reads the frame-start VRAM (pixel-identical to ABI 1)");
+    check(generic.rows_differ > 0 && generic.digest1 != generic.digest2, "case 7 negative control: the GENERIC path reads the evolving VRAM and differs");
+  }
+  // negative control: clearing the mask makes the T001 failing fixture differ again (and the unmarked rows were resolved from authored words)
+  {
+    Options c = mask_options(); c.clear_mask = true;
+    const Verdict v = run(fixture("fallback-mid-cell"), c);
+    check(v.rows_differ > 0 && v.digest1 != v.digest2, "clearing the mask makes the fixture differ again");
+  }
+}
+
+// The code-3 gate (explicit cases a-f, exact outcomes).
+void code3_gate() {
+  const int side = kAspects[1].side;
+  Spec s = base_spec("gate"); for (int p = 0; p < 2; ++p) for (int r = 0; r < H; ++r) s.fallback[p][r] = 1;   // every row masked on both planes
+  const auto twin_with = [&](unsigned private_words, int code, const char *table_name) {
+    Scene sc; build_scene(sc, s);
+    Provider prov; prov.kind = Provider::Abi2; prov.spec = &s; prov.scene = &sc; prov.declared_left = side;
+    prov.private_words = static_cast<uint8_t>(private_words); prov.mask_code = code;
+    uint8_t bytes[28]; std::memset(bytes, 0xFF, sizeof bytes);
+    for (unsigned p = 0; p < 2; ++p) segarecomp::scenery::mask_store(prov.mask[p], bytes, 28);
+    GenesisNativeCompat table = twin_table(); table.name = table_name;
+    prov.table = &table;
+    return produce(sc, prov, static_cast<unsigned>(side));
+  };
+  const Produced legacy = twin_with(0U, GENESIS_COMPAT_WORD_VDP_START, "parity.legacy-abi1");      // (a) a legacy ABI 1 provider (the flag is disabled) returning 3
+  check(legacy.rc == 0 && legacy.res.compat_reason == GENESIS_COMPAT_FAULT && legacy.res.authored == 0 && legacy.res.authored_row_count == 0, "(a) a legacy provider returning 3 is an unanswered cell: FAULT, authored 0, no credit");
+  const Produced adapter = twin_with(1U, GENESIS_COMPAT_WORD_VDP_START, "scheduled-mod-host");      // (b) the trusted adapter
+  check(adapter.rc == 0 && adapter.res.compat_reason == GENESIS_COMPAT_OK && adapter.res.authored == 1 && adapter.res.authored_row_count == static_cast<unsigned>(H), "(b) the trusted adapter returning 3 for a masked row is a successful provider word with full credit");
+  const Produced untrusted = twin_with(0U, GENESIS_COMPAT_WORD_VDP_START, "scheduled-mod-host");   // (c) the same table, the flag not set; (f) a provider NAMED like the adapter does not enable it
+  check(untrusted.res.compat_reason == legacy.res.compat_reason && untrusted.res.authored == legacy.res.authored && untrusted.res.authored_row_count == legacy.res.authored_row_count && untrusted.surface == legacy.surface,
+        "(c)/(f) the adapter's table without the trusted attach (and a provider named like it) is rejected exactly as (a)");
+  for (const int code : {4, -1, 255}) {   // (e) other unsupported values stay fail-closed in both configurations
+    for (const unsigned flag : {0U, 1U}) {
+      const Produced p = twin_with(flag, code, "scheduled-mod-host");
+      check(p.rc == 0 && p.res.compat_reason == GENESIS_COMPAT_FAULT && p.res.authored == 0 && p.res.authored_row_count == 0, "(e) unsupported value " + std::to_string(code) + " is fail-closed, flag " + std::to_string(flag));
+    }
+  }
+  {   // (d) values 1, 2 and 0: identical with the flag off and on (the producer change is invisible to them)
+    Spec t = base_spec("gate-d"); for (int r = 100; r < H; ++r) t.fallback[1][r] = 1; for (int r = 0; r < 40; ++r) t.generic2[0][r] = 1;
+    for (const unsigned flag : {0U, 1U}) (void)flag;
+    Scene sc; build_scene(sc, t);
+    Provider a, b; a.kind = b.kind = Provider::Abi1; a.spec = b.spec = &t; a.scene = b.scene = &sc; a.declared_left = b.declared_left = side; a.private_words = 0U; b.private_words = 1U;   // the reference answers 1 and 2
+    const Produced pa = produce(sc, a, static_cast<unsigned>(side)), pb = produce(sc, b, static_cast<unsigned>(side));
+    check(pa.surface == pb.surface && coverage_equal(pa, pb), "(d) answers 1 and 2 are identical with the private-word flag off and on");
+    Provider w0, w1; w0.kind = w1.kind = Provider::Abi2; w0.spec = w1.spec = &t; w0.scene = w1.scene = &sc; w0.declared_left = w1.declared_left = side; w0.private_words = 0U; w1.private_words = 1U;   // no window: 2; (0 is exercised below)
+    const Produced qa = produce(sc, w0, static_cast<unsigned>(side)), qb = produce(sc, w1, static_cast<unsigned>(side));
+    check(qa.surface == qb.surface && coverage_equal(qa, qb), "(d) answer 2 (a plane without windows) is identical with the flag off and on");
+    w0.windows[0][0].present = w1.windows[0][0].present = true; w0.windows[0][0].cols = w1.windows[0][0].cols = 1; w0.windows[0][0].rows = w1.windows[0][0].rows = 1; w0.windows[0][0].words.assign(1, 0); w1.windows[0][0].words.assign(1, 0);
+    const Produced ra = produce(sc, w0, static_cast<unsigned>(side)), rb = produce(sc, w1, static_cast<unsigned>(side));   // cells outside the one-cell window: answer 0
+    check(ra.res.compat_reason == GENESIS_COMPAT_FAULT && ra.surface == rb.surface && coverage_equal(ra, rb), "(d) answer 0 (a cell outside every window) fails identically with the flag off and on");
+  }
+  {   // (f) the flag defaults to zero in an initialiser and the adapter never derives it from a provider table
+    GenesisFrameExtension ext{};
+    check(ext.compat_private_words == 0U, "(f) compat_private_words is zero-initialised");
+  }
+}
+
+void mask_cost_line() {
+  // The stated bounds at 32:9 (the planned side of the widest standard aspect), centred: adapter state 4 x 56 bytes, copy 2 x 56 bytes, one bit test per scenery_word call, no provider code per pixel.
+  const Spec s = mask_fixtures()[0].spec;
+  const int side = kAspects[2].side;
+  const Verdict m = run_case(s, side, side, Timing::Exact, -1, mask_options());
+  Options plain; const Verdict w = run_case(s, side, side, Timing::Exact, -1, plain);
+  const unsigned state_bytes = 4U * segarecomp::scenery::kMaskBytesMax, copy_bytes = 2U * segarecomp::scenery::kMaskBytesMax;
+  std::printf("PARITY cost mask 32:9 centred: adapter state %u bytes (staged + visible, both planes), copy %u bytes per frame, %u bit tests (one per scenery_word call, none calls provider code), ABI 1 provider calls %u, words %u (windowless rows excluded; %u without the mask)\n",
+              state_bytes, copy_bytes, m.abi2_calls, m.abi1_calls, m.words, w.words);
+  check(state_bytes == 224U && copy_bytes == 112U && m.abi2_calls == m.abi1_calls && m.abi2_calls == w.abi2_calls, "the mask adds no host queries: the lookup count equals the unmasked twin's");
+}
+
+void mask_viewport_row_index() {
+  // The mask is indexed by produced SCREEN row, not by the world cell row: a vertical scroll that moves plane cell rows must not change which rows are generic; moving the native picture (left_px) does not either.
+  Spec s = base_spec("row-index"); s.vs[1] = 37; for (int r = 50; r < 58; ++r) s.fallback[1][r] = 1;
+  const int side = kAspects[2].side;
+  Verdict first;
+  bool have = false;
+  for (const int left : {0, side / 2, side, side + side / 2, 2 * side}) {
+    const Verdict v = run_case(s, side, left, Timing::Exact, -1, mask_options());
+    check(v.scenario == "PASS" && v.coverage_equal, "a vertical scroll of 37 px: the mask follows screen rows, left_px=" + std::to_string(left));
+    check(v.authored_rows2 > 0, "row-index: rows credited");
+    if (have) check(v.authored_rows2 == first.authored_rows2, "moving the native picture does not change which rows are generic");
+    first = v; have = true;
+  }
+  Scene sc; build_scene(sc, s);
+  Spec wrongly = s;   // the same mask applied by WORLD cell row instead would be a different set of rows: prove the two sets differ
+  unsigned screen_rows = 0, world_rows = 0;
+  for (int r = 0; r < H; ++r) { screen_rows += s.fallback[1][r]; world_rows += (((r + 37) / 8) >= 50 / 8 && ((r + 37) / 8) <= 57 / 8) ? 1U : 0U; }
+  check(screen_rows == 8U && world_rows != screen_rows, "the screen-row set and the world-cell-row set are different for a scrolled plane");
+  (void)wrongly;
+}
+
+void mask_448_row_frame() {
+  // A 448-row (interlace mode 2) frame: marks above and below row 224 both reach the producer's rows; a 224-row-limited host would silently lose the lower half.
+  segarecomp::scenery::RowMask m;
+  uint8_t bytes[56] = {};
+  bytes[1] = 0x04; bytes[40] = 0x10;   // rows 10 and 324
+  check(segarecomp::scenery::mask_in_range(0, bytes, 448, 56), "a 448-row mask is in range");
+  segarecomp::scenery::mask_store(m, bytes, 56);
+  check(segarecomp::scenery::row_generic(m, 10) && segarecomp::scenery::row_generic(m, 324) && !segarecomp::scenery::row_generic(m, 11) && !segarecomp::scenery::row_generic(m, 447) && !segarecomp::scenery::row_generic(m, 448), "marks above and below row 224 are kept; rows beyond 448 are never marked");
+  uint8_t pad[1] = {0x20};
+  check(!segarecomp::scenery::mask_in_range(0, pad, 5, 1) && segarecomp::scenery::mask_in_range(0, pad, 6, 1), "padding bits beyond `rows` must be zero");
+  check(!segarecomp::scenery::mask_in_range(0, bytes, 449, 57) && !segarecomp::scenery::mask_in_range(0, bytes, 0, 0) && !segarecomp::scenery::mask_in_range(2, bytes, 8, 1) && !segarecomp::scenery::mask_in_range(0, nullptr, 8, 1) &&
+        !segarecomp::scenery::mask_in_range(0, bytes, 16, 1) && !segarecomp::scenery::mask_in_range(0, bytes, 8, 2) && !segarecomp::scenery::mask_in_range(0, bytes, 8, 0), "out-of-range submissions are refused by the production validator");
+}
+
+
+// SEG-152-T007 follow-up: the PRODUCER on a minimal valid synthetic interlace-mode-2 (448-row) frame. The harness's Spec arrays stay 224 rows, so this uses its scene, raster and `produce` with two bespoke
+// word callbacks: the ABI 1 reference answers EVERY row (0..447) with the VDP's own frame-start word (own_plane); the ABI 2 twin submits a 448-row mask for both planes and answers code 3 (private words on).
+int im2_ref_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
+  Provider *p = static_cast<Provider *>(state);
+  ++p->cells;
+  if (plane > 1U || row >= 448U) return 0;
+  const long cx = floor8(static_cast<long>(x) - hscroll), py = static_cast<long>(row) + vscroll;
+  *word = p->scene->vram_word(plane, static_cast<unsigned>(((cx % 64) + 64) % 64), static_cast<unsigned>((((py >= 0 ? py / 16 : -((-py + 15) / 16)) % 32) + 32) % 32));
+  return 1;
+}
+int im2_twin_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
+  Provider *p = static_cast<Provider *>(state);
+  ++p->cells;
+  if (plane > 1U || row >= 448U) return 0;
+  return segarecomp::scenery::answer(p->mask[plane], p->windows[plane], static_cast<int>(row), x, hscroll, vscroll, word, p->mask_code, GENESIS_COMPAT_WORD_GENERIC);
+}
+void mask_448_producer() {
+  const int side = kAspects[1].side;
+  const Spec s = base_spec("im2");
+  Scene sc; build_scene(sc, s);
+  for (auto &line : sc.raster->lines) line.registers[12] = static_cast<uint16_t>(line.registers[12] | (GENESIS_VDP_REG12_LSM1_BIT | GENESIS_VDP_REG12_LSM0_BIT));   // H40, interlace mode 2: 448 rows
+  GenesisNativeCompat ref_table = twin_table(), twin_tab = twin_table();
+  ref_table.scenery_word = im2_ref_word; twin_tab.scenery_word = im2_twin_word; ref_table.name = "parity.im2-abi1"; twin_tab.name = "scheduled-mod-host";
+  Provider ref; ref.kind = Provider::Abi1; ref.spec = &s; ref.scene = &sc; ref.declared_left = side; ref.table = &ref_table; ref.private_words = 0U;
+  Provider twin; twin.kind = Provider::Abi2; twin.spec = &s; twin.scene = &sc; twin.declared_left = side; twin.table = &twin_tab;
+  uint8_t bytes[56]; std::memset(bytes, 0xFF, sizeof bytes);   // every row 0..447 marked on both planes
+  check(segarecomp::scenery::mask_in_range(0, bytes, 448, 56), "im2: the 448-row mask is in range");
+  for (unsigned p = 0; p < 2; ++p) segarecomp::scenery::mask_store(twin.mask[p], bytes, 56);
+  const Produced a = produce(sc, ref, static_cast<unsigned>(side)), b = produce(sc, twin, static_cast<unsigned>(side));
+  if (a.rc != 0 || b.rc != 0) {   // the producer rejected the fixture for an independent reason: record it precisely instead of forcing it
+    std::printf("PARITY im2 producer: NOT EXERCISED, produce rc ref=%d twin=%d\n", a.rc, b.rc);
+    check(false, "im2: the producer rejected the interlace-mode-2 fixture (rc " + std::to_string(a.rc) + "/" + std::to_string(b.rc) + ")");
+    return;
+  }
+  check(a.res.native_h == 448U && b.res.native_h == 448U, "im2: the produced frame is 448 rows high (" + std::to_string(a.res.native_h) + ")");
+  check(a.res.compat_reason == GENESIS_COMPAT_OK && b.res.compat_reason == GENESIS_COMPAT_OK && a.res.authored == 1 && b.res.authored == 1, "im2: both providers are accepted and authored");
+  check(a.res.authored_row_count > 224U && b.res.authored_row_count == a.res.authored_row_count && coverage_equal(a, b), "im2: ABI 2 credit equals ABI 1 incl. rows >= 224 (" + std::to_string(a.res.authored_row_count) + " vs " + std::to_string(b.res.authored_row_count) + ")");
+  check(((b.res.authored_rows[300 >> 3] >> (300 & 7)) & 1U) != 0U && ((b.res.authored_rows[447 >> 3] >> (447 & 7)) & 1U) != 0U && ((b.res.authored_rows[10 >> 3] >> (10 & 7)) & 1U) != 0U, "im2: rows 10, 300 and 447 are credited as authored");
+  check(a.surface == b.surface && a.surface.size() > 0U, "im2: the produced surface equals the ABI 1 own_plane reference (VDP-derived frame-start word above and below row 223)");
+  // a mask marking only rows >= 224 credits only those rows and leaves the upper half generic
+  Provider low; low.kind = Provider::Abi2; low.spec = &s; low.scene = &sc; low.declared_left = side; low.table = &twin_tab;
+  uint8_t lower[56] = {}; for (unsigned r = 224; r < 448; ++r) lower[r >> 3] = static_cast<uint8_t>(lower[r >> 3] | (1U << (r & 7U)));
+  segarecomp::scenery::mask_store(low.mask[0], lower, 56);
+  const Produced c = produce(sc, low, static_cast<unsigned>(side));
+  check(c.rc == 0 && (c.res.authored_rows[400 >> 3] >> (400 & 7) & 1U) != 0U && (c.res.authored_rows[100 >> 3] >> (100 & 7) & 1U) == 0U, "im2: a mask of the lower half only credits rows >= 224 and not rows < 224 (plane B generic: uncredited)");
+}
+
 }  // namespace
 
 int main() {
@@ -284,6 +542,15 @@ int main() {
   placement_errors();
   maximum_side();
   cost_report();
+  Tally masked;
+  mask_parity_matrix(masked);
+  mask_accounting_cases();
+  code3_gate();
+  mask_cost_line();
+  mask_viewport_row_index();
+  mask_448_row_frame();
+  mask_448_producer();
+  std::printf("PARITY mask totals: cases %u (pass %u, limit %u)\n", masked.cases, masked.pass, masked.limit);
   std::printf("PARITY totals: exact cases %u (pass %u, limit %u), predicted cases %u (pass %u, limit %u)\n", exact.cases, exact.pass, exact.limit, predicted.cases, predicted.pass, predicted.limit);
   if (failures != 0) { std::printf("abi_parity_scenery_test: %d failure(s)\n", failures); return 1; }
   std::printf("abi_parity_scenery_test: ok\n");

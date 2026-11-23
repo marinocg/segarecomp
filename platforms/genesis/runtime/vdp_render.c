@@ -787,17 +787,25 @@ static void genesis_vdp_prepare_row_plane(const GenesisVdpRenderContext *ctx, co
 
 /* Plane A or B candidate at screen column `x` (which may lie outside [0, width): SEG-118 samples the same plane beyond the picture, wrapping
  * through the plane exactly as the visible columns do) and row, using vertical-scroll group `group` of the plane's per-row constants. */
-static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_at(const GenesisVdpRenderContext *ctx,
-                                                               const GenesisVdpRowPlane *plane, int64_t x, unsigned group,
-                                                               unsigned row) {
+/* The VDP's own name-table word of the plane cell under screen column `x` / `row` (the addressing of genesis_vdp_plane_candidate_at, shared by SEG-152-T007's frame-start read), from `vram`. */
+static uint16_t genesis_vdp_plane_nametable_word(const uint8_t *vram, const GenesisVdpRenderContext *ctx, const GenesisVdpRowPlane *plane, int64_t x, unsigned group, unsigned row) {
   const int32_t vscroll = plane->vscroll[group < GENESIS_VDP_VSRAM_GROUP_COUNT ? group : 0U];
   const unsigned plane_x = genesis_vdp_wrap_coordinate(x - (int64_t)plane->hscroll, plane->width_px);
   const unsigned plane_y = genesis_vdp_plane_y(row, vscroll, plane->height_px);
   const unsigned cell_col = plane_x / GENESIS_VDP_TILE_WIDTH;
   const unsigned cell_row = plane_y / ctx->geometry.cell_height;
   const uint32_t addr = plane->base + ((uint32_t)cell_row * plane->width_cells + cell_col) * 2U;
+  return (uint16_t)genesis_vdp_be16(vram, addr);
+}
+
+static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_at(const GenesisVdpRenderContext *ctx,
+                                                               const GenesisVdpRowPlane *plane, int64_t x, unsigned group,
+                                                               unsigned row) {
+  const int32_t vscroll = plane->vscroll[group < GENESIS_VDP_VSRAM_GROUP_COUNT ? group : 0U];
+  const unsigned plane_x = genesis_vdp_wrap_coordinate(x - (int64_t)plane->hscroll, plane->width_px);
+  const unsigned plane_y = genesis_vdp_plane_y(row, vscroll, plane->height_px);
   const GenesisVdpNametableEntry entry =
-      genesis_vdp_decode_nametable_word((uint16_t)genesis_vdp_be16(ctx->vram, addr));
+      genesis_vdp_decode_nametable_word(genesis_vdp_plane_nametable_word(ctx->vram, ctx, plane, x, group, row));
   return genesis_vdp_fetch_cell_pixel(ctx, entry, plane_x % GENESIS_VDP_TILE_WIDTH,
                                       plane_y % ctx->geometry.cell_height);
 }
@@ -1361,6 +1369,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   uint8_t sprite_reason = 0U;
   uint32_t sprite_pixels = 0U;
   int journaled, sprites;
+  const uint8_t *frame_start_vram;
   unsigned compat_accepted = 0U;
   char compat_scene[GENESIS_COMPAT_SCENE_MAX + 1] = {0};
   uint8_t compat_reason = 0U;
@@ -1412,6 +1421,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   if (!journaled) flags |= GENESIS_EXT_FLAG_NO_VRAM_JOURNAL;
   ctx.vram = vram;
   ctx.geometry = geometry;
+  frame_start_vram = journaled ? raster->vram_start : vram;   /* SEG-152-T007: the VRAM an ABI 1 provider is handed as frame->vram */
   if (journaled) {
     memcpy(work_vram, raster->vram_start, sizeof(work_vram));
     ctx.vram = work_vram;
@@ -1521,7 +1531,10 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
           const unsigned ga = plane_a.per_column ? group : 0U;
           uint16_t word = 0U;
           const int answer = (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U ? target->compat->scenery_word(target->compat_state, 0U, row, (int)x, (int)plane_a.hscroll, (int)plane_a.vscroll[ga], &word) : 0;
-          if (answer == 1) {
+          if (answer == GENESIS_COMPAT_WORD_VDP_START && target->compat_private_words != 0U && (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U) {   /* SEG-152-T007: the ABI 1 own_plane answer (a credited provider word) */
+            ++compat_words;
+            a = genesis_vdp_plane_candidate_from_word(&ctx, &plane_a, x, ga, row, genesis_vdp_plane_nametable_word(frame_start_vram, &ctx, &plane_a, x, ga, row));
+          } else if (answer == 1) {
             ++compat_words;
             a = genesis_vdp_plane_candidate_from_word(&ctx, &plane_a, x, ga, row, word);
           } else {
@@ -1535,7 +1548,10 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
           const unsigned gb = plane_b.per_column ? group : 0U;
           uint16_t word = 0U;
           const int answer = (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U ? target->compat->scenery_word(target->compat_state, 1U, row, (int)x, (int)plane_b.hscroll, (int)plane_b.vscroll[gb], &word) : 0;
-          if (answer == 1) {
+          if (answer == GENESIS_COMPAT_WORD_VDP_START && target->compat_private_words != 0U && (compat_accepted & GENESIS_COMPAT_SCENERY) != 0U) {   /* SEG-152-T007: the ABI 1 own_plane answer (a credited provider word) */
+            ++compat_words;
+            b = genesis_vdp_plane_candidate_from_word(&ctx, &plane_b, x, gb, row, genesis_vdp_plane_nametable_word(frame_start_vram, &ctx, &plane_b, x, gb, row));
+          } else if (answer == 1) {
             ++compat_words;
             b = genesis_vdp_plane_candidate_from_word(&ctx, &plane_b, x, gb, row, word);
           } else {

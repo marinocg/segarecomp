@@ -379,6 +379,7 @@ int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameE
   ext->compat = compat;
   ext->compat_state = state;
   ext->compat_caps = caps;
+  ext->compat_private_words = 0U;   /* SEG-152-T007: never enabled here; only the trusted attach of the scheduled-mod adapter (viewer_main_hook.c) sets it after this call */
   ext->compat_components = components & compat->components;
   v->compat_enabled = ext->compat_components;
   ext->request = request_of_compat(sv_host_settings(v->host)->video.widescreen, ext->compat_components & GENESIS_COMPAT_HUD);
@@ -387,6 +388,12 @@ int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameE
   ext->compat_ram_stamp = 0U;
   ext->overlay_rgba = g_compat_overlay;
   ext->layer_rgba = g_compat_layers;
+  return 0;
+}
+
+int genesis_sdl3_viewer_attach_scheduled_mod_compat(GenesisSdl3Viewer *v, GenesisFrameExtension *ext, const GenesisNativeCompat *compat, void *state, unsigned caps) {
+  if (genesis_sdl3_viewer_attach_native_compat(v, ext, compat, state, caps) != 0) return -1;
+  ext->compat_private_words = 1U;
   return 0;
 }
 

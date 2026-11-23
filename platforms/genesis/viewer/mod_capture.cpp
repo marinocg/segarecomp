@@ -95,6 +95,9 @@ struct Mod {
   // SEG-140-T011 (ADR 0309): the typed scenery_window feature. One bounded name-table window per plane, staged during the render callback, committed with it, bound to the one frame it was rendered for.
   using SceneryWindow = segarecomp::scenery::Window;   // mod_scenery_window.hpp: the limits and the lookup shared with the ABI 1 / ABI 2 parity harness
   SceneryWindow staged_scenery[2][2], visible_scenery[2][2];   // [plane][window]: ADR 0313, up to two windows per plane (the playfield rows and a split-scroll band can need disjoint cell ranges)
+  // SEG-152-T007 (ADR 0320 decision 8 addendum): the per-plane per-row generic mask, staged / committed / cleared exactly like the windows (2 x 56 bytes staged + 2 x 56 visible; no provider pointer is retained).
+  segarecomp::scenery::RowMask staged_row_mask[2], visible_row_mask[2];
+  bool staged_row_mask_submitted[2] = {false, false};   // at most one submission per plane per callback
   std::uint64_t visible_scenery_frame = 0;   // the guest frame whose render callback committed `visible_scenery` (and the ADR 0315 placement below: they are committed together)
   // ADR 0315: the frame-bound asymmetric placement. `margin` is the per-side margin the provider saw when it chose `left_px`; -1 = none declared.
   bool exact_served = false;                  // ADR 0320: the committed output was produced by THIS prepare() call (an exact-frame provider); it is never carried to another frame
@@ -280,6 +283,18 @@ int api_scenery_window(std::uint32_t plane, std::int32_t cell_x0, std::int32_t c
   w.words.assign(words, words + static_cast<std::size_t>(cols) * rows);
   return SEGA_MOD_OK;
 }
+// SEG-152-T007: marks screen rows of one plane as answered by the VDP's own plane as a provider word (ABI 1 own_plane). Needs `scenery.words`, like scenery_window; validated before anything is staged.
+int api_scenery_generic_rows(std::uint32_t plane, const std::uint8_t *mask, std::uint32_t rows, std::uint32_t mask_bytes) {
+  if (!in_render()) return refused_phase();
+  if (!sega_mod_is_granted(&g.scheduler->host, SEGA_MOD_CAP_SCENERY_WORDS)) { genesis_mod_fault_current("capability"); return SEGA_MOD_E_CAPABILITY; }
+  if (!segarecomp::scenery::mask_in_range(plane, mask, rows, mask_bytes) || g.staged_row_mask_submitted[plane]) {
+    genesis_mod_fault_current("range");
+    return SEGA_MOD_E_RANGE;
+  }
+  segarecomp::scenery::mask_store(g.staged_row_mask[plane], mask, mask_bytes);
+  g.staged_row_mask_submitted[plane] = true;
+  return SEGA_MOD_OK;
+}
 // ADR 0315: the per-side margin of the host's most recently PUBLISHED extension result, read from the runtime's own publication (never cached): zero for Original, 4:3, a failed production or before the first one,
 // because the runtime publishes a result (status NONE / UNAVAILABLE, side 0) for every frame, including the ones that return before prepare().
 std::uint32_t current_margin() {
@@ -322,7 +337,7 @@ static_assert(sizeof(SegaGenesisFrameLine) == sizeof(GenesisCompatLine) && offse
               "the ABI 2 frame line has the layout of the ABI 1 compat line");
 #endif
 SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, api_view_margin, api_view_left, {nullptr, nullptr, nullptr, nullptr},
-                                   api_overlay_bitmap, api_overlay_layer_bitmap, api_overlay_layer_clip, api_overlay_fallback, api_decline};
+                                   api_overlay_bitmap, api_overlay_layer_bitmap, api_overlay_layer_clip, api_overlay_fallback, api_decline, api_scenery_generic_rows};
 
 // The provider's `phase` entry, wrapped: a render callback starts from an empty staging area, and what it staged becomes visible only if the callback finished without a fault (a faulted callback leaves nothing).
 void wrapped_phase(void *state, const SegaModHost *host) {
@@ -331,6 +346,7 @@ void wrapped_phase(void *state, const SegaModHost *host) {
     g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; g.have_staged_set = false; g.have_visible_set = false;
     for (auto &plane_windows : g.staged_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};
     for (auto &plane_windows : g.visible_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};   // nothing of an earlier frame survives the start of a render callback
+    for (unsigned plane = 0; plane < 2U; ++plane) { g.staged_row_mask[plane] = segarecomp::scenery::RowMask{}; g.visible_row_mask[plane] = segarecomp::scenery::RowMask{}; g.staged_row_mask_submitted[plane] = false; }
     g.staged_left_px = g.visible_left_px = -1;
   }
   g.native_phase_entry(state, host);
@@ -343,6 +359,7 @@ void wrapped_phase(void *state, const SegaModHost *host) {
       g.visible_set_digest = g.visible_set_digest_valid ? fnv1a64(g.scheduler->render_copy, GENESIS_MOD_WORK_RAM_BYTES) : 0U;
     }
     for (unsigned plane = 0; plane < 2U; ++plane) for (unsigned k = 0; k < 2U; ++k) std::swap(g.visible_scenery[plane][k], g.staged_scenery[plane][k]);
+    for (unsigned plane = 0; plane < 2U; ++plane) std::swap(g.visible_row_mask[plane], g.staged_row_mask[plane]);
     g.visible_scenery_frame = host->frame;
     g.visible_left_px = g.staged_left_px;
     g.visible_left_margin = g.staged_left_margin;
@@ -351,6 +368,7 @@ void wrapped_phase(void *state, const SegaModHost *host) {
     g.staged_left_px = -1;
     g.staged = luau::Output{}; g.have_staged_set = false;
     for (auto &plane_windows : g.staged_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};
+    for (unsigned plane = 0; plane < 2U; ++plane) { g.staged_row_mask[plane] = segarecomp::scenery::RowMask{}; g.staged_row_mask_submitted[plane] = false; }
   }
 }
 #endif
@@ -548,7 +566,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   const bool declared = current && g.visible_left_px >= 0;
   p.left_ok = declared && eff_side > 0U && g.visible_left_margin == eff_side && g.visible_left_px <= 2 * static_cast<std::int64_t>(eff_side);
   if ((frame->requested & GENESIS_COMPAT_SCENERY) != 0U) {
-    p.scenery = current && (g.visible_scenery[0][0].present || g.visible_scenery[1][0].present);   // ADR 0314: a frame is served when at least one plane has a window (an empty plane is a window of blank cells); a plane without one is left to the generic extension
+    p.scenery = current && (g.visible_scenery[0][0].present || g.visible_scenery[1][0].present || g.visible_row_mask[0].any || g.visible_row_mask[1].any);   // ADR 0314: a frame is served when at least one plane has a window (an empty plane is a window of blank cells); a plane without one is left to the generic extension
     if (p.scenery) accepted |= GENESIS_COMPAT_SCENERY;
     // The windows of a callback that declared a placement were built for THAT view: when the placement is not valid for this frame's geometry they are not served either (they would answer the wrong
     // cells), so the scenery falls back to the generic extension. The HUD and sprite contributions are independent of the view and stay accepted. A provider that declared no placement is untouched.
@@ -606,8 +624,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
 int scenery_word(void *, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
 #ifdef SEGARECOMP_MOD_NATIVE
   if (!p.scenery || plane > 1U || word == nullptr) return 0;
-  if (!g.visible_scenery[plane][0].present && !g.visible_scenery[plane][1].present) return GENESIS_COMPAT_WORD_GENERIC;   // ADR 0314: this plane has no window: the VDP-derived extension answers it, not a failure
-  return segarecomp::scenery::lookup(g.visible_scenery[plane], static_cast<int>(row), x, hscroll, vscroll, word);
+  return segarecomp::scenery::answer(g.visible_row_mask[plane], g.visible_scenery[plane], static_cast<int>(row), x, hscroll, vscroll, word, GENESIS_COMPAT_WORD_VDP_START, GENESIS_COMPAT_WORD_GENERIC);   // SEG-152-T007: a marked screen row is the VDP's own word as a provider word (honoured only on this adapter's trusted attach); ADR 0314: a plane without a window is left to the generic extension
 #else
   (void)plane; (void)row; (void)x; (void)hscroll; (void)vscroll; (void)word;
   return 0;

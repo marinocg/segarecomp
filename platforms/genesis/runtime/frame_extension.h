@@ -56,6 +56,10 @@ typedef enum GenesisExtensionReason {
 } GenesisExtensionReason;
 
 /* Caveats of a PARTIAL result (bit mask). Each means "the extension is real VDP data but a part of it cannot be derived exactly". */
+/* SEG-152-T007 (ADR 0320 decision 8 addendum): a HOST-PRIVATE scenery_word answer, deliberately not in the public ABI 1 SDK header. It asks the producer for the VDP-derived name-table word of the cell read from the frame-start VRAM, counted as a
+ * provider-answered word (the exact ABI 1 `own_plane` semantics: return 1 with that word). Valid only when GenesisFrameExtension::compat_private_words is non-zero; otherwise it is an unanswered cell like any unsupported value. */
+#define GENESIS_COMPAT_WORD_VDP_START 3
+
 #define GENESIS_EXT_FLAG_WINDOW_EDGE 0x01U     /* the window plane covers a native edge on some rows: Plane A is omitted off-screen on those rows */
 #define GENESIS_EXT_FLAG_COLUMN_VSCROLL 0x02U  /* per-column vertical scroll differs across columns: the nearest edge column's value is used */
 #define GENESIS_EXT_FLAG_NO_VRAM_JOURNAL 0x04U /* no VRAM journal: mid-frame VRAM changes cannot be replayed (same limit as the native render) */
@@ -140,6 +144,9 @@ typedef struct GenesisFrameExtension {
   void *compat_state;
   unsigned compat_components;       /* GENESIS_COMPAT_* components the host will use (derived from the granted capabilities) */
   unsigned compat_caps;             /* GENESIS_CAP_* the verified package declared and the host grants */
+  /* SEG-152-T007: host-private, zero = disabled. Set to 1 only by the trusted attach of the scheduled-mod adapter (never from provider data); it makes the producer honour GENESIS_COMPAT_WORD_VDP_START (vdp_render.h)
+   * from `scenery_word`. Everywhere else that answer keeps its meaning of an unanswered cell. */
+  uint8_t compat_private_words;
   uint8_t *compat_ram;
   uint64_t compat_ram_stamp;
   uint8_t compat_ram_valid;

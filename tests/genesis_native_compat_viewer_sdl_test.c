@@ -185,6 +185,15 @@ int main(void) {
     bad.abi_version = 7;
     CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &bad, &mock, 15U) != 0 && g.ext->compat == NULL, "another ABI version is refused and nothing is attached"); }
   CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &k_mock, &mock, 15U) == 0 && g.ext->compat == &k_mock && g.ext->compat_ram != NULL && g.ext->overlay_rgba != NULL, "a valid provider attaches");
+  /* SEG-152-T007: the host-private answer code is enabled ONLY by the trusted attach function. An ordinary attach leaves it 0; a refused trusted attach leaves it 0 and attaches nothing; the table's name
+   * and every other provider-controlled value cannot enable it (the table carries no such field). */
+  CHECK(g.ext->compat_private_words == 0U, "an ordinary attach leaves compat_private_words 0");
+  { GenesisNativeCompat named = k_mock, bad = k_mock; named.name = "scheduled-mod-host"; bad.abi_version = 7;
+    CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &named, &mock, 15U) == 0 && g.ext->compat_private_words == 0U, "a provider named like the adapter does not enable it");
+    CHECK(genesis_sdl3_viewer_attach_scheduled_mod_compat(g.viewer, g.ext, &bad, &mock, 15U) != 0 && g.ext->compat_private_words == 0U, "an unsuccessful trusted attach leaves the flag 0");
+    CHECK(genesis_sdl3_viewer_attach_scheduled_mod_compat(g.viewer, NULL, &k_mock, &mock, 15U) != 0 && g.ext->compat_private_words == 0U, "a trusted attach with a missing extension leaves the flag 0");
+    CHECK(genesis_sdl3_viewer_attach_scheduled_mod_compat(g.viewer, g.ext, &k_mock, &mock, 15U) == 0 && g.ext->compat_private_words == 1U, "the trusted attach of the scheduled-mod adapter enables it");
+    CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &k_mock, &mock, 15U) == 0 && g.ext->compat_private_words == 0U, "re-attaching ordinarily clears it again"); }
 
   /* Level 3 + Comfort (the default style): frame 1 has no snapshot (declined: generic + Comfort); from frame 2 the provider serves the frame: authored, Comfort bypassed */
   set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_COMFORT, 100);

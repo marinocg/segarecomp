@@ -390,8 +390,13 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   {
     void *compat_state = NULL;
     const GenesisNativeCompat *compat = segarecomp_patch_provider(&compat_state);
-    if (compat == NULL || g_raster_capture.extension == NULL || genesis_sdl3_viewer_attach_native_compat(sdl, g_raster_capture.extension, compat, compat_state, SEGARECOMP_NATIVE_PROVIDER_CAPS) != 0)
-      fprintf(stderr, "viewer: native compatibility provider not attached; presenting generically\n");
+#ifdef SEGARECOMP_MOD_VIEWER
+    /* SEG-152-T007: in this build the provider's table is mod_capture.cpp's own host table: the trusted attach also honours its host-private answer codes */
+    const int attached = compat != NULL && g_raster_capture.extension != NULL && genesis_sdl3_viewer_attach_scheduled_mod_compat(sdl, g_raster_capture.extension, compat, compat_state, SEGARECOMP_NATIVE_PROVIDER_CAPS) == 0;
+#else
+    const int attached = compat != NULL && g_raster_capture.extension != NULL && genesis_sdl3_viewer_attach_native_compat(sdl, g_raster_capture.extension, compat, compat_state, SEGARECOMP_NATIVE_PROVIDER_CAPS) == 0;
+#endif
+    if (!attached) fprintf(stderr, "viewer: native compatibility provider not attached; presenting generically\n");
   }
 #endif
 
