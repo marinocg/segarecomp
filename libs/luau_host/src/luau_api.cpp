@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <map>
 
 namespace segarecomp::luau {
@@ -214,6 +215,13 @@ static OverlayImage raster_ops(int width, int height, int layer, std::span<const
   const SvFontFace &face = sv_font_faces[SV_FONT_BODY];
   for (const OverlayOp &op : ops) {
     if (op.layer != layer) continue;
+    if (op.kind == OverlayOp::Kind::bitmap) {   // SEG-152-T005: exact replacement of the destination bytes (alpha 0 included), never the blend
+      for (int row = 0; row < op.h; ++row) {
+        std::uint8_t *dst = pixel(op.x, op.y + row);
+        if (dst != nullptr) std::memcpy(dst, &op.pixels[static_cast<std::size_t>(row) * static_cast<std::size_t>(op.w) * 4U], static_cast<std::size_t>(op.w) * 4U);
+      }
+      continue;
+    }
     if (op.kind == OverlayOp::Kind::rect) {
       for (int y = op.y; y < op.y + op.h; ++y)
         for (int x = op.x; x < op.x + op.w; ++x)
@@ -246,8 +254,14 @@ const OverlayLayerDecl *layer_of(const Output &out, int index) {
 }
 int width_of(const Output &out, int target) { const OverlayLayerDecl *d = target != 0 ? layer_of(out, target) : nullptr; return d != nullptr ? d->w : kOverlayWidth; }
 int height_of(const Output &out, int target) { const OverlayLayerDecl *d = target != 0 ? layer_of(out, target) : nullptr; return d != nullptr ? d->h : kOverlayHeight; }
+std::size_t layer_pixels(const Output &out) {
+  std::size_t n = 0;
+  for (const OverlayLayerDecl &d : out.layers) n += static_cast<std::size_t>(d.w) * static_cast<std::size_t>(d.h);
+  return n;
+}
 OverlayCall add_op(Output &out, OverlayOp op) {
-  if (out.overlay.size() >= kOverlayOpsPerCallback) return bad(OverlayCall::Status::budget, "sega.overlay request limit exceeded");
+  // bitmap ops live in the same list but do not consume the rect/text budget
+  if (out.overlay.size() - out.bitmap_requests >= kOverlayOpsPerCallback) return bad(OverlayCall::Status::budget, "sega.overlay request limit exceeded");
   out.overlay.push_back(std::move(op));
   return {};
 }
@@ -268,7 +282,74 @@ OverlayCall overlay_declare_layer(Output &out, const OverlayLayerDecl &d) {
   if (d.dx < -2048 || d.dx > 2048 || d.dy < -2048 || d.dy > 2048 || d.w < 1 || d.w > kOverlayLayerSide || d.h < 1 || d.h > kOverlayLayerSide || d.z < 0 || d.z > kOverlayLayersMax - 1)
     return bad(OverlayCall::Status::range, "an argument of sega.overlay.layer is out of range");
   if (layer_of(out, d.index) != nullptr) return bad(OverlayCall::Status::range, "sega.overlay.layer declares a layer that was already declared in this callback");
+  if (layer_pixels(out) + static_cast<std::size_t>(d.w) * static_cast<std::size_t>(d.h) > kLayerPixelsMax) return bad(OverlayCall::Status::budget, "the declared layers exceed the overlay pixel budget");   // reachable only next to a bitmap layer
   out.layers.push_back(d);
+  return {};
+}
+
+OverlayCall overlay_declare_bitmap_layer(Output &out, const OverlayLayerDecl &d) {
+  if (d.index < 1 || d.index > kOverlayLayersMax) return bad(OverlayCall::Status::range, "the layer index of overlay_layer_bitmap is out of range");
+  if (d.anchor < 0 || d.anchor > 8) return bad(OverlayCall::Status::range, "the anchor of overlay_layer_bitmap is not a known anchor");
+  if (d.reference < 0 || d.reference > 1) return bad(OverlayCall::Status::range, "the reference of overlay_layer_bitmap must be 0 (picture) or 1 (presentation)");
+  if (d.dx < -2048 || d.dx > 2048 || d.dy < -2048 || d.dy > 2048 || d.w < 1 || d.w > kBitmapLayerSide || d.h < 1 || d.h > kBitmapLayerSide || d.z < 0 || d.z > kOverlayLayersMax - 1)
+    return bad(OverlayCall::Status::range, "an argument of overlay_layer_bitmap is out of range");
+  if (layer_of(out, d.index) != nullptr) return bad(OverlayCall::Status::range, "overlay_layer_bitmap declares a layer that was already declared in this callback");
+  if (layer_pixels(out) + static_cast<std::size_t>(d.w) * static_cast<std::size_t>(d.h) > kLayerPixelsMax) return bad(OverlayCall::Status::budget, "the declared layers exceed the overlay pixel budget");
+  OverlayLayerDecl decl = d;
+  decl.bitmap = true;
+  decl.has_clip = false;
+  out.layers.push_back(decl);
+  return {};
+}
+
+OverlayCall overlay_layer_clip(Output &out, std::int64_t index, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h) {
+  OverlayLayerDecl *decl = nullptr;
+  for (OverlayLayerDecl &d : out.layers)
+    if (d.index == index) decl = &d;
+  if (decl == nullptr) return bad(OverlayCall::Status::range, "overlay_layer_clip names a layer that has not been declared");
+  if (x < 0 || y < 0 || w < 1 || h < 1 || x + w > decl->w || y + h > decl->h) return bad(OverlayCall::Status::range, "the clip rectangle of overlay_layer_clip lies outside its layer");
+  decl->has_clip = true;
+  decl->clip_x = static_cast<int>(x);
+  decl->clip_y = static_cast<int>(y);
+  decl->clip_w = static_cast<int>(w);
+  decl->clip_h = static_cast<int>(h);
+  return {};
+}
+
+OverlayCall overlay_fallback(Output &out, std::int64_t x, std::int64_t y) {
+  if (x < 0 || x > 65535 || y < 0 || y > 65535) return bad(OverlayCall::Status::range, "an argument of overlay_fallback is out of range");
+  out.fallback_x = static_cast<int>(x);
+  out.fallback_y = static_cast<int>(y);
+  return {};
+}
+
+OverlayCall overlay_bitmap(Output &out, int target, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h, const std::uint8_t *rgba, std::uint64_t stride_bytes) {
+  const int target_w = width_of(out, target), target_h = height_of(out, target);
+  if (rgba == nullptr || x < -kCoord || x > kCoord || y < -kCoord || y > kCoord || w < 1 || h < 1 || w > target_w || h > target_h || stride_bytes < static_cast<std::uint64_t>(w) * 4U)
+    return bad(OverlayCall::Status::range, "an argument of overlay_bitmap is out of range");
+  const std::uint64_t bytes = static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(h) * 4U;
+  if (out.bitmap_requests >= kBitmapRequestsMax || out.bitmap_bytes + bytes > kBitmapBytesMax) return bad(OverlayCall::Status::budget, "the overlay_bitmap budget of the callback is exhausted");
+  ++out.bitmap_requests;
+  out.bitmap_bytes += bytes;
+  const std::int64_t x0 = std::max<std::int64_t>(x, 0), y0 = std::max<std::int64_t>(y, 0);
+  const std::int64_t x1 = std::min<std::int64_t>(x + w, target_w), y1 = std::min<std::int64_t>(y + h, target_h);
+  if (x1 <= x0 || y1 <= y0) {
+    note_to(out, "overlay_clipped", "an overlay_bitmap has no visible area");
+    return {};
+  }
+  if (x0 != x || y0 != y || x1 - x0 != w || y1 - y0 != h) note_to(out, "overlay_clamped", "an overlay_bitmap was clamped to the overlay");
+  OverlayOp op;
+  op.layer = target;
+  op.kind = OverlayOp::Kind::bitmap;
+  op.x = static_cast<int>(x0);
+  op.y = static_cast<int>(y0);
+  op.w = static_cast<int>(x1 - x0);
+  op.h = static_cast<int>(y1 - y0);
+  const std::size_t row_bytes = static_cast<std::size_t>(op.w) * 4U;
+  op.pixels.resize(row_bytes * static_cast<std::size_t>(op.h));
+  for (int row = 0; row < op.h; ++row)   // only the visible part of each row is read: never past (h - 1) * stride + 4 * w bytes
+    std::memcpy(&op.pixels[static_cast<std::size_t>(row) * row_bytes], rgba + static_cast<std::uint64_t>(y0 - y + row) * stride_bytes + static_cast<std::uint64_t>(x0 - x) * 4U, row_bytes);
+  out.overlay.push_back(std::move(op));
   return {};
 }
 
@@ -284,6 +365,7 @@ OverlayCall overlay_select_target(Output &out, int &target, std::int64_t index) 
 
 OverlayCall overlay_rect(Output &out, int target, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h, std::uint32_t rgba) {
   if (x < -kCoord || x > kCoord || y < -kCoord || y > kCoord || w < 0 || w > kCoord || h < 0 || h > kCoord) return bad(OverlayCall::Status::range, "an argument of sega.overlay.rect is out of range");
+  if (const OverlayLayerDecl *d = target != 0 ? layer_of(out, target) : nullptr; d != nullptr && d->bitmap) return bad(OverlayCall::Status::range, "a bitmap layer accepts bitmaps only, not sega.overlay.rect");
   const int target_w = width_of(out, target), target_h = height_of(out, target);
   const std::int64_t x0 = std::max<std::int64_t>(x, 0), y0 = std::max<std::int64_t>(y, 0);
   const std::int64_t x1 = std::min<std::int64_t>(x + w, target_w), y1 = std::min<std::int64_t>(y + h, target_h);
@@ -305,6 +387,7 @@ OverlayCall overlay_rect(Output &out, int target, std::int64_t x, std::int64_t y
 
 OverlayCall overlay_text(Output &out, int target, std::int64_t x, std::int64_t y, std::string_view text, std::uint32_t rgba) {
   if (x < -kCoord || x > kCoord || y < -kCoord || y > kCoord) return bad(OverlayCall::Status::range, "an argument of sega.overlay.text is out of range");
+  if (const OverlayLayerDecl *d = target != 0 ? layer_of(out, target) : nullptr; d != nullptr && d->bitmap) return bad(OverlayCall::Status::range, "a bitmap layer accepts bitmaps only, not sega.overlay.text");
   const std::int64_t cx = std::clamp<std::int64_t>(x, 0, width_of(out, target) - 1), cy = std::clamp<std::int64_t>(y, 0, height_of(out, target) - 1);
   if (cx != x || cy != y) note_to(out, "overlay_clamped", "a sega.overlay.text origin was clamped to the overlay");
   OverlayOp op;

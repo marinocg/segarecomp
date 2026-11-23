@@ -275,6 +275,24 @@ target_link_libraries(genesis_mod_exact_adapter_tests PRIVATE segarecomp::luau_h
 target_compile_features(genesis_mod_exact_adapter_tests PRIVATE cxx_std_20)
 add_test(NAME genesis_mod_exact_adapter_tests COMMAND genesis_mod_exact_adapter_tests)
 set_tests_properties(genesis_mod_exact_adapter_tests PROPERTIES TIMEOUT 300)
+# SEG-152-T005 / SEG-152-T006 (ADR 0320 decisions 6 and 7): the same viewer adapter driven by a scripted exact-frame provider: bounded RGBA bitmaps (pixel equality with the ABI 1 transport, limits, faults,
+# rasterization order, regression of old providers) and the non-fault per-frame refusal (vs genuine faults, reason parity with ABI 1).
+add_library(genesis_mod_overlay_script OBJECT fixtures/mod_sdk/overlay_script_provider.c)
+set_target_properties(genesis_mod_overlay_script PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_include_directories(genesis_mod_overlay_script PRIVATE ${PROJECT_SOURCE_DIR}/platforms/sdk ${PROJECT_SOURCE_DIR}/platforms/genesis/sdk)
+target_compile_definitions(genesis_mod_overlay_script PRIVATE SEGA_MOD_TARGET_PLATFORM=1 SEGA_MOD_TARGET_ABI_MAJOR=2U SEGA_MOD_TARGET_ABI_MINOR=1U)
+if(NOT MSVC)
+  target_compile_options(genesis_mod_overlay_script PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+add_executable(genesis_mod_overlay_script_tests genesis_mod_overlay_script_test.cpp fixtures/mod_sdk/overlay_script_artifact.c
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/mod_capture.cpp $<TARGET_OBJECTS:genesis_mod_overlay_script>
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c)
+target_include_directories(genesis_mod_overlay_script_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+target_link_libraries(genesis_mod_overlay_script_tests PRIVATE segarecomp::luau_host segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+target_compile_features(genesis_mod_overlay_script_tests PRIVATE cxx_std_20)
+add_test(NAME genesis_mod_bitmap_tests COMMAND genesis_mod_overlay_script_tests bitmap)
+add_test(NAME genesis_mod_refusal_tests COMMAND genesis_mod_overlay_script_tests refusal)
+set_tests_properties(genesis_mod_bitmap_tests genesis_mod_refusal_tests PROPERTIES TIMEOUT 300)
 # SEG-138-T006 (ADR 0299): mod-owned state (MODSTATE) in the Genesis save-state / rewind container, with the shared snapshot codec and the rewind engine compiled in (as programs do).
 add_executable(genesis_mod_state_tests genesis_mod_state_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_persistence.c
@@ -2530,7 +2548,7 @@ add_test(NAME luau_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOUR
 add_test(NAME luau_host_golden_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/luau_host_golden_test.py)
 add_test(NAME mod_luau_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_luau_api_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_api_test.py $<TARGET_FILE:segarecomp>)
-foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_frame_cost genesis_mod_exact_adapter_tests genesis_mod_state_tests genesis_mod_replay_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
+foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_frame_cost genesis_mod_exact_adapter_tests genesis_mod_bitmap_tests genesis_mod_refusal_tests genesis_mod_state_tests genesis_mod_replay_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
   set_property(TEST ${_luau_test} APPEND PROPERTY LABELS full fast)
   set_property(TEST ${_luau_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endforeach()

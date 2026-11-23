@@ -16,15 +16,15 @@ namespace segarecomp::luau {
 using RasterizedLayers = std::vector<std::pair<OverlayLayerDecl, OverlayImage>>;
 
 // Returns 1 when something is presented (a fixed overlay and/or at least one layer), else 0.
-inline int pack_hud(bool have_image, bool fixed, const OverlayImage &image, const RasterizedLayers &layers, GenesisCompatOverlay *out) {
+inline int pack_hud(bool have_image, bool fixed, const OverlayImage &image, const RasterizedLayers &layers, GenesisCompatOverlay *out, int fallback_x = 0, int fallback_y = 0) {   // SEG-152-T005: the fallback position and layer clips are set only by the native bitmap calls
   if (!have_image || out->capacity < image.rgba.size()) return 0;
   if (fixed) {   // only a request that drew into the fixed overlay makes the legacy path show anything
     std::memcpy(out->rgba, image.rgba.data(), image.rgba.size());
     out->width = static_cast<std::uint16_t>(image.width);
     out->height = static_cast<std::uint16_t>(image.height);
   }
-  out->fallback_x = 0;
-  out->fallback_y = 0;
+  out->fallback_x = static_cast<std::uint16_t>(fallback_x);
+  out->fallback_y = static_cast<std::uint16_t>(fallback_y);
   if (out->layer_rgba != nullptr) {   // SEG-140-T004: the declared layers, packed one after another into the host's buffer
     std::size_t offset = 0;
     out->layer_count = 0;
@@ -41,6 +41,13 @@ inline int pack_hud(bool have_image, bool fixed, const OverlayImage &image, cons
       l.z = static_cast<std::uint8_t>(entry.first.z);
       l.dx = static_cast<std::int16_t>(entry.first.dx);
       l.dy = static_cast<std::int16_t>(entry.first.dy);
+      if (entry.first.has_clip) {
+        l.has_clip = 1;
+        l.clip_x = static_cast<std::uint16_t>(entry.first.clip_x);
+        l.clip_y = static_cast<std::uint16_t>(entry.first.clip_y);
+        l.clip_w = static_cast<std::uint16_t>(entry.first.clip_w);
+        l.clip_h = static_cast<std::uint16_t>(entry.first.clip_h);
+      }
       l.offset = static_cast<std::uint32_t>(offset);
       offset += bytes;
     }

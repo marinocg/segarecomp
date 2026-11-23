@@ -162,12 +162,14 @@ struct RenderView {
   const std::string *scene;
   const luau::SpriteSubmission *sprites;
   const GenesisVirtualSpriteSet *set;   // SEG-140-T010: the native route's submission, already in the shared transport (null for the Luau route and when none was submitted)
+  int fallback_x, fallback_y;           // SEG-152-T005: the fixed overlay's ABI 1 fallback position (native route only; 0 for Luau)
+  std::uint32_t declined, decline_reason;   // SEG-152-T006: the non-fault decline of the committed callback (native route only)
 };
 RenderView render_view() {
 #ifdef SEGARECOMP_MOD_NATIVE
-  return {&g.visible.overlay, &g.visible.layers, &g.visible.scene, &g.visible.sprites, g.have_visible_set ? g.visible_set.get() : nullptr};
+  return {&g.visible.overlay, &g.visible.layers, &g.visible.scene, &g.visible.sprites, g.have_visible_set ? g.visible_set.get() : nullptr, g.visible.fallback_x, g.visible.fallback_y, g.visible.declined, g.visible.decline_reason};
 #else
-  return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene(), &g.provider->sprites(), nullptr};
+  return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene(), &g.provider->sprites(), nullptr, 0, 0, 0U, 0U};
 #endif
 }
 
@@ -202,6 +204,37 @@ int api_overlay_text(std::int32_t x, std::int32_t y, const char *ascii, std::uin
   if (!in_render()) return refused_phase();
   if (ascii == nullptr && len != 0U) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
   return answer(luau::overlay_text(g.staged, g.target, x, y, std::string_view(ascii != nullptr ? ascii : "", len), rgba));
+}
+// SEG-152-T005 (ADR 0320 decision 6): the bounded RGBA bitmap calls: validation, clamping, budgets and notes are luau_api.cpp's (one implementation for the staged output the one compositor consumes).
+int api_overlay_bitmap(std::int32_t x, std::int32_t y, std::uint32_t w, std::uint32_t h, const std::uint8_t *rgba, std::uint32_t stride_bytes) {
+  return in_render() ? answer(luau::overlay_bitmap(g.staged, g.target, x, y, w, h, rgba, stride_bytes)) : refused_phase();
+}
+int api_overlay_layer_bitmap(std::uint32_t index, std::uint32_t anchor, std::uint32_t reference, std::int32_t dx, std::int32_t dy, std::uint32_t w, std::uint32_t h, std::uint32_t z) {
+  if (!in_render()) return refused_phase();
+  luau::OverlayLayerDecl d;
+  d.index = static_cast<int>(index > 1000U ? 1000U : index);
+  d.anchor = static_cast<int>(anchor > 1000U ? 1000U : anchor);
+  d.reference = static_cast<int>(reference > 1000U ? 1000U : reference);
+  d.dx = dx;
+  d.dy = dy;
+  d.w = static_cast<int>(w > 100000U ? 100000U : w);
+  d.h = static_cast<int>(h > 100000U ? 100000U : h);
+  d.z = static_cast<int>(z > 1000U ? 1000U : z);
+  return answer(luau::overlay_declare_bitmap_layer(g.staged, d));
+}
+int api_overlay_layer_clip(std::uint32_t index, std::uint32_t x, std::uint32_t y, std::uint32_t w, std::uint32_t h) {
+  return in_render() ? answer(luau::overlay_layer_clip(g.staged, index, x, y, w, h)) : refused_phase();
+}
+int api_overlay_fallback(std::uint32_t x, std::uint32_t y) { return in_render() ? answer(luau::overlay_fallback(g.staged, x, y)) : refused_phase(); }
+// SEG-152-T006 (ADR 0320 decision 7): a refusal is not a fault. The provider-selectable reasons are the ABI 1 provider-owned vocabulary; STALE_STATE and FAULT are host-originated (a provider must not impersonate them).
+int api_decline(std::uint32_t components, std::uint32_t reason) {
+  if (!in_render()) return refused_phase();
+  const std::uint32_t known = SEGA_GEN_COMPONENT_HUD | SEGA_GEN_COMPONENT_SCENERY | SEGA_GEN_COMPONENT_SPRITES;
+  const bool selectable = reason == SEGA_GEN_REASON_UNSUPPORTED_SCENE || reason == SEGA_GEN_REASON_BAD_STATE || reason == SEGA_GEN_REASON_BAD_SCROLL || reason == SEGA_GEN_REASON_MISMATCH;
+  if (components == 0U || (components & ~known) != 0U || !selectable) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
+  if (g.staged.declined == 0U) g.staged.decline_reason = reason;   // the first reason wins; the components accumulate
+  g.staged.declined |= components;
+  return SEGA_MOD_OK;
 }
 int api_scene(const char *id, std::uint32_t len) {
   if (!in_render()) return refused_phase();
@@ -272,10 +305,14 @@ SegaGenesisVdpHelpers make_vdp_helpers() {
   return t;
 }
 const SegaGenesisVdpHelpers g_vdp_helpers = make_vdp_helpers();
+static_assert(SEGA_GEN_COMPONENT_HUD == GENESIS_COMPAT_HUD && SEGA_GEN_COMPONENT_SCENERY == GENESIS_COMPAT_SCENERY && SEGA_GEN_COMPONENT_SPRITES == GENESIS_COMPAT_SPRITES &&
+              SEGA_GEN_REASON_UNSUPPORTED_SCENE == GENESIS_COMPAT_UNSUPPORTED_SCENE && SEGA_GEN_REASON_BAD_STATE == GENESIS_COMPAT_BAD_STATE && SEGA_GEN_REASON_BAD_SCROLL == GENESIS_COMPAT_BAD_SCROLL &&
+              SEGA_GEN_REASON_MISMATCH == GENESIS_COMPAT_MISMATCH, "the ABI 2 component and reason values are the ABI 1 ones");
 static_assert(sizeof(SegaGenesisFrameLine) == sizeof(GenesisCompatLine) && offsetof(SegaGenesisFrameLine, cram) == offsetof(GenesisCompatLine, cram) && offsetof(SegaGenesisFrameLine, vsram) == offsetof(GenesisCompatLine, vsram),
               "the ABI 2 frame line has the layout of the ABI 1 compat line");
 #endif
-SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, api_view_margin, api_view_left, {nullptr, nullptr, nullptr, nullptr}};
+SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, api_view_margin, api_view_left, {nullptr, nullptr, nullptr, nullptr},
+                                   api_overlay_bitmap, api_overlay_layer_bitmap, api_overlay_layer_clip, api_overlay_fallback, api_decline};
 
 // The provider's `phase` entry, wrapped: a render callback starts from an empty staging area, and what it staged becomes visible only if the callback finished without a fault (a faulted callback leaves nothing).
 void wrapped_phase(void *state, const SegaModHost *host) {
@@ -445,6 +482,7 @@ struct Presented {
   luau::RasterizedLayers layers;
   luau::SpriteSubmission sprites;   // SEG-140-T008: the virtual sprites committed by the last successful render callback
   const GenesisVirtualSpriteSet *set = nullptr;   // SEG-140-T010: the native route's committed set (owned by the adapter, valid until the next render callback)
+  int fallback_x = 0, fallback_y = 0;   // SEG-152-T005: the committed callback's fixed-overlay fallback position
   bool fixed = false, have = false, have_sprites = false, have_set = false, scenery = false, left_ok = false;
 } p;
 
@@ -507,13 +545,18 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     if (declared && !p.left_ok && p.scenery) { p.scenery = false; accepted &= ~static_cast<unsigned>(GENESIS_COMPAT_SCENERY); }
   }
 #endif
+  const RenderView view_now = render_view();
+  const std::uint32_t declined = view_now.declined;   // SEG-152-T006: components the provider refused for this frame (never a fault): their output is discarded, the generic path serves them
+  if ((declined & GENESIS_COMPAT_SCENERY) != 0U) { p.scenery = false; accepted &= ~static_cast<unsigned>(GENESIS_COMPAT_SCENERY); }
   if ((frame->requested & GENESIS_COMPAT_HUD) != 0U) {
-    const RenderView view = render_view();
-    const std::vector<luau::OverlayOp> &ops = *view.ops;
-    p.have_sprites = view.sprites->total > 0;
+    const RenderView view = view_now;
+    static const std::vector<luau::OverlayOp> no_ops;
+    const bool hud_declined = (declined & GENESIS_COMPAT_HUD) != 0U;   // a declined HUD presents no overlay or layer; the virtual sprites are the SPRITES component's and are declined separately
+    const std::vector<luau::OverlayOp> &ops = hud_declined ? no_ops : *view.ops;
+    p.have_sprites = view.sprites->total > 0 && (declined & GENESIS_COMPAT_SPRITES) == 0U;
     if (p.have_sprites) p.sprites = *view.sprites;
     p.set = view.set;
-    p.have_set = view.set != nullptr && view.set->count > 0;
+    p.have_set = view.set != nullptr && view.set->count > 0 && (declined & GENESIS_COMPAT_SPRITES) == 0U;
 #ifdef SEGARECOMP_MOD_NATIVE
     if (p.have_set && frame->work_ram != nullptr) {   // W04 gap B (a provider without frame.work_ram has no snapshot: the compositor then rejects game art as UNVERIFIED_STATE, as before): a set naming the game's own art must belong to THIS frame's epoch; otherwise the whole set is dropped (a stale submission, a restore, a rewind or a skipped callback never draws game art)
       bool verified = false;
@@ -529,13 +572,17 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
       p.fixed = false;
       for (const luau::OverlayOp &op : ops) p.fixed = p.fixed || op.layer == 0;
       p.layers.clear();
-      for (const luau::OverlayLayerDecl &d : *view.layers) p.layers.emplace_back(d, luau::rasterize_layer(d, ops));
+      if (!hud_declined) for (const luau::OverlayLayerDecl &d : *view.layers) p.layers.emplace_back(d, luau::rasterize_layer(d, ops));
+      p.fallback_x = view.fallback_x;
+      p.fallback_y = view.fallback_y;
       p.have = true;
       accepted |= GENESIS_COMPAT_HUD;
     }
   }
   out->accepted = accepted;
+  if (accepted == 0U && declined != 0U) out->reason = static_cast<std::uint8_t>(view_now.decline_reason);   // SEG-152-T006: the provider's diagnostic, reported exactly as an ABI 1 decline (a host reason is never provider-selectable)
 #ifdef SEGARECOMP_MOD_NATIVE
+  if (declined == (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_SPRITES)) p.left_ok = false;   // a wholly declined frame is generic: no placement either
   if (p.left_ok) { out->left_px = static_cast<std::int32_t>(g.visible_left_px); out->has_left_px = 1U; }   // with the verdict OK even when no component is accepted (ADR 0315)
 #endif
   if (accepted == 0U) return;
@@ -554,7 +601,7 @@ int scenery_word(void *, unsigned plane, unsigned row, int x, int hscroll, int v
 #endif
 }
 int hud(void *, GenesisCompatOverlay *out) {
-  const int hud_drawn = luau::pack_hud(p.have, p.fixed, p.image, p.layers, out);
+  const int hud_drawn = luau::pack_hud(p.have, p.fixed, p.image, p.layers, out, p.fallback_x, p.fallback_y);
   bool sprites = p.have_sprites && luau::pack_sprites(p.sprites, out->vsprites);
   if (p.have_set && out->vsprites != nullptr) {   // the native route's set is already the shared transport: copied as submitted
     std::memcpy(out->vsprites, p.set, sizeof *out->vsprites);

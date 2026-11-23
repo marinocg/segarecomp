@@ -72,6 +72,15 @@ rc, err = compile_source(src_use, 1)
 cli.check(rc == 0, f"a source targeting minor 1 sees SegaGenesisFeatures::frame ({err[:200]})")
 rc, err = compile_source(src_use, 0)
 cli.check(rc != 0 and "frame" in err, "a source targeting minor 0 does not see the minor-1 members (a readable compile error, not a silent change)")
+# SEG-152-T005/T006: the appended render-API members (bitmap, layer bitmap/clip, fallback, decline) follow the same minor-1 rule; the table keeps its size for a source that declares no minor
+for member in ("overlay_bitmap", "overlay_layer_bitmap", "overlay_layer_clip", "overlay_fallback", "decline"):
+    use = f'#include <segarecomp_mod_genesis.h>\nconst void *use(const SegaGenesisRenderApi *r) {{ return (const void *)r->{member}; }}\n'
+    rc, err = compile_source(use, 1)
+    cli.check(rc == 0, f"a source targeting minor 1 sees SegaGenesisRenderApi::{member} ({err[:200]})")
+    rc, err = compile_source(use, 0)
+    cli.check(rc != 0 and member in err, f"a source targeting minor 0 does not see SegaGenesisRenderApi::{member}")
+size_src = '#include <segarecomp_mod_genesis.h>\nunsigned size(void) { return (unsigned)sizeof(SegaGenesisRenderApi); }\n'
+cli.check(compile_source(size_src, 0)[0] == 0 and compile_source(size_src, 1)[0] == 0, "SegaGenesisRenderApi compiles at both minors (the minor-0 placeholder keeps the layout)")
 rc, err = compile_source(src_plain, 0)
 cli.check(rc == 0, "a source targeting minor 0 still compiles against the extended header and the table size is unchanged for it")
 rc, err = compile_source(src_plain, 2)
