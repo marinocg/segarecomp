@@ -60,13 +60,42 @@ typedef struct SegaGenesisRenderApi {
   int (*view_margin)(uint32_t *margin_px);
   int (*view_left)(uint32_t left_px, uint32_t margin_px);
   void *reserved[4];                          /* NULL */
+  /* Appended by SEG-152-T005/T006 (ABI minor 1, ADR 0320 decisions 6 and 7; a provider reads these only when `size` covers them and its manifest declares abi.minor >= 1). */
+#if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR < 1)
+  void *e_abi_minor_1_required_render[5]; /* a source that declares no abi.minor does not see overlay_bitmap, overlay_layer_bitmap, overlay_layer_clip, overlay_fallback or decline */
+#else
+  /* Bounded RGBA bitmap (decision 6). `overlay_bitmap` copies w x h RGBA8 pixels (byte order R,G,B,A, straight alpha, `stride_bytes` >= 4 * w, rows top to bottom; the buffer may be reused at once) into the current target
+   * (overlay_target) at (x, y). The pixels REPLACE the destination bytes (alpha 0 and its RGB included, as the ABI 1 transport carries raw bytes); rect and text keep blending, in submission order. 1 <= w,h <= the target's size,
+   * an origin that puts the bitmap partly outside is clamped (a note, never a fault); NULL, a zero size, a short stride or an oversized bitmap is a range fault. At most 8 bitmap requests and 393216 submitted bytes per callback
+   * (budget fault); a bitmap does not consume the 64 rect/text requests. `overlay_layer_bitmap` declares positioned layer 1-4 of up to 256 x 256 pixels (the declared layers share 65536 pixels) that accepts bitmaps only (rect/text
+   * on it is a range fault); the existing overlay_layer limits (128 x 128) are unchanged. `overlay_layer_clip` sets GenesisCompatLayer::has_clip for a declared layer (the last call wins); `overlay_fallback` sets the fixed overlay's
+   * fallback_x/fallback_y (0..65535 picture pixels; the last call wins). */
+  int (*overlay_bitmap)(int32_t x, int32_t y, uint32_t w, uint32_t h, const uint8_t *rgba, uint32_t stride_bytes);
+  int (*overlay_layer_bitmap)(uint32_t index, uint32_t anchor, uint32_t reference, int32_t dx, int32_t dy, uint32_t w, uint32_t h, uint32_t z);
+  int (*overlay_layer_clip)(uint32_t index, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+  int (*overlay_fallback)(uint32_t x, uint32_t y);
+  /* Refusal (decision 7), NOT a fault: this frame's `components` (SEGA_GEN_COMPONENT_*, the mask of SegaGenesisFrameView::requested) are declined with a diagnostic `reason` (SEGA_GEN_REASON_*): their staged output is
+   * discarded (never half-served) and the host serves them generically with its own accurate status; the mod stays enabled and the next frame can be accepted. Only the provider-selectable reasons are accepted;
+   * STALE_STATE, FAULT, OK, an unknown reason, or an empty/unknown component mask is a range fault (a provider must not impersonate a failure only the host observes). A second call declares the union of the components
+   * and the first reason wins. Returns SEGA_MOD_OK for a valid argument. */
+  int (*decline)(uint32_t components, uint32_t reason);
+#endif
 } SegaGenesisRenderApi;
+
+/* ADR 0320 decisions 6/7 (the values of the host's GENESIS_COMPAT_* so `requested` and the reasons of an ABI 1 provider carry over unchanged). */
+#define SEGA_GEN_COMPONENT_HUD 1U      /* the fixed overlay, layers and virtual sprites' overlay carrier: output of overlay_* */
+#define SEGA_GEN_COMPONENT_SCENERY 2U  /* scenery windows */
+#define SEGA_GEN_COMPONENT_SPRITES 4U  /* virtual sprites */
+#define SEGA_GEN_REASON_UNSUPPORTED_SCENE 2U
+#define SEGA_GEN_REASON_BAD_STATE 3U
+#define SEGA_GEN_REASON_BAD_SCROLL 4U
+#define SEGA_GEN_REASON_MISMATCH 6U
 
 /* ADR 0320 (SEG-152-T003, ABI minor 1): the exact-frame view. Present only for a provider that REQUIRES `frame.vdp` (an exact-frame provider): the host runs its `render` callback once per produced frame at the producer
  * seam, and `SegaGenesisFeatures::frame` is non-NULL only inside that callback (NULL in every other phase and for every other provider). Everything is a host-owned copy valid only during the callback: there is no
  * pointer to live guest memory. `work_ram` is the copy taken at the previous onset (the one ABI 1 `prepare` receives for the same frame) and is NULL unless `frame.work_ram` was granted; `vram`, `lines` need `frame.vdp`.
  * `flags` bit SEGA_GEN_FRAME_VRAM_FRAME_START: `vram` is the frame-start state (a journaled frame); clear: it is the producer's own end-of-frame VRAM and NOT a frame-start snapshot (a frame without a VRAM journal is still
- * delivered, as for ABI 1). `requested` is the component mask the host asked for (HUD 1, SPRITES 2, SCENERY 4). `side` is the per-side extension margin planned for this frame (0 = none: Original, exact 4:3). */
+ * delivered, as for ABI 1). `requested` is the component mask the host asked for (SEGA_GEN_COMPONENT_HUD 1, SCENERY 2, SPRITES 4: the host's own GENESIS_COMPAT_* bits). `side` is the per-side extension margin planned for this frame (0 = none: Original, exact 4:3). */
 #define SEGA_GEN_FRAME_VRAM_FRAME_START 1U
 #define SEGA_GEN_FRAME_MAX_LINES 224U
 typedef struct SegaGenesisFrameLine {

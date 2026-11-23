@@ -1,0 +1,32 @@
+# SEG-152-T005/T006: test package of the bitmap compositor test (fixture image: tests/fixtures/mod_scenery/scenery_fixture_rom.py, mid_frame=True). Native code: approval of this exact identity is the boundary.
+[mod]
+id = "bitmap-probe"
+author = "segarecomp tests"
+version = "0.1.0"
+name = "Bitmap probe"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "@@SHA@@"
+
+[[source]]
+kind = "native-c11"
+path = "src/provider.c"
+
+[abi]
+native = 2
+minor = 1
+
+[capabilities]
+required = ["frame.vdp", "overlay.rgba"]
+
+[geometry]
+aspect_max = "32:9"
+
+[[scene]]
+id = "main"
+components = ["hud"]

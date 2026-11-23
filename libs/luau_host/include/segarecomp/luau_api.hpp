@@ -41,6 +41,10 @@ inline constexpr std::size_t kOverlayOpsPerCallback = 64, kOverlayTextBytes = 64
 inline constexpr int kOverlayWidth = 128, kOverlayHeight = 256;
 // SEG-140-T004: positioned layers: at most four, each at most 128 x 128 (four of them are exactly the host's 65,536-pixel overlay budget).
 inline constexpr int kOverlayLayersMax = 4, kOverlayLayerSide = 128;
+// SEG-152-T005 (ADR 0320 decision 6): the bounded RGBA bitmap feature of the native render API. These bounds belong to the bitmap feature ONLY (a provider/script that never uses it has the previous accounting):
+// a bitmap layer is at most 256 x 256 within the shared 65,536-pixel transport, at most 8 bitmap requests and 393,216 submitted bytes (128 x 256 x 4 + 65,536 x 4) per callback.
+inline constexpr int kBitmapLayerSide = 256;
+inline constexpr std::size_t kLayerPixelsMax = 65536, kBitmapRequestsMax = 8, kBitmapBytesMax = 128U * 256U * 4U + 65536U * 4U;
 
 // ---- copy-in / copy-out records ----
 struct FrameValue {
@@ -63,11 +67,12 @@ struct FrameInput {
   const HostServices *services = nullptr;   // valid for the call only; null = the sega.mem / sega.input bindings fault with cause `phase`
 };
 struct OverlayOp {
-  enum class Kind { rect, text } kind = Kind::rect;
+  enum class Kind { rect, text, bitmap } kind = Kind::rect;
   int layer = 0;                     // 0 = the fixed HUD overlay; 1..kOverlayLayersMax = a positioned layer (SEG-140-T004)
   int x = 0, y = 0, w = 0, h = 0;   // already clamped to the overlay / layer
   std::uint32_t rgba = 0;            // 0xRRGGBBAA
   std::string text;                  // printable ASCII, at most 64 bytes
+  std::vector<std::uint8_t> pixels;  // Kind::bitmap: the visible (clamped) w x h RGBA8 pixels, tightly packed, copied from the provider during the call (never a pointer into provider memory)
 };
 // A non-fatal diagnostic of a callback (a clamp or a truncation). `cause` is a stable class: "log_truncated", "text_truncated", "overlay_clamped", "overlay_clipped".
 struct Note {
@@ -79,6 +84,9 @@ struct Note {
 struct OverlayLayerDecl {
   int index = 0;                     // 1..kOverlayLayersMax
   int anchor = 0, reference = 0, dx = 0, dy = 0, w = 0, h = 0, z = 0;
+  bool bitmap = false;               // SEG-152-T005: declared with the bitmap layer call (up to 256 x 256): accepts bitmap ops only
+  bool has_clip = false;             // SEG-152-T005: GenesisCompatLayer::has_clip; only the clip rectangle (layer pixels) of the image is drawn
+  int clip_x = 0, clip_y = 0, clip_w = 0, clip_h = 0;
 };
 // SEG-140-T008 (ADR 0306): the per-frame virtual-sprite submission of one render callback (platform-neutral names; the Genesis adapter maps it onto GenesisVirtualSpriteSet, the one transport every authoring
 // route shares). Provenance 1 = game-state verified, 2 = mod authored; layer 0 behind_planes, 1 between, 2 above_all. Semantic validity (sizes, tile and palette ranges, positions, clips, the budget
@@ -106,6 +114,12 @@ struct Output {
   std::vector<std::string> log;
   std::vector<OverlayOp> overlay;
   std::vector<Note> notes;
+  // SEG-152-T005: the bitmap feature's own accounting (a bitmap does not consume the rect/text op budget) and the fixed overlay's ABI 1 fallback position.
+  std::uint32_t bitmap_requests = 0;
+  std::uint64_t bitmap_bytes = 0;
+  int fallback_x = 0, fallback_y = 0;
+  // SEG-152-T006: the non-fault decline of the native render API (components in the host's GENESIS_COMPAT_* bits and the diagnostic reason); 0 = nothing declined.
+  std::uint32_t declined = 0, decline_reason = 0;
 };
 
 // SEG-138-T011 (ADR 0305): the ONE implementation of the overlay request rules (validation, clamping, notes, budgets), shared by the Luau `sega.overlay.*` bindings and the native ABI 2 render API so a
@@ -115,6 +129,13 @@ struct OverlayCall {
   std::string message;   // empty when ok
 };
 [[nodiscard]] OverlayCall overlay_declare_layer(Output &out, const OverlayLayerDecl &layer);   // index 1..4, anchor 0..8, reference 0..1, |dx|,|dy| <= 2048, 1 <= w,h <= 128, z 0..3, not declared twice
+// SEG-152-T005 (ADR 0320 decision 6). The bitmap-specific layer declaration: like overlay_declare_layer but 1 <= w,h <= 256, the declared layers share the 65,536-pixel transport (budget), and the layer accepts bitmap ops only.
+[[nodiscard]] OverlayCall overlay_declare_bitmap_layer(Output &out, const OverlayLayerDecl &layer);
+// A bitmap of w x h RGBA8 pixels (R,G,B,A, straight alpha, `stride_bytes` >= 4 * w, rows top to bottom) at (x, y) of the target; 1 <= w,h <= target size (else range), an origin that puts it partly outside is clamped with a note (never moved).
+// The visible part is COPIED; the bitmap REPLACES the destination bytes when rasterized (rect/text blend). At most 8 requests and 393,216 submitted bytes per callback (budget fault); rect/text are refused on a bitmap layer (range).
+[[nodiscard]] OverlayCall overlay_bitmap(Output &out, int target, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h, const std::uint8_t *rgba, std::uint64_t stride_bytes);
+[[nodiscard]] OverlayCall overlay_layer_clip(Output &out, std::int64_t index, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h);   // a declared layer; the clip lies inside it; the last call wins
+[[nodiscard]] OverlayCall overlay_fallback(Output &out, std::int64_t x, std::int64_t y);                                                         // 0..65535 picture pixels (GenesisCompatOverlay::fallback_x/y)
 [[nodiscard]] OverlayCall overlay_select_target(Output &out, int &target, std::int64_t index);   // 0 or a layer declared earlier in the callback
 [[nodiscard]] OverlayCall overlay_rect(Output &out, int target, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h, std::uint32_t rgba);
 [[nodiscard]] OverlayCall overlay_text(Output &out, int target, std::int64_t x, std::int64_t y, std::string_view text, std::uint32_t rgba);
