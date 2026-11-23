@@ -42,10 +42,10 @@ static void provider_phase(void *state, const SegaModHost *host) {
   /*@@NODECLINE@@*/ (void)r->decline(SEGA_GEN_COMPONENT_HUD, SEGA_GEN_REASON_BAD_STATE);
 #endif
   (void)r->scene("main", 4U);
-  if (v->side > 0U) {
+  if ((v->requested & SEGA_GEN_COMPONENT_SCENERY) != 0U) {   /* the ABI 1 twin serves scenery whenever the host asks for it, also in exact 4:3 where the view reports side 0: the cells it is asked for are the planned margin's, which the view does not name, so a 64 px nominal margin covers them */
     if (f->vdp->read_hscroll(v->vram, v->lines[0].registers, 0U, 0U, &hs) != 0) return;
     camera = -hs / 8;   /*@@STALE@@*/
-    left = v->side / LEFT_DIV;
+    left = v->side > 0U ? v->side / LEFT_DIV : 64U;
     x0 = camera - (int32_t)(left / 8U) - 3;
     for (row = 0U; row < ROWS; ++row)
       for (c = 0U; c < COLS; ++c) words[row * COLS + c] = world_word(0U, x0 + (int32_t)c);
@@ -56,7 +56,7 @@ static void provider_phase(void *state, const SegaModHost *host) {
       for (row = MASK_FROM; row < 224U; ++row) mask[row >> 3U] = (uint8_t)(mask[row >> 3U] | (1U << (row & 7U)));
       (void)r->scenery_generic_rows(0U, mask, 224U, 28U);
     }
-    (void)r->view_left(left, v->side);
+    if (v->side > 0U) (void)r->view_left(left, v->side);   /* the placement needs a planned margin: with side 0 (nothing of the extension is shown) none can be requested (ADR 0315) */
   }
 #if DECLINE != 1
   art_fill(fixed_art, 40U, 16U, 160U, 0U);

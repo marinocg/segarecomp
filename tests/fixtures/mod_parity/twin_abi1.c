@@ -21,6 +21,7 @@ static void prepare(void *state, const GenesisCompatFrame *f, GenesisCompatDecis
   out->accepted = f->requested & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY);
 #if DECLINE == 1
   out->accepted &= ~(unsigned)GENESIS_COMPAT_HUD;
+  out->reason = GENESIS_COMPAT_BAD_STATE;   /* the refusal's diagnostic (only reported when nothing else is accepted, as the same-logic ABI 2 decline reports it) */
 #endif
   memcpy(out->scene, "main", 5U);
   if (f->side > 0U) { out->left_px = (int32_t)(f->side / LEFT_DIV); out->has_left_px = 1U; }

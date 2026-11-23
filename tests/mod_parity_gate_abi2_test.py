@@ -6,7 +6,7 @@ twin written to the same logic, through the real SDL3 viewer and its one composi
 Proved: (1) the schema 3 package is accepted by the packager with exactly those capabilities, minor 2 and the two payload kinds, and `pack` is byte-deterministic; the schema 2 package of the same game still inspects and
 builds unchanged; (2) over the variants serve / per-row generic rows / refused HUD / refused frame and the modes 32:9 with an asymmetric placement, 16:9, Original and exact 4:3, the presented frame of the ABI 2 package equals
 the ABI 1 twin's byte for byte and matches a committed golden digest (synthetic content only, exact equality); (3) falsification: a stale scroll, a skipped callback, a missing refusal and an oversized bitmap each leave the
-ABI 2 frame different from the ABI 1 twin's (the gate names the failing case). The existing viewport suites run unmodified and are part of the same CI job.
+ABI 2 run different from the ABI 1 twin's for a named reason, an oversized bitmap faulting the callback with cause range and discarding everything staged; (4) per-frame producer verdicts (frame, status, side, accepted components, refusal reason, authored status, placement) and the coverage report's accounting equal frame by frame, with the one declared ADR 0315 difference (no placement can be requested when the view reports side 0), and a scripted transition run (32:9, 21:9, 16:9, Original, exact 4:3), its replay, a quick save + load and a rewind equal between the twins. The existing viewport suites run unmodified and are part of the same CI job.
 usage: mod_parity_gate_abi2_test.py <segarecomp-cli> <C compiler> <source root> <SDL3 prefix>"""
 import hashlib
 import importlib.util
@@ -25,9 +25,13 @@ CAPABILITIES = ["frame.vdp", "frame.work_ram", "overlay.rgba", "scenery.words"]
 # variant -> (DECLINE, MASK_FROM, LEFT_DIV): serve; per-row generic rows from row 100 (the ABI 1 own_plane shape); the HUD refused (BAD_STATE); the whole frame refused (unsupported scene)
 VARIANTS = {"serve": (0, 224, 4), "rows": (0, 100, 4), "refuse-hud": (1, 224, 4), "refuse-all": (2, 224, 4)}
 # mode -> (aspect, video schedule): 32:9 with an asymmetric placement, 16:9, Original (10:orig) and exact 4:3 (10:4:3)
-MODES = {"wide": ("32:9", None), "w169": ("16:9", None), "orig": ("32:9", "10:orig"), "43": ("32:9", "10:4:3")}
+MODES = {"wide": ("32:9", None), "w219": ("21:9", None), "w169": ("16:9", None), "orig": ("32:9", "10:orig"), "43": ("32:9", "10:4:3")}
 # Golden digests of the presented frame (sha256 over the RGB rows) of the synthetic fixture, exact equality. `--print-goldens` prints them.
 GOLDEN = {
+    "refuse-all:w219": "494a30015d06708e2bbcd3d1b9139668eec855beeafbf262a7ed683f407f6b79",
+    "refuse-hud:w219": "6a7d4c6c3e0fbbb0f0958cf2d18e6aaa4d5ffbd8afd920bd63664ef704777907",
+    "rows:w219": "924b0f44614f39e04260c3539db49579c6ec607adeb7ea31cac5c2029eee9572",
+    "serve:w219": "f41efa576f051d2a6f686ff08ad484c7d96c46e1e38ce840245530aa21772393",
     "refuse-all:43": "b09683a3e8a6da4af582181a5a415878dce57186269028fceaf9d5136d898e16",
     "refuse-all:orig": "b09683a3e8a6da4af582181a5a415878dce57186269028fceaf9d5136d898e16",
     "refuse-all:w169": "0f27bb51d386c9cd2a118202b494023c6e99b384cfc052ce0aef9f178c0d5e03",
@@ -76,53 +80,67 @@ def main():
         tmp.mkdir(exist_ok=True)
         h = Harness(cli, compiler, root, sdl, tmp)
         check = h.check
-        image = fixture.make_rom(mid_frame=True)
-        effective = bytearray(image)
-        effective[0x7F9] ^= 0x01   # one byte of unused padding (`bra.s *` words no program path reads): the BPS payload is real, the program is unchanged
-        effective = bytes(effective)
-        rom = tmp / "parity.rom"
-        rom.write_bytes(image)
-        effective_rom = tmp / "parity-effective.rom"   # a schema 2 build is given the image the launcher already patched (the package declares its BPS target); a schema 3 build is given the original and applies its bps-image
-        effective_rom.write_bytes(effective)
-        image_sha, effective_sha = sha(image), sha(effective)
-        bps = segapatch.bps_create(image, effective)
+        class Ctx:   # one fixture image with its effective (BPS-patched) image: the matrix runs on the short program (40 turns), the lifecycle on a long one (110 turns, like the exact-frame suite) so scripted transitions, a save, a load and a rewind all fit
+            pass
+
+        def make_ctx(tag, turns):
+            c = Ctx()
+            fixture.TURNS = turns
+            c.image = fixture.make_rom(mid_frame=True)
+            eff = bytearray(c.image)
+            eff[0x7F9] ^= 0x01   # one byte of unused padding (`bra.s *` words no program path reads): the BPS payload is real, the program is unchanged
+            c.effective = bytes(eff)
+            c.rom = tmp / f"parity{tag}.rom"
+            c.rom.write_bytes(c.image)
+            c.effective_rom = tmp / f"parity-effective{tag}.rom"   # a schema 2 build is given the image the launcher already patched (the package declares its BPS target); a schema 3 build is given the original and applies its bps-image
+            c.effective_rom.write_bytes(c.effective)
+            c.image_sha, c.effective_sha = sha(c.image), sha(c.effective)
+            c.bps = segapatch.bps_create(c.image, c.effective)
+            c.tag = tag
+            return c
+
+        C = make_ctx("", 40)
         shared = (bdir / "bitmap_art.h").read_text()
         world = (pdir / "parity_world.h").read_text()
+
+        ids = {}
 
         def inline(text, variant):
             decline, mask, left = VARIANTS[variant]
             text = text.replace('#include "bitmap_art.h"', shared).replace('#include "parity_world.h"', world)
             return text.replace("@@DECLINE@@", str(decline)).replace("@@MASK_FROM@@", str(mask)).replace("@@LEFT_DIV@@", str(left))
 
-        def abi2_project(name, variant, edit=None, bps_bytes=bps):
+        def abi2_project(name, variant, edit=None, manifest=None):
             d = tmp / (name + "-src")
             (d / "src").mkdir(parents=True)
             (d / "data").mkdir()
             source = inline((pdir / "provider.c").read_text(), variant)
             source = edit(source) if edit else source
             (d / "src/provider.c").write_text(source)
-            (d / "data/game.bps").write_bytes(bps_bytes)
-            (d / "mod.toml").write_text((pdir / "mod.toml").read_text().replace("@@SHA@@", image_sha).replace("@@TARGET_SHA@@", effective_sha))
+            (d / "data/game.bps").write_bytes(C.bps)
+            (d / "mod.toml").write_text((pdir / "mod.toml").read_text().replace("@@SHA@@", C.image_sha).replace("@@TARGET_SHA@@", C.effective_sha) if manifest is None else manifest((pdir / "mod.toml").read_text().replace("@@SHA@@", C.image_sha).replace("@@TARGET_SHA@@", C.effective_sha)))
             out = tmp / (name + ".segapatch")
             r = h.run_cli("mod", "pack", d, "--out", out)
             doc = json.loads(r.stdout)
             check(r.returncode == 0 and doc.get("ok"), f"pack {name}: {r.stdout[:400]}")
             return d, out, doc
 
-        def abi2_program(name, variant, edit=None):
-            _, out, doc = abi2_project(name, variant, edit)
-            built = h.build(rom, tmp / name, out, doc.get("package_identity"), native=True)
+        def abi2_program(name, variant, edit=None, manifest=None):
+            _, out, doc = abi2_project(name, variant, edit, manifest=manifest)
+            built = h.build(C.rom, tmp / name, out, doc.get("package_identity"), native=True)
             check(built.returncode == 0, f"{name} builds: {built.stdout[-400:]}{built.stderr[-300:]}")
+            ids[name] = doc.get("package_identity")
             return tmp / name
 
         def abi1_program(name, variant):
             pkg = tmp / (name + ".segapatch")
-            segapatch.create(image, effective, pkg, id_="parity-twin", name="Parity twin", version="1.0.0", native_source=inline((pdir / "twin_abi1.c").read_text(), variant).encode(),
+            segapatch.create(C.image, C.effective, pkg, id_="parity-twin", name="Parity twin", version="1.0.0", native_source=inline((pdir / "twin_abi1.c").read_text(), variant).encode(),
                              native_caps=CAPABILITIES, author="Test")
             ident = json.loads(h.run_cli("patch", "inspect", pkg).stdout)["package_identity"]
-            r = h.run_cli("build", "--rom", effective_rom, "--output", tmp / name, "--cc", compiler, "--runtime-dir", root / "platforms/genesis", "--optimize", "0", "--runtime-optimize", "1", "--sdl3-include", pathlib.Path(sdl) / "include",
+            r = h.run_cli("build", "--rom", C.effective_rom, "--output", tmp / name, "--cc", compiler, "--runtime-dir", root / "platforms/genesis", "--optimize", "0", "--runtime-optimize", "1", "--sdl3-include", pathlib.Path(sdl) / "include",
                           "--sdl3-lib", pathlib.Path(sdl) / "lib", "--test-frame-seam", "1", "--patch-package", pkg, "--patch-identity", ident)
             check(r.returncode == 0, f"{name} builds: {r.stdout[-300:]}{r.stderr[-300:]}")
+            ids[name] = ident
             return tmp / name, pkg
 
         # ---- (1) the schema 3 package: accepted with the declared capabilities, minor 2 and both payload kinds, byte-deterministic; the schema 2 package of the same game is unchanged ----
@@ -141,20 +159,74 @@ def main():
         twin_serve, pkg2 = abi1_program("abi1-serve", "serve")
         with zipfile.ZipFile(pkg2) as z:
             check(json.loads(z.read("manifest.json")).get("schema_version") == 2, "the ABI 1 package of the same game is still a schema 2 package")
-        check(h.build(rom, tmp / "vanilla").returncode == 0, "Vanilla builds")
+        check(h.build(C.rom, tmp / "vanilla").returncode == 0, "Vanilla builds")
         if h.failures:
             return 1
 
-        def play(program, name, mode):
-            aspect, schedule = MODES[mode]
+        def play(program, name, mode, schedule=None, pad=PAD, save=None, identity=None, sched_aspect=None):
+            aspect, mode_schedule = MODES[mode]
             cfg = tmp / (name + ".cfg")
-            cfg.write_text(ENHANCED % aspect)
-            env = {"SEGARECOMP_VIEWER_SETTINGS": str(cfg), "SEGARECOMP_VIEWER_FINAL_FRAME_NO_NOTICES": "1"}
-            if schedule:
-                env["SEGARECOMP_VIEWER_TEST_VIDEO_AT"] = schedule
-            run, lines, frame, _ram = h.play(program, name, PAD, rom_sha=image_sha, extra=env, budget=20_000_000)
+            cfg.write_text(ENHANCED % (sched_aspect or aspect))
+            report = tmp / (name + ".coverage.json")
+            report.unlink(missing_ok=True)
+            env = {"SEGARECOMP_VIEWER_SETTINGS": str(cfg), "SEGARECOMP_VIEWER_FINAL_FRAME_NO_NOTICES": "1", "SEGARECOMP_VIEWER_TEST_TRACE": "1", "SEGARECOMP_COVERAGE_REPORT": str(report)}
+            if schedule or mode_schedule:
+                env["SEGARECOMP_VIEWER_TEST_VIDEO_AT"] = schedule or mode_schedule
+            run, lines, frame, ram = h.play(program, name, pad, save=save, identity=identity, rom_sha=C.image_sha, extra=env, budget=20_000_000)
             check(lines.get("VIEWER_SUMMARY", [{}])[0].get("outcome") == "guest_stop", f"{name}: runs to its own guest stop: {run.stderr[-300:]}")
-            return {"bmp": read_bmp(frame), "summary": (lines.get("MOD_SUMMARY") or [{}])[0]}
+            trace = {t["f"]: t for t in lines.get("VIEWER_TEST_TRACE", [])}
+            cov = json.loads(report.read_text()) if report.is_file() else None
+            scene = cov["scenes"][0]["components"] if cov and cov.get("scenes") else None
+            return {"bmp": read_bmp(frame), "summary": (lines.get("MOD_SUMMARY") or [{}])[0], "trace": trace, "coverage": scene, "lines": lines, "ram": ram.read_bytes() if ram.is_file() else b""}
+
+        VERDICT = ("status", "side", "shift", "acc", "reason", "auth")
+
+        def verdicts(run):
+            return {f: tuple(t[k] for k in VERDICT) for f, t in run["trace"].items()}
+
+        def diff_verdicts(a, b):
+            va, vb = verdicts(a), verdicts(b)
+            return [(f, va.get(f), vb.get(f)) for f in sorted(set(va) | set(vb)) if va.get(f) != vb.get(f)]
+
+        ACCOUNT = ("offered", "accepted", "presented", "rejected")   # the coverage report's per-component accounting (declared/covered/requested depend on whether the package declares a geometry, which the schema 2 twin does not)
+        OFF_FROM = 10   # SEGARECOMP_VIEWER_TEST_VIDEO_AT "10:orig" / "10:4:3": the first frame whose presenter shows no extension
+
+        def compare_contract(key, a, b, mode, off=None):
+            """Frame by frame, the producer's verdict of the ABI 1 twin and of the ABI 2 package must be equal: frame identity, status, side, accepted components, refusal reason, authored status and placement shift. The ONE declared
+            intended difference (ADR 0315): on frames where the presenter shows no extension (Original, exact 4:3; `off` = [(first, last)] frame ranges, exclusive/inclusive) the ABI 2 view reports side 0, so a provider cannot request
+            a placement: the ABI 2 `shift` is 0 where the ABI 1 twin, which is handed the planned side, requests one; the picture is identical because the presenter ignores it. Nothing else may differ."""
+            if off is None:
+                off = [(OFF_FROM, 10 ** 9)] if mode in ("orig", "43") else []
+            is_off = lambda f: any(lo < f <= hi for lo, hi in off)  # noqa: E731
+            si = VERDICT.index("shift")
+            va, vb = verdicts(a), verdicts(b)
+            check(sorted(va) == sorted(vb) and len(va) > 30, f"{key}: both packages publish a verdict for the same frames ({len(va)} / {len(vb)})")
+            strict = [(f, va[f], vb.get(f)) for f in sorted(va) if not is_off(f) and va[f] != vb.get(f)]
+            check(not strict, f"{key}: per-frame verdicts (status, side, shift, accepted components, reason, authored) equal frame by frame ({len(strict)} differ, first {strict[:2]})")
+            late = [f for f in sorted(va) if is_off(f)]
+            if off:
+                odd = [(f, va[f], vb.get(f)) for f in late if vb.get(f) is None or va[f][:si] + va[f][si + 1:] != vb[f][:si] + vb[f][si + 1:] or vb[f][si] != 0]
+                check(late and not odd, f"{key}: with no extension shown the verdicts equal the ABI 1 twin's except the placement shift, which the ABI 2 view cannot request (declared ADR 0315 difference; {len(odd)} other differences, first {odd[:2]})")
+                moved = sum(1 for f in late if va[f][si] != vb[f][si])
+                print(f"DECLARED DIFFERENCE {key}: the ABI 1 twin requested a placement the presenter ignored on {moved} of {len(late)} frames; the ABI 2 view (side 0) requested none; pictures equal")
+            ca, cb = a["coverage"], b["coverage"]
+            check(ca is not None and cb is not None and all({k: ca[c][k] for k in ACCOUNT} == {k: cb[c][k] for k in ACCOUNT} for c in ("scenery", "hud")), f"{key}: the coverage report's offered/accepted/presented/rejected accounting equals the ABI 1 twin's ({ca and ca['scenery']} / {cb and cb['scenery']})")
+
+        def named_failures(ref, bad):
+            """The named reasons a mutant's run differs from the ABI 1 reference run: per-frame verdict fields and the presented picture."""
+            va, vb = verdicts(ref), verdicts(bad)
+            names = set()
+            for f in set(va) | set(vb):
+                x, y = va.get(f), vb.get(f)
+                if x is None or y is None:
+                    names.add("frame-identity")
+                    continue
+                for i, label in enumerate(("status", "side", "placement", "accepted-components", "reason", "authored")):
+                    if x[i] != y[i]:
+                        names.add(label)
+            if ref["bmp"] != bad["bmp"]:
+                names.add("picture")
+            return names
 
         # ---- (2) the matrix: every variant x mode, ABI 2 == ABI 1 twin byte for byte, equal to the committed golden ----
         vanilla = {m: play(tmp / "vanilla", f"vanilla-{m}", m) for m in MODES}
@@ -168,6 +240,7 @@ def main():
                 a, b = play(abi1, f"a1-{variant}-{mode}", mode), play(abi2, f"a2-{variant}-{mode}", mode)
                 check(b["summary"].get("faulted") is False, f"{key}: the ABI 2 provider is healthy (a refusal is not a fault)")
                 check(a["bmp"] == b["bmp"], f"{key}: the presented frame of the ABI 2 package equals the ABI 1 twin's byte for byte")
+                compare_contract(key, a, b, mode)
                 digest = frame_digest(b["bmp"])
                 produced[key] = digest
                 if not printing:
@@ -177,23 +250,78 @@ def main():
                     check(b["bmp"] == vanilla[mode]["bmp"], f"{key}: nothing of the provider is presented: Vanilla's generic frame")
                 else:
                     check(b["bmp"] != vanilla[mode]["bmp"], f"{key}: the provider's output is really presented")
-        # ---- (3) falsification: each mutant of the ABI 2 provider must differ from the ABI 1 twin of the logic it claims to reproduce ----
+        # ---- (3) falsification: each mutant of the ABI 2 provider must fail the differential for a NAMED reason (a per-frame verdict field or the picture), never merely "something faulted" ----
+        def big(t):   # an oversized bitmap layer (257 > 256): the production range rule refuses the call, which FAULTS the callback (SEGA_MOD_E_RANGE) and discards everything it staged
+            return t.replace("/*@@BIG@@*/", "(void)r->overlay_layer_bitmap(2U, 2U, 0U, 0, 0, 257U, 16U, 1U); (void)r->overlay_target(2U); (void)r->overlay_bitmap(0, 0, 257U, 16U, big_art, 1028U); (void)r->overlay_target(0U);")
         mutants = [
-            ("stale-scroll", "serve", "wide", lambda t: t.replace("camera = -hs / 8;", "camera = -hs / 8 - 20;")),   # windows placed from a scroll twenty cells (160 px) behind: the far right cells fall outside every window
-            ("skipped-callback", "serve", "wide", lambda t: t.replace("/*@@SKIP@@*/", "return;")),
-            ("oversized-bitmap", "serve", "wide", lambda t: t.replace("/*@@BIG@@*/", "(void)r->overlay_layer_bitmap(2U, 2U, 0U, 0, 0, 257U, 16U, 1U); (void)r->overlay_target(2U); (void)r->overlay_bitmap(0, 0, 257U, 16U, big_art, 1028U); (void)r->overlay_target(0U);")),
+            ("stale-scroll", lambda t: t.replace("camera = -hs / 8;", "camera = -hs / 8 - 20;"), None, {"picture"}),   # windows placed from a scroll twenty cells (160 px) behind: the far right cells fall outside every window
+            ("skipped-callback", lambda t: t.replace("/*@@SKIP@@*/", "return;"), None, {"accepted-components", "picture"}),
+            ("oversized-bitmap", big, None, {"accepted-components", "picture"}),
         ]
-        expectations = {}
-        for name, variant, mode, edit in mutants:
-            program = abi2_program(f"mut-{name}", variant, edit)
-            expectations[name] = (play(program, f"mut-{name}-{mode}", mode), play(twin_serve, f"mut-ref-{name}-{mode}", mode))
-        for name, (bad, ref) in expectations.items():
-            check(bad["bmp"] != ref["bmp"] or bad["summary"].get("faulted") is True, f"FALSIFY {name}: the gate fails the mutant (its frame differs from the ABI 1 twin's, or it faulted)")
+        runs = {}
+        for name, edit, manifest, want in mutants:
+            program = abi2_program(f"mut-{name}", "serve", edit, manifest)
+            bad, ref = play(program, f"mut-{name}-wide", "wide"), play(twin_serve, f"mut-ref-{name}-wide", "wide")
+            runs[name] = bad
+            names = named_failures(ref, bad)
+            check(want <= names, f"FALSIFY {name}: the differential fails it for the named reasons {sorted(want)} (got {sorted(names)})")
+        ob = runs["oversized-bitmap"]
+        vwide = vanilla["wide"]
+        logs = [m.get("line") for m in ob["lines"].get("MOD_LOG", [])]
+        faults = [l for l in logs if l and l.startswith("E_MOD_FAULT")]
+        check(len(faults) == 1 and "cause=range" in faults[0] and "phase=render" in faults[0], f"FALSIFY oversized-bitmap: the refused call faults the render callback with cause range (SEGA_MOD_E_RANGE is the status the adapter's overlay_layer_bitmap returns for it: genesis_mod_overlay_script_tests, `a bitmap layer wider than 256 is a range fault`): {faults}")
+        fault = ob["summary"].get("fault") or {}
+        check(ob["summary"].get("faulted") is True and "range" in json.dumps(fault), f"FALSIFY oversized-bitmap: the callback faulted with cause range ({fault})")
+        check(ob["bmp"] == vwide["bmp"], "FALSIFY oversized-bitmap: no staged HUD, layer or scenery survives the fault (the presented frame is Vanilla's generic frame)")
+        check(ob["ram"] == vwide["ram"] and len(ob["trace"]) == len(vwide["trace"]), "FALSIFY oversized-bitmap: the guest progressed normally (same work RAM and the same number of produced frames as Vanilla)")
+        after = {f: v for f, v in verdicts(ob).items() if f >= 2}
+        check(after and all(v == (2, 238, 0, 0, 5, 0) for v in after.values()), f"FALSIFY oversized-bitmap: from the faulted frame on the producer's verdict is accepted 0, reason FAULT (5), no placement, authored 0, on every frame (the discarded callback leaves nothing): {sorted(set(after.values()))}")
         # a missing refusal: the provider ignores the decision the ABI 1 twin takes (DECLINE 0 where the twin refuses)
-        for variant, ref_variant in (("serve", "refuse-all"), ("serve", "refuse-hud")):
-            ref_prog = abi1_program(f"mutref-{ref_variant}", ref_variant)[0]
-            bad = play(abi2_program(f"mut-norefuse-{ref_variant}", variant), f"mut-norefuse-{ref_variant}", "wide")
-            check(bad["bmp"] != play(ref_prog, f"mutref-run-{ref_variant}", "wide")["bmp"], f"FALSIFY missing-refusal ({ref_variant}): the gate fails a provider that serves a frame the ABI 1 twin refuses")
+        for ref_variant in ("refuse-all", "refuse-hud"):
+            ref_run = play(abi1_program(f"mutref-{ref_variant}", ref_variant)[0], f"mutref-run-{ref_variant}", "wide")
+            bad = play(abi2_program(f"mut-norefuse-{ref_variant}", "serve"), f"mut-norefuse-{ref_variant}", "wide")
+            names = named_failures(ref_run, bad)
+            check({"accepted-components", "picture"} <= names, f"FALSIFY missing-refusal ({ref_variant}): the differential fails a provider that serves what the ABI 1 twin refuses ({sorted(names)})")
+        # ---- (4) lifecycle through the real viewer: a scripted transition (32:9 -> 21:9 -> 16:9 -> Original -> exact 4:3 -> 32:9), replay, save/load and rewind, ABI 1 twin against ABI 2, frame by frame ----
+        C = make_ctx("-long", 110)
+        twin_long = abi1_program("abi1-long", "serve")[0]
+        abi2_long = abi2_program("abi2-long", "serve")
+        if h.failures:
+            return 1
+        sched = "20:21:9,40:16:9,60:orig,80:4:3,100:32:9"
+        OFF = [(60, 100)]   # frames after "60:orig" up to "100:32:9": the presenter shows no extension
+        seq = {k: play(p, f"lc-{k}", "wide", schedule=sched) for k, p in (("a1", twin_long), ("a2", abi2_long))}
+        again = {k: play(p, f"lc-{k}-2", "wide", schedule=sched) for k, p in (("a1", twin_long), ("a2", abi2_long))}
+        check(len(seq["a1"]["trace"]) > 100, f"the scripted run presents more than one frame through several transitions ({len(seq['a1']['trace'])} frames)")
+        check(len({t["side"] for t in seq["a2"]["trace"].values()}) >= 3, "the aspect changed several times (32:9, 21:9, 16:9: three different planned sides)")
+        check(seq["a1"]["bmp"] == seq["a2"]["bmp"], "transition run: the final presented frame equals the ABI 1 twin's")
+        compare_contract("transition-run", seq["a1"], seq["a2"], "wide", off=OFF)
+        for k in ("a1", "a2"):
+            check(again[k]["trace"] == seq[k]["trace"] and again[k]["bmp"] == seq[k]["bmp"], f"replay determinism ({k}): the second run reproduces every per-frame verdict and the final frame")
+        lifecycle = {}
+        for k, (prog, ident) in (("a1", (twin_long, ids["abi1-long"])), ("a2", (abi2_long, ids["abi2-long"]))):
+            base = play(prog, f"lcb-{k}", "wide")
+            sv = play(prog, f"lcs-{k}", "wide", pad="0 -\n30 K\n31 -\n", save=tmp / f"save-{k}", identity=ident)
+            ld = play(prog, f"lcl-{k}", "wide", pad="0 -\n3 M\n4 -\n", save=tmp / f"save-{k}", identity=ident)
+            rw = play(prog, f"lcr-{k}", "wide", pad="0 -\n40 Y\n41 -\n", save=tmp / f"save-rw-{k}", identity=ident)
+            check(sv["lines"]["VIEWER_STATE"][0]["status"] == "ok" and ld["lines"]["VIEWER_STATE"][0]["status"] == "ok", f"({k}) the quick save and the load succeed")
+            rev = [e for e in rw["lines"].get("VIEWER_STATE", []) if e.get("event") == "rewind"]
+            check(rev and rev[0].get("status") == "ok", f"({k}) the rewind took effect")
+            check(verdicts(sv) == verdicts(base) and sv["bmp"] == base["bmp"], f"({k}) taking a save changes nothing")
+            def restored(run):
+                """Every frame the restored run published equals the uninterrupted run's frame of that number, except the ONE first frame after the restore: it has no previous-onset snapshot, so the host reports STALE_STATE (accepted 0,
+                reason 1, no placement) for any provider, ABI 1 and ABI 2 alike (nothing of an earlier frame is served)."""
+                vr, vb_ = verdicts(run), verdicts(base)
+                odd = [f for f in vr if f not in vb_ or vr[f] != vb_[f]]
+                stale = [f for f in odd if f in vb_ and vr[f][3] == 0 and vr[f][4] == 1 and vr[f][2] == 0]
+                return len(odd) <= 1 and odd == stale and len(vr) > 20, odd, stale
+            okl, oddl, _ = restored(ld)
+            okr, oddr, _ = restored(rw)
+            check(okl and ld["bmp"] == base["bmp"] and ld["ram"] == base["ram"], f"({k}) after the load every frame equals the uninterrupted run's but the first (STALE_STATE), and the final frame and guest RAM are equal (odd frames {oddl})")
+            check(okr and rw["bmp"] == base["bmp"] and rw["ram"] == base["ram"], f"({k}) after the rewind every frame equals the uninterrupted run's but the first (STALE_STATE), and the final frame and guest RAM are equal (odd frames {oddr})")
+            lifecycle[k] = (base, ld, rw)
+        for i, label in ((0, "uninterrupted"), (1, "load"), (2, "rewind")):
+            check(verdicts(lifecycle["a1"][i]) == verdicts(lifecycle["a2"][i]) and lifecycle["a1"][i]["bmp"] == lifecycle["a2"][i]["bmp"], f"save/load/rewind ({label}): the ABI 2 package's per-frame verdicts and final frame equal the ABI 1 twin's")
         if printing:
             print("GOLDEN = {")
             for key in sorted(produced):

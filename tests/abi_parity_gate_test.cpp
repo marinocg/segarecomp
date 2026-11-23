@@ -117,6 +117,7 @@ struct Twin : Provider {   // a Provider (the harness's scenery state) plus the 
   luau::RasterizedLayers layers;
   unsigned fallback_x = 0, fallback_y = 0;
   unsigned bitmap_bytes = 0, rejected_calls = 0;
+  bool faulted = false;         // an invalid render-API call faults the callback: staged output is discarded and the mod stays disabled (the scheduler's rule; the host then reports GENESIS_COMPAT_FAULT)
   Plan plan;
 };
 
@@ -166,11 +167,12 @@ void prepare2(void *state, const GenesisCompatFrame *f, GenesisCompatDecision *o
   Twin *t = static_cast<Twin *>(state);
   ++t->prepared;
   t->have = false; t->fixed = false; t->layers.clear(); t->image = luau::OverlayImage{}; t->bitmap_bytes = 0; t->rejected_calls = 0;
+  if (t->faulted) { out->accepted = 0; out->reason = GENESIS_COMPAT_FAULT; return; }   // a disabled mod presents nothing
   if (t->mutant == Mutant::SkippedCallback) { out->accepted = 0; out->reason = GENESIS_COMPAT_STALE_STATE; return; }   // the callback never ran for this frame
   t->plan = make_plan(*f, t->mutant == Mutant::MissingRefusal, t->mutant == Mutant::WrongReason ? static_cast<uint8_t>(GENESIS_COMPAT_BAD_STATE) : 0);
   const Plan &p = t->plan;
   luau::Output o;
-  const auto call = [&](const luau::OverlayCall &c) { if (c.status != luau::OverlayCall::Status::ok) ++t->rejected_calls; return c.status == luau::OverlayCall::Status::ok; };
+  const auto call = [&](const luau::OverlayCall &c) { if (c.status != luau::OverlayCall::Status::ok) { ++t->rejected_calls; t->faulted = true; } return c.status == luau::OverlayCall::Status::ok; };   // production semantics: an invalid call is a fault of the whole callback (mod_capture.cpp `answer`)
   if (!p.fixed.px.empty()) {
     (void)call(luau::overlay_fallback(o, p.fx, p.fy));
     (void)call(luau::overlay_bitmap(o, 0, 0, 0, p.fixed.w, p.fixed.h, p.fixed.px.data(), static_cast<uint64_t>(p.fixed.w) * 4U));
@@ -181,13 +183,14 @@ void prepare2(void *state, const GenesisCompatFrame *f, GenesisCompatDecision *o
       if (t->mutant == Mutant::OversizedBitmap && l.index == 2U) { w = 257; h = 16; big.assign(static_cast<size_t>(w) * h * 4U, 0x55); px = big.data(); }   // one pixel wider than a bitmap layer may be
       luau::OverlayLayerDecl d; d.index = static_cast<int>(l.index); d.anchor = static_cast<int>(l.anchor); d.reference = static_cast<int>(l.reference); d.dx = l.dx; d.dy = l.dy; d.w = static_cast<int>(w); d.h = static_cast<int>(h); d.z = static_cast<int>(l.z);
       int target = 0;
-      if (!call(luau::overlay_declare_bitmap_layer(o, d))) continue;
+      if (!call(luau::overlay_declare_bitmap_layer(o, d))) break;   // the callback faulted: nothing after the invalid call runs
       (void)call(luau::overlay_select_target(o, target, l.index));
       (void)call(luau::overlay_bitmap(o, target, 0, 0, w, h, px, static_cast<uint64_t>(w) * 4U));
       if (l.clip) (void)call(luau::overlay_layer_clip(o, l.index, l.cx, l.cy, l.cw, l.ch));
     }
   }
-  (void)call(luau::overlay_scene(o, p.scene));
+  if (!t->faulted && !p.scene.empty()) (void)call(luau::overlay_scene(o, p.scene));   // a refused frame names no scene
+  if (t->faulted) { out->accepted = 0; out->reason = GENESIS_COMPAT_FAULT; return; }   // staged output of a faulted callback is discarded: no HUD, no layer, no scenery, no placement, no scene token
   t->bitmap_bytes = static_cast<unsigned>(o.bitmap_bytes);
   unsigned served = p.serve & ~p.declined;
   if ((served & GENESIS_COMPAT_HUD) != 0U) {
@@ -357,7 +360,7 @@ void falsification() {
       {Mutant::MissingRefusal, "unsupported-scene", 101, 101, -1, "accepted-components", "overlay"},
       {Mutant::MissingRefusal, "fade-decline", 238, 119, -1, "accepted-components", "layers"},
       {Mutant::WrongReason, "fade-decline", 238, 238, -1, "reason", "reason"},
-      {Mutant::OversizedBitmap, "parallax-hud", 238, 238, -1, "layers", "layers"},
+      {Mutant::OversizedBitmap, "parallax-hud", 238, 238, -1, "accepted-components", "reason"},
   };
   for (const Case &c : cases) {
     const Spec &s = scene(c.scene);
@@ -375,7 +378,9 @@ void falsification() {
   }
   // the oversized bitmap is rejected by the production range rule (a named call status), not silently repaired
   const Pair oversized = run_pair(scene("parallax-hud"), 238, 238, Mutant::OversizedBitmap);
-  check(oversized.rejected > 0 && oversized.b.res.layer_count == 2U && oversized.a.res.layer_count == 3U, "an oversized bitmap layer is refused by the production overlay rules and its layer is not presented");
+  check(oversized.rejected > 0 && oversized.b.res.compat_accepted == 0U && oversized.b.res.compat_reason == GENESIS_COMPAT_FAULT && oversized.b.res.layer_count == 0U && oversized.b.res.overlay_w == 0U && oversized.b.res.shift == 0 && oversized.b.res.authored == 0U &&
+        oversized.b.res.scene[0] == '\0' && oversized.a.res.layer_count == 3U,
+        "an oversized bitmap layer is refused by the production overlay rules and FAULTS the callback: no HUD, no layer, no scenery credit, no placement, no scene token survives (accepted 0, reason FAULT), while the ABI 1 reference presents its three layers");
 }
 
 // ---- scenario matrix: sequences (fade, aspect transitions, replay, warm/cold provider state, save/load, rewind), the genuine fault and the stale-placement rule -------------------------------------------------------------
