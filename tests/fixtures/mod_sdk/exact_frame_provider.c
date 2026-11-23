@@ -35,6 +35,7 @@ static void provider_phase(void *state, const SegaModHost *host) {
   }
   ++g_exact_obs.render_calls;
   g_exact_obs.last_render_frame = host->frame;
+  if (g_exact_obs.light) return;
   view = features->frame;
   g_exact_obs.kept = view;
   g_exact_obs.vdp_helpers_present = features->vdp != NULL;

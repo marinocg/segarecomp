@@ -6,7 +6,9 @@
 #include "runtime.h"
 #include "exact_frame_observation.h"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -204,6 +206,34 @@ void test_helpers_equal_abi1() {
         t->cram_rgb(nullptr, 0U, rgb) == host->cram_rgb(nullptr, 0U, rgb) && t->read_vscroll(nullptr, d.lines[0].registers, 0U, 0U, &v) == host->read_vscroll(nullptr, d.lines[0].registers, 0U, 0U, &v), "NULL arguments: same code as ABI 1");
 }
 
+// Interlace mode 2 (SEG-152, ADR 0320): the output is 448 rows high but the raster capture holds 224 FIELD lines (GENESIS_RASTER_MAX_LINES); the renderer maps output row r to field line r / 2. The producer therefore
+// hands ABI 1 `prepare` (and the view) height = 448 with line_count = 224: `line_count` counts captured field/raster lines, not output pixel rows, and nothing of the VDP state is dropped.
+static_assert(GENESIS_FRAME_MAX_HEIGHT == 448U && GENESIS_RASTER_MAX_LINES == 224U && SEGA_GEN_FRAME_MAX_LINES == GENESIS_RASTER_MAX_LINES, "the view holds every line the capture holds");
+static_assert(sizeof(SegaGenesisFrameLine) == sizeof(GenesisCompatLine), "the view line is the capture line");
+
+void test_interlace_field_lines() {
+  std::puts("STEP interlace_field_lines");
+  Harness h;
+  h.init(kExact, 0U, kAllPhases);
+  run_frames(h.rt, 2U);
+  FrameData d;
+  d.fill(77U);
+  d.height = 448U;   // interlace mode 2: 448 output rows
+  d.line_count = std::min<uint32_t>(d.height, GENESIS_RASTER_MAX_LINES);   // exactly what vdp_render.c hands ABI 1 prepare: min(height, GENESIS_RASTER_MAX_LINES)
+  check(d.line_count == 224U, "the producer's line count for a 448-high frame is the 224 captured field lines");
+  const GenesisModExactFrame f = d.view();
+  check(genesis_mod_scheduler_present(h.sched.get(), &f) == 1, "a 448-high frame is presented");
+  check(g_exact_obs.height == 448U && g_exact_obs.line_count == 224U, "the view reports the 448-row picture and 224 field-line records");
+  check(g_exact_obs.lines_hash == fnv(d.lines.data(), 224U * sizeof(SegaGenesisFrameLine)), "every captured field line (registers, CRAM, VSRAM) is present and byte-identical: none is dropped");
+  // output rows r and r + 1 (2k, 2k + 1) read field line k: the view's record k describes both
+  const GenesisCompatHost *host = genesis_native_compat_host();
+  int32_t a = 0, b = 0;
+  uint16_t regs[24];
+  std::memcpy(regs, d.lines[10].registers, sizeof regs);
+  regs[12] |= 0x0006U;   // LSM = 11: interlace mode 2
+  check(host->read_hscroll(d.vram.data(), regs, 0U, 20U, &a) == host->read_hscroll(d.vram.data(), regs, 0U, 21U, &b) && a == b, "in interlace mode 2 output rows 20 and 21 share field line 10's horizontal scroll (row r maps to field line r / 2)");
+}
+
 void test_flags_and_capabilities() {
   std::puts("STEP flags_and_capabilities");
   {   // a frame without a VRAM journal is NOT declined: the provider is called, the flag is clear and the VRAM is still a host-owned copy
@@ -341,15 +371,52 @@ void test_fault_and_r1() {
   check(h.rt.virtual_frame_count >= 6U && snap.ctx == h.sched.get(), "the guest continues and the mod-state seam is available for save/load");
 }
 
+// SEG-152-T003 (the cost of the frame view, measured like the scheduler's OVERHEAD_EVIDENCE): fixed host-owned buffers, nothing allocated per frame. The numbers do not depend on the aspect: the view always
+// copies the same 64 KiB + 64 KiB + 224 lines (the 32:9 planned side changes no size here, only the producer's own extension work, which is not part of this cost).
+void test_cost() {
+  std::puts("STEP cost");
+  using clock = std::chrono::steady_clock;
+  const int n = 4000;
+  Harness h;
+  h.init(kExact, 0U, kAllPhases);
+  run_frames(h.rt, 2U);
+  FrameData d;
+  d.fill(5U);
+  const GenesisModExactFrame f = d.view();
+  auto ns_per = [&](auto &&body) {
+    const auto t0 = clock::now();
+    for (int i = 0; i < n; ++i) body(i);
+    return static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now() - t0).count()) / n;
+  };
+  volatile uint8_t sink = 0;
+  std::vector<uint8_t> ram(65536), vram(65536), lines(224U * sizeof(SegaGenesisFrameLine));
+  const double ram_copy = ns_per([&](int i) { d.ram[0] = static_cast<uint8_t>(i); std::memcpy(ram.data(), d.ram.data(), ram.size()); sink = ram[static_cast<size_t>(i) & 1023U]; });
+  const double vram_copy = ns_per([&](int i) { d.vram[0] = static_cast<uint8_t>(i); std::memcpy(vram.data(), d.vram.data(), vram.size()); sink = vram[static_cast<size_t>(i) & 1023U]; });
+  const double line_copy = ns_per([&](int i) { d.lines[0].registers[0] = static_cast<uint16_t>(i); std::memcpy(lines.data(), d.lines.data(), lines.size()); sink = lines[static_cast<size_t>(i) & 1023U]; });
+  g_exact_obs.light = 1;
+  const double total = ns_per([&](int) { (void)genesis_mod_scheduler_present(h.sched.get(), &f); });
+  g_exact_obs.light = 0;
+  const double budget = 1e9 / 60.0;
+  const double callback = total - ram_copy - vram_copy - line_copy;
+  std::printf("EXACT_FRAME_COST ram_copy_ns=%.0f vram_copy_ns=%.0f field_lines_copy_ns=%.0f callback_overhead_ns=%.0f present_total_ns=%.0f frame_budget_share_percent=%.4f frames=%d\n", ram_copy, vram_copy, line_copy,
+              callback < 0.0 ? 0.0 : callback, total, 100.0 * total / budget, n);
+  check(g_exact_obs.render_calls >= static_cast<unsigned>(n), "the measured loop ran the callback for every frame");
+  check(total < 0.05 * budget, "the exact-frame view costs less than 5% of a 60 Hz frame budget (a generous bound against noise; the measured share is reported above)");
+  (void)sink;
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
-  const bool helpers_only = argc > 1 && std::string(argv[1]) == "helpers";   // `genesis_mod_vdp_helper_tests` (SEG-152-T004) runs only the helper differential
-  if (helpers_only) {
+  const std::string mode = argc > 1 ? argv[1] : "";   // `genesis_mod_vdp_helper_tests` (SEG-152-T004) runs only the helper differential; `genesis_mod_exact_frame_cost` only the measurement
+  if (mode == "helpers") {
     test_helpers_equal_abi1();
+  } else if (mode == "cost") {
+    test_cost();
   } else {
     test_opt_in_and_view();
     test_helpers_equal_abi1();
+    test_interlace_field_lines();
     test_flags_and_capabilities();
     test_optional_and_ordinary();
     test_fault_and_r1();

@@ -8,6 +8,9 @@
 /* The ABI 2 service functions carry no context pointer, so the scheduler whose callback is running is reachable through this single pointer, set only for the duration of a callback. */
 static GenesisModScheduler *g_current = NULL;
 
+/* ADR 0320 decision 4: the view holds every raster/field line the capture holds (interlace mode 2 has 448 output rows but 224 captured lines; nothing is dropped) and its line has the layout of the capture's. */
+_Static_assert(SEGA_GEN_FRAME_MAX_LINES == GENESIS_RASTER_MAX_LINES, "the exact-frame view holds every captured raster line");
+
 #define PHASE_BIT(p) (UINT32_C(1) << (p))
 #define HOOK_PHASES (PHASE_BIT(SEGA_MOD_PHASE_HOOK_ENTRY) | PHASE_BIT(SEGA_MOD_PHASE_HOOK_EXIT))
 #define VALID_PHASES (PHASE_BIT(SEGA_MOD_PHASE_RESET) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT) | \

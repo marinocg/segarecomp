@@ -255,6 +255,8 @@ add_test(NAME genesis_mod_exact_frame_tests COMMAND genesis_mod_exact_frame_test
 set_tests_properties(genesis_mod_exact_frame_tests PROPERTIES TIMEOUT 300)
 add_test(NAME genesis_mod_vdp_helper_tests COMMAND genesis_mod_exact_frame_tests helpers)   # SEG-152-T004: the helper table against the ABI 1 GenesisCompatHost
 set_tests_properties(genesis_mod_vdp_helper_tests PROPERTIES TIMEOUT 300)
+add_test(NAME genesis_mod_exact_frame_cost COMMAND genesis_mod_exact_frame_tests cost)   # SEG-152-T003: the measured cost of the frame view (EXACT_FRAME_COST evidence line)
+set_tests_properties(genesis_mod_exact_frame_cost PROPERTIES TIMEOUT 300)
 # SEG-152-T003 (ADR 0320): the viewer's scheduled-mod adapter (mod_capture.cpp, compiled as a built native viewer program compiles it) drives a synthetic exact-frame provider from the producer seam:
 # frame exactness of overlay, scenery, placement and scene, Original/aspect/skip/fault cases.
 add_library(genesis_mod_exact_artist OBJECT fixtures/mod_sdk/exact_frame_artist.c)
@@ -2528,7 +2530,7 @@ add_test(NAME luau_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOUR
 add_test(NAME luau_host_golden_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/luau_host_golden_test.py)
 add_test(NAME mod_luau_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_luau_api_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_api_test.py $<TARGET_FILE:segarecomp>)
-foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_adapter_tests genesis_mod_state_tests genesis_mod_replay_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
+foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_frame_cost genesis_mod_exact_adapter_tests genesis_mod_state_tests genesis_mod_replay_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
   set_property(TEST ${_luau_test} APPEND PROPERTY LABELS full fast)
   set_property(TEST ${_luau_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endforeach()

@@ -69,7 +69,7 @@ def main():
         image_sha = sha(image)
         identities = {}
 
-        def project(name, edit=None, caps=None):
+        def project(name, edit=None, caps=None, image_sha=image_sha, rom=rom):
             d = tmp / (name + "-src")
             (d / "src").mkdir(parents=True)
             source = (exact_dir / "probe.c").read_text()
@@ -96,14 +96,25 @@ def main():
         fault = project("fault", lambda t: t.replace("  host->log(line, n);\n  if (render_api == NULL", "  host->log(line, n);\n  if (host->frame == 40U) { uint32_t dead = 0U; (void)host->read(SEGA_GEN_SPACE_VDP_VRAM, 0U, 1U, &dead); }\n  if (render_api == NULL"))
         nocache = project("nocache", lambda t: t.replace("  if (v->work_ram != NULL) camera =", "  memo_camera = memo_left = 0xFFFFFFFFU;   /* the cache is cleared before every presented frame */\n  if (v->work_ram != NULL) camera =", 1))
         badess = project("badess", lambda t: t.replace("  if (v->work_ram != NULL) camera =", "  ++ess;   /* a presentation-time write to essential state: a contract violation (ADR 0320 R2 iii) */\n  if (v->work_ram != NULL) camera =", 1))
-        abi1_out = tmp / "twin.segapatch"
-        segapatch.create(image, None, abi1_out, id_="exact-twin", name="Exact twin", version="1.0.0", native_source=(exact_dir / "twin_abi1.c").read_bytes(),
-                         native_caps=["frame.work_ram", "frame.vdp", "overlay.rgba", "scenery.words"], author="Test")
-        ident1 = json.loads(h.run_cli("patch", "inspect", abi1_out).stdout)["package_identity"]
-        r = h.run_cli("build", "--rom", rom, "--output", tmp / "twin", "--cc", compiler, "--runtime-dir", root / "platforms/genesis", "--optimize", "0", "--runtime-optimize", "1", "--sdl3-include", pathlib.Path(sdl) / "include",
-                      "--sdl3-lib", pathlib.Path(sdl) / "lib", "--test-frame-seam", "1", "--patch-package", abi1_out, "--patch-identity", ident1)
-        check(r.returncode == 0, f"twin builds: {r.stdout[-300:]}{r.stderr[-300:]}")
-        twin = tmp / "twin"
+        def twin_for(name, image_, rom_):
+            out = tmp / (name + ".segapatch")
+            segapatch.create(image_, None, out, id_="exact-twin", name="Exact twin", version="1.0.0", native_source=(exact_dir / "twin_abi1.c").read_bytes(),
+                             native_caps=["frame.work_ram", "frame.vdp", "overlay.rgba", "scenery.words"], author="Test")
+            ident1 = json.loads(h.run_cli("patch", "inspect", out).stdout)["package_identity"]
+            r = h.run_cli("build", "--rom", rom_, "--output", tmp / name, "--cc", compiler, "--runtime-dir", root / "platforms/genesis", "--optimize", "0", "--runtime-optimize", "1", "--sdl3-include", pathlib.Path(sdl) / "include",
+                          "--sdl3-lib", pathlib.Path(sdl) / "lib", "--test-frame-seam", "1", "--patch-package", out, "--patch-identity", ident1)
+            check(r.returncode == 0, f"{name} builds: {r.stdout[-300:]}{r.stderr[-300:]}")
+            return tmp / name
+
+        twin = twin_for("twin", image, rom)
+        # the interlace-mode-2 variant of the same fixture (448-line output, 224 field lines): its own image, hence its own packages
+        image_i = fixture.make_rom(mid_frame=True, interlace=True)
+        rom_i = tmp / "exact-il.rom"
+        rom_i.write_bytes(image_i)
+        sha_i = sha(image_i)
+        check(h.build(rom_i, tmp / "vanilla-il").returncode == 0, "Vanilla (interlace) builds")
+        exact_i = project("exact-il", image_sha=sha_i, rom=rom_i)
+        twin_i = twin_for("twin-il", image_i, rom_i)
         if h.failures:
             return 1
 
@@ -123,8 +134,9 @@ def main():
             noview = [m["line"] for m in lines.get("MOD_LOG", []) if m.get("line", "").startswith("NOVIEW")]
             abi1 = [kv(line[5:]) for line in run.stderr.splitlines() if line.startswith("ABI1 ")]
             trace = {t["f"]: t for t in lines.get("VIEWER_TEST_TRACE", [])}
+            audio = next((json.loads(l.split(" ", 1)[1]) for l in run.stderr.splitlines() if l.startswith("VIEWER_AUDIO_SUMMARY ")), None)
             return {"run": run, "lines": lines, "logs": logs, "noview": noview, "abi1": abi1, "trace": trace, "frame": frame, "ram": ram.read_bytes() if ram.is_file() else b"",
-                    "bmp": read_bmp(frame) if frame.is_file() else None, "coverage": json.loads(report.read_text()) if report.is_file() else None, "summary": (lines.get("MOD_SUMMARY") or [{}])[0]}
+                    "audio": audio, "bmp": read_bmp(frame) if frame.is_file() else None, "coverage": json.loads(report.read_text()) if report.is_file() else None, "summary": (lines.get("MOD_SUMMARY") or [{}])[0]}
 
         def consecutive(logs):
             return all(b["f"] == a["f"] + 1 for a, b in zip(logs, logs[1:]))
@@ -247,6 +259,13 @@ def main():
         ba_rw = play(badess, "ba-rewind", cfg32, pad="0 -\n40 Y\n41 -\n", save=tmp / "save-ba", identity=identities["badess"])
         ba_u = {e["f"]: e for e in ba["logs"]}
         check(any(ba_u[f] != e for e in ba_rw["logs"] for f in [e["f"]]) and ba_rw["bmp"] != ba["bmp"], "a provider that writes essential state at presentation time is detected: its rewound run differs from its uninterrupted run (the good probe's does not)")
+        # ================= (E) failed production: the callback is not invoked, exactly as ABI 1 `prepare` is not =================
+        # The interlace-mode-2 variant of the fixture makes the raster producer REJECT the frame (frame_render_rejections), so no frame is published and the provider hook is never reached: neither the ABI 1 twin
+        # nor the exact-frame provider is called. (448-line frames are covered by genesis_mod_exact_frame_tests: the view carries the 224 captured field lines, see native-sdk-abi-2.md.)
+        ei, ti = play(exact_i, "x-il", cfg32), play(twin_i, "t-il", cfg32)
+        rejected = [json.loads(l.split(" ", 1)[1])["frame_render_rejections"] for l in ei["run"].stderr.splitlines() if l.startswith("RUNTIME_NOTES ")]
+        check(rejected and rejected[0] >= 1 and not ei["logs"] and not ei["noview"] and not ti["abi1"], f"a frame the producer rejects calls neither the ABI 1 `prepare` nor the exact-frame callback ({len(ei['logs'])} / {len(ti['abi1'])} calls, producer rejections {rejected})")
+        check(ei["summary"].get("faulted") is False, "and the provider is healthy: a failed production is not a fault")
         ft = play(fault, "f-run", cfg32)
         Lf = ft["logs"]
         check(ft["summary"].get("faulted") is True and "cause=capability" in ft["summary"].get("fault", "") or ft["summary"].get("faulted") is True, f"a genuine fault disables the mod: {ft['summary'].get('fault')}")
@@ -255,6 +274,16 @@ def main():
         check(ft["ram"] == van["ram"], "the guest state is unchanged by the fault")
         # R1: guest state and native picture digests are identical with presentation on, off (Vanilla), skipped (scenery-only in Original) and restored
         check(ex["ram"] == van["ram"] == base_run["ram"] == ld["ram"] == rw["ram"], "R1: the final guest work RAM is identical with the provider on, absent, restored and rewound")
+        def audio_of(*runs):
+            return {(r["audio"] or {}).get("sha256") for r in runs}, {(r["audio"] or {}).get("frames") for r in runs}
+        sha_a, frames_a = audio_of(ex, van, tw, base_run, nc, ft)
+        check(len(sha_a) == 1 and None not in sha_a and len(frames_a) == 1, f"R1 audio: the mixer output digest and length are identical with the provider on, absent, ABI 1, a cold cache and a faulted provider ({sha_a}, {frames_a})")
+        sha_b, frames_b = audio_of(ex2, van2, tw2)
+        check(len(sha_b) == 1 and None not in sha_b and len(frames_b) == 1, "R1 audio: and across aspect changes, Original and 4:3")
+        check(ex["audio"]["non_silent"] is False, "(the fixture program is silent: the audio digest is a real but weak witness; the guest never touches the sound devices)")
+        pics = {tuple(map(tuple, r["bmp"][0])) for r in (nc, base_run, ex)}
+        check(ex["bmp"] == base_run["bmp"] == nc["bmp"] and ld["bmp"] == base_run["bmp"] and rw["bmp"] == base_run["bmp"], "R1 native picture: the presented frame is identical for the repeated, cold-cache, restored and rewound runs")
+        check(len(L) == len(T) == len(base_run["logs"]) == len(nc["logs"]) and [e["f"] for e in L] == [e["f"] for e in base_run["logs"]], "R1 callback counts and frame numbers are identical across repeated runs and equal the ABI 1 prepare count")
         check(ex2["ram"] == van2["ram"] == tw2["ram"] == ex43["ram"] == van43["ram"], "R1: and across aspect changes and skipped presentation")
         if h.failures:
             return 1

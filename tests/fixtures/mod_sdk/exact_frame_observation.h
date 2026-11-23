@@ -21,6 +21,7 @@ typedef struct ExactObservation {
   int hscroll_a, hscroll_b, vscroll_a, vscroll_b, per_column, rgb_status;
   int32_t hscroll_a_value, hscroll_b_value, vscroll_a_value, vscroll_b_value;
   uint8_t rgb[3];
+  int light;                           /* set by the cost measurement: count the call and return (the observer's hashing is not the host's cost) */
   int fault_next;                      /* set by the test: the next exact-frame callback makes an invalid access (a fault) */
 } ExactObservation;
 extern ExactObservation g_exact_obs;

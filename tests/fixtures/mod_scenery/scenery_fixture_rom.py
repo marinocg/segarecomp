@@ -45,13 +45,13 @@ class Code:
             self.out[at + 1] = displacement & 0xFF
 
 
-def make_rom(mid_frame: bool = False) -> bytes:
+def make_rom(mid_frame: bool = False, interlace: bool = False) -> bytes:
     """VDP: 40-cell picture, plane A at 0xC000 (64 x 32), horizontal scroll table at 0xFC00 (full screen). Plane A alternates tile 1 and tile 3 by column (green / red of palette line 0). Each of the 40 turns: while Right is held the
     camera word at 0xFF0012 grows by one, and the program writes the plane-A horizontal scroll -(camera * 8) into the table. Camera stays inside 0..24 in the tests (a 10-bit scroll value never wraps)."""
     c = Code()
     c.w(0x41F9); c.l(0x00C00004)                     # lea 0xC00004,a0   (VDP control)
     c.w(0x43F9); c.l(0x00C00000)                     # lea 0xC00000,a1   (VDP data)
-    for reg in (0x8004, 0x8144, 0x8230, 0x8407, 0x8578, 0x8700, 0x8B00, 0x8C81, 0x8D3F, 0x8F02, 0x9001):
+    for reg in (0x8004, 0x8144, 0x8230, 0x8407, 0x8578, 0x8700, 0x8B00, 0x8C87 if interlace else 0x8C81, 0x8D3F, 0x8F02, 0x9001):   # SEG-152-T003: interlace=True selects interlace mode 2 (448-line output, 224 field lines)
         c.w(0x30BC, reg)                             # move.w #reg,(a0)
     c.w(0x20BC); c.l(0xC0000000)                     # move.l #CRAM write 0,(a0)
     for colour in (0x0420, 0x00E0, 0x000E):

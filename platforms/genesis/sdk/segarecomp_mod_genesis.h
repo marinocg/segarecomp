@@ -83,7 +83,7 @@ typedef struct SegaGenesisFrameView {
   uint32_t flags;
   const uint8_t *vram;                 /* 65536 bytes, host-owned copy */
   const SegaGenesisFrameLine *lines;   /* per output line registers, CRAM, VSRAM */
-  uint32_t line_count;                 /* <= SEGA_GEN_FRAME_MAX_LINES */
+  uint32_t line_count;                 /* <= SEGA_GEN_FRAME_MAX_LINES: the number of captured RASTER (field) lines, NOT the output pixel rows: in interlace mode 2 `height` is 448 and line_count is 224; output row r reads line r / 2 */
   uint32_t reserved[7];
 } SegaGenesisFrameView;
 

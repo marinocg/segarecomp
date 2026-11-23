@@ -79,4 +79,46 @@ cli.check(rc != 0 and "E_ABI_MINOR_TOO_NEW" in err, "a source targeting a minor 
 rc, err = compile_source(src_use, None)
 cli.check(rc == 0, "a hand-built source that declares no target minor sees the whole table (the host build always declares it)")
 
+# the host's own diagnostic for a source that uses a minor-1 member without declaring the minor: a stable class naming abi.minor (a struct member cannot carry a custom #error, ADR 0320 decision 10 as amended)
+HEAD = f'''[mod]
+id = "minor-diag"
+author = "segarecomp tests"
+version = "0.1.0"
+name = "Minor diagnostic"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "rev-a"
+sha256 = "{SRC_SHA}"
+
+[[source]]
+kind = "native-c11"
+path = "src/provider.c"
+
+[abi]
+native = 2
+{{minor}}
+[capabilities]
+required = ["frame.vdp", "frame.work_ram"]
+'''
+PROVIDER = b'#include <segarecomp_mod_genesis.h>\nstatic const SegaModProvider p = {sizeof(SegaModProvider), SEGA_MOD_ABI_MAJOR, 1U, SEGA_MOD_PLATFORM, "d", 1U, 0, 0, 0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0}};\nconst SegaModProvider *segarecomp_mod_provider(void **s) { const SegaGenesisFeatures *f = (const SegaGenesisFeatures *)0; if (s != 0 && f != 0 && f->frame != 0 && f->vdp != 0) return 0; return &p; }\n'
+
+
+def build_project(name, minor_line):
+    d = tmp / name
+    write(d / "mod.toml", HEAD.replace("{minor}", minor_line))
+    write(d / "src/provider.c", PROVIDER)
+    return cli.run("mod", "build", d, "--out", tmp / (name + ".segapatch"), "--cc", cc, "--sdk-dir", root / "platforms")
+
+
+rc, doc, _ = build_project("undeclared", "")
+cli.check(rc == 1 and doc and doc.get("class") == "E_ABI_MINOR_UNDECLARED" and "abi.minor" in (doc.get("error") or ""), f"a source using frame/vdp without abi.minor is E_ABI_MINOR_UNDECLARED naming abi.minor: {doc and (doc.get('class'), (doc.get('error') or '')[:160])}")
+rc, doc, _ = build_project("declared", "minor = 1")
+cli.check(rc == 0 and doc and doc.get("ok") is True, f"the same source with minor = 1 builds ({doc and (doc.get('class'), (doc.get('error') or '')[:200])})")
+rc, doc, _ = build_project("too-new", "minor = 2")
+cli.check(rc == 1 and doc and doc.get("class") == "E_ABI_MINOR_TOO_NEW", f"minor = 2 is E_ABI_MINOR_TOO_NEW from the project reader: {doc and doc.get('class')}")
+
 cli.done("segapatch_abi_minor_test")
