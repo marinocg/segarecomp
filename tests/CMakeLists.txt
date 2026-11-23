@@ -1611,6 +1611,13 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_view_abi2_test APPEND PROPERTY LABELS full)
   set_property(TEST mod_view_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_view_abi2_test PROPERTY TIMEOUT 1500)
+  # SEG-152-T003/T004 (ADR 0320): the exact-frame callback through the real producer and the SDL3 viewer: one callback per produced frame, ABI 1 twin equality, mid-frame changes, aspect/Original/4:3,
+  # skipped presentation, save/load, rewind, fault; HUD, scenery, placement and sprite belong to the produced frame.
+  add_test(NAME mod_exact_frame_abi2_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_exact_frame_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_exact_frame_abi2_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_exact_frame_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_exact_frame_abi2_test PROPERTY TIMEOUT 1500)
   add_test(NAME mod_view_transitions_abi2_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_view_transitions_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
   set_property(TEST mod_view_transitions_abi2_test APPEND PROPERTY LABELS full)
