@@ -165,6 +165,21 @@ def main():
         hud_g = rep_g["scenes"][0]["components"]["hud"] if rep_g and rep_g["scenes"] else {"covered": 0, "requested": -1}
         check(wrong_g == 0 and sc_g["covered"] == sc_g["requested"] > 0 and hud_g["covered"] > 0 and lines_g["MOD_SUMMARY"][0]["faulted"] is False and surf_g == surf_one,
               f"ADR 0314: a plane without a window is left to the generic extension: plane A authored, equal to the golden ({wrong_g} pixels differ), frame equal to the two-plane frame, scenery credited, no fault ({sc_g})")
+        # ---- SEG-152-T007 (ADR 0320): the REAL trusted attachment. A scheduled ABI 2 minor 2 provider marks every row of both planes through scenery_generic_rows (no window): the viewer's trusted attach honours the host-private
+        # code 3, so the rows are credited as authored (covered == requested) and show the VDP's own frame-start plane (equal to Vanilla's generic wrap for this fixture, whose plane is never rewritten); no fault ----
+        def mask_edit(t):
+            t = t.replace("SEGA_MOD_ABI_MAJOR, 0U, SEGA_MOD_PLATFORM", "SEGA_MOD_ABI_MAJOR, 2U, SEGA_MOD_PLATFORM")
+            t = t.replace(both, "    {\n      static const uint8_t all_rows[28] = {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255};\n      (void)render->scenery_generic_rows(0U, all_rows, 224U, 28U);\n      (void)render->scenery_generic_rows(1U, all_rows, 224U, 28U);\n    }\n")
+            return t
+        masked = project("v-mask-rows", mask_edit, lambda m: m.replace("[abi]\nnative = 2", "[abi]\nnative = 2\nminor = 2"))
+        if h.failures:
+            return 1
+        surf_m, lines_m, rep_m, ram_m = play(masked, "mask-rows", "32:9")
+        sc_m = rep_m["scenes"][0]["components"]["scenery"] if rep_m and rep_m["scenes"] else {"covered": 0, "requested": -1}
+        check(lines_m["MOD_SUMMARY"][0]["faulted"] is False and sc_m["covered"] == sc_m["requested"] > 0 and ram_m == ram_v,
+              f"trusted attach: a real scheduled provider's row mask is credited as authored (covered == requested), no fault: {sc_m} {lines_m['MOD_SUMMARY'][0].get('fault')}")
+        check(all(surf_m[y][x] == base[y][x] for y in range(H) for x in list(range(side)) + list(range(side + W, W + 2 * side)) if not (x < 24 and y < 8)),
+              "trusted attach: the masked rows present the VDP's own frame-start plane (the Vanilla generic margins)")
         # ---- ACTIVE scrolling: Right is held until the program ends, so the presented frame is captured WHILE the camera changes on consecutive frames ----
         MOVING = "0 R\n"
         mutant = project("t-shifted-cell", lambda t: t.replace("const int32_t cell = x0 + (int32_t)c;", "const int32_t cell = x0 + (int32_t)c + 1;"))   # a window whose words belong to the NEXT cell: the one-cell / one-frame misassociation

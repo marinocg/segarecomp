@@ -391,6 +391,12 @@ int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameE
   return 0;
 }
 
+int genesis_sdl3_viewer_attach_scheduled_mod_compat(GenesisSdl3Viewer *v, GenesisFrameExtension *ext, const GenesisNativeCompat *compat, void *state, unsigned caps) {
+  if (genesis_sdl3_viewer_attach_native_compat(v, ext, compat, state, caps) != 0) return -1;
+  ext->compat_private_words = 1U;
+  return 0;
+}
+
 void genesis_sdl3_viewer_native_compat_stats(const GenesisSdl3Viewer *v, GenesisNativeCompatStats *out) {
   if (out == NULL) return;
   memset(out, 0, sizeof *out);

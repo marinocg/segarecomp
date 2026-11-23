@@ -30,6 +30,8 @@ typedef struct OverlayScript {
   unsigned count, calls, ran;
   uint64_t last_frame;
   uint32_t has_render_api, has_frame;
+  uint32_t probe_phase, phase_seen;
+  int phase_status;
   int statuses[96];
   ScriptOp ops[96];
 } OverlayScript;
@@ -811,6 +813,17 @@ void rows_capability_tests() {
   h.rt->virtual_frame_count = g_script.last_frame + 2U;
   check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), "the callback faulted: the mod presents nothing");
 }
+
+// Outside the render phase the call is SEGA_MOD_E_PHASE (a fault of the callback), distinct from SEGA_MOD_E_CAPABILITY, which needs the render phase first.
+void rows_phase_tests() {
+  Harness h;
+  Script s;
+  g_script.probe_phase = SEGA_MOD_PHASE_FRAME_END;
+  run_frames(*h.rt, 8U);
+  check(g_script.phase_seen == 1U && g_script.phase_status == SEGA_MOD_E_PHASE && g_script.phase_status != SEGA_MOD_E_CAPABILITY, "scenery_generic_rows outside the render phase is SEGA_MOD_E_PHASE (not SEGA_MOD_E_CAPABILITY)");
+  h.rt->virtual_frame_count = g_script.last_frame + 2U;
+  check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), "the out-of-phase call faulted the callback: the mod presents nothing");
+}
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -822,6 +835,7 @@ int main(int argc, char **argv) {
   else if (mode == "rows_exact") rows_tests(true);
   else if (mode == "rows_ordinary") rows_tests(false);
   else if (mode == "rows_capability") rows_capability_tests();
+  else if (mode == "rows_phase") rows_phase_tests();
   else { std::puts("usage: genesis_mod_overlay_script_tests bitmap|refusal"); return 2; }
   if (failures != 0) { std::printf("genesis_mod_overlay_script_tests %s: %d FAILED\n", mode.c_str(), failures); return 1; }
   std::printf("genesis_mod_overlay_script_tests %s: OK\n", mode.c_str());

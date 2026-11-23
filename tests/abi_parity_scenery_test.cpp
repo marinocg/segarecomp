@@ -479,6 +479,54 @@ void mask_448_row_frame() {
         !segarecomp::scenery::mask_in_range(0, bytes, 16, 1) && !segarecomp::scenery::mask_in_range(0, bytes, 8, 2) && !segarecomp::scenery::mask_in_range(0, bytes, 8, 0), "out-of-range submissions are refused by the production validator");
 }
 
+
+// SEG-152-T007 follow-up: the PRODUCER on a minimal valid synthetic interlace-mode-2 (448-row) frame. The harness's Spec arrays stay 224 rows, so this uses its scene, raster and `produce` with two bespoke
+// word callbacks: the ABI 1 reference answers EVERY row (0..447) with the VDP's own frame-start word (own_plane); the ABI 2 twin submits a 448-row mask for both planes and answers code 3 (private words on).
+int im2_ref_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
+  Provider *p = static_cast<Provider *>(state);
+  ++p->cells;
+  if (plane > 1U || row >= 448U) return 0;
+  const long cx = floor8(static_cast<long>(x) - hscroll), py = static_cast<long>(row) + vscroll;
+  *word = p->scene->vram_word(plane, static_cast<unsigned>(((cx % 64) + 64) % 64), static_cast<unsigned>((((py >= 0 ? py / 16 : -((-py + 15) / 16)) % 32) + 32) % 32));
+  return 1;
+}
+int im2_twin_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
+  Provider *p = static_cast<Provider *>(state);
+  ++p->cells;
+  if (plane > 1U || row >= 448U) return 0;
+  return segarecomp::scenery::answer(p->mask[plane], p->windows[plane], static_cast<int>(row), x, hscroll, vscroll, word, p->mask_code, GENESIS_COMPAT_WORD_GENERIC);
+}
+void mask_448_producer() {
+  const int side = kAspects[1].side;
+  const Spec s = base_spec("im2");
+  Scene sc; build_scene(sc, s);
+  for (auto &line : sc.raster->lines) line.registers[12] = static_cast<uint16_t>(line.registers[12] | (GENESIS_VDP_REG12_LSM1_BIT | GENESIS_VDP_REG12_LSM0_BIT));   // H40, interlace mode 2: 448 rows
+  GenesisNativeCompat ref_table = twin_table(), twin_tab = twin_table();
+  ref_table.scenery_word = im2_ref_word; twin_tab.scenery_word = im2_twin_word; ref_table.name = "parity.im2-abi1"; twin_tab.name = "scheduled-mod-host";
+  Provider ref; ref.kind = Provider::Abi1; ref.spec = &s; ref.scene = &sc; ref.declared_left = side; ref.table = &ref_table; ref.private_words = 0U;
+  Provider twin; twin.kind = Provider::Abi2; twin.spec = &s; twin.scene = &sc; twin.declared_left = side; twin.table = &twin_tab;
+  uint8_t bytes[56]; std::memset(bytes, 0xFF, sizeof bytes);   // every row 0..447 marked on both planes
+  check(segarecomp::scenery::mask_in_range(0, bytes, 448, 56), "im2: the 448-row mask is in range");
+  for (unsigned p = 0; p < 2; ++p) segarecomp::scenery::mask_store(twin.mask[p], bytes, 56);
+  const Produced a = produce(sc, ref, static_cast<unsigned>(side)), b = produce(sc, twin, static_cast<unsigned>(side));
+  if (a.rc != 0 || b.rc != 0) {   // the producer rejected the fixture for an independent reason: record it precisely instead of forcing it
+    std::printf("PARITY im2 producer: NOT EXERCISED, produce rc ref=%d twin=%d\n", a.rc, b.rc);
+    check(false, "im2: the producer rejected the interlace-mode-2 fixture (rc " + std::to_string(a.rc) + "/" + std::to_string(b.rc) + ")");
+    return;
+  }
+  check(a.res.native_h == 448U && b.res.native_h == 448U, "im2: the produced frame is 448 rows high (" + std::to_string(a.res.native_h) + ")");
+  check(a.res.compat_reason == GENESIS_COMPAT_OK && b.res.compat_reason == GENESIS_COMPAT_OK && a.res.authored == 1 && b.res.authored == 1, "im2: both providers are accepted and authored");
+  check(a.res.authored_row_count > 224U && b.res.authored_row_count == a.res.authored_row_count && coverage_equal(a, b), "im2: ABI 2 credit equals ABI 1 incl. rows >= 224 (" + std::to_string(a.res.authored_row_count) + " vs " + std::to_string(b.res.authored_row_count) + ")");
+  check(((b.res.authored_rows[300 >> 3] >> (300 & 7)) & 1U) != 0U && ((b.res.authored_rows[447 >> 3] >> (447 & 7)) & 1U) != 0U && ((b.res.authored_rows[10 >> 3] >> (10 & 7)) & 1U) != 0U, "im2: rows 10, 300 and 447 are credited as authored");
+  check(a.surface == b.surface && a.surface.size() > 0U, "im2: the produced surface equals the ABI 1 own_plane reference (VDP-derived frame-start word above and below row 223)");
+  // a mask marking only rows >= 224 credits only those rows and leaves the upper half generic
+  Provider low; low.kind = Provider::Abi2; low.spec = &s; low.scene = &sc; low.declared_left = side; low.table = &twin_tab;
+  uint8_t lower[56] = {}; for (unsigned r = 224; r < 448; ++r) lower[r >> 3] = static_cast<uint8_t>(lower[r >> 3] | (1U << (r & 7U)));
+  segarecomp::scenery::mask_store(low.mask[0], lower, 56);
+  const Produced c = produce(sc, low, static_cast<unsigned>(side));
+  check(c.rc == 0 && (c.res.authored_rows[400 >> 3] >> (400 & 7) & 1U) != 0U && (c.res.authored_rows[100 >> 3] >> (100 & 7) & 1U) == 0U, "im2: a mask of the lower half only credits rows >= 224 and not rows < 224 (plane B generic: uncredited)");
+}
+
 }  // namespace
 
 int main() {
@@ -501,6 +549,7 @@ int main() {
   mask_cost_line();
   mask_viewport_row_index();
   mask_448_row_frame();
+  mask_448_producer();
   std::printf("PARITY mask totals: cases %u (pass %u, limit %u)\n", masked.cases, masked.pass, masked.limit);
   std::printf("PARITY totals: exact cases %u (pass %u, limit %u), predicted cases %u (pass %u, limit %u)\n", exact.cases, exact.pass, exact.limit, predicted.cases, predicted.pass, predicted.limit);
   if (failures != 0) { std::printf("abi_parity_scenery_test: %d failure(s)\n", failures); return 1; }

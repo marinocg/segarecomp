@@ -31,6 +31,10 @@ GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *viewer, 
  * `caps` is the GENESIS_CAP_* set the package declared (the host grants exactly those). Allocation-free (adapter-owned snapshot and overlay buffers). Returns 0, or -1 for an
  * invalid argument or a provider with another ABI version (the viewer then stays generic). */
 int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *viewer, GenesisFrameExtension *extension, const GenesisNativeCompat *compat, void *state, unsigned caps);
+/* SEG-152-T007: the TRUSTED attach of the scheduled-mod adapter's own table (the only caller is viewer_main_hook.c, in a build whose provider is mod_capture.cpp's host table). Identical to
+ * genesis_sdl3_viewer_attach_native_compat and, only when that returns 0, additionally honours the host-private answer code 3 (GenesisFrameExtension::compat_private_words = 1). Never derived from
+ * the table's name or any provider-controlled data: the sole input is which function the host calls. A refused attach leaves the flag 0. */
+int genesis_sdl3_viewer_attach_scheduled_mod_compat(GenesisSdl3Viewer *viewer, GenesisFrameExtension *extension, const GenesisNativeCompat *compat, void *state, unsigned caps);
 /* Counters over the presented frames of a run, for the end-of-run summary: frames the provider served (authored), declined by reason, and HUD frames. */
 typedef struct GenesisNativeCompatStats {
   uint64_t frames, authored, hud_frames;
