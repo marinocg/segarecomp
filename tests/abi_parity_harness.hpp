@@ -58,7 +58,14 @@ struct Spec {
   std::vector<JournalWrite> journal;   // SEG-152-T007: mid-frame name-table writes (the producer replays them; an ABI 1 provider reads the frame-start VRAM)
   int window_from_row = -1;    // SEG-152-T007: >= 0 (a multiple of 8): the window plane covers the full width from that row down (a status band: window-plane edge / HUD rows)
   bool no_journal = false;     // SEG-152-T007: the frame carries no VRAM journal (GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)
+  // SEG-152-T008: the presentation gate's extra state of the same fixture (all default to "absent", which leaves every earlier scenario byte-identical).
+  uint8_t pal[H] = {};         // per-line palette variant: the CRAM of that output line has every colour channel raised by this many steps (0 = the base palette): raster palette effects (water, gradients)
+  uint8_t fade = 0;            // 0..7: every line's CRAM is darkened by this many steps (a fade or a transition in progress)
+  bool hud_tiles = false;      // the game's own HUD glyph tiles are present in VRAM (tile indices kHudTile0..+3), drawn by the provider from the frame view
+  uint8_t scene_id = 0;        // work RAM byte 0: the game's scene (the gate's provider logic decides acceptance from it, as the production providers do)
+  uint8_t bad_hud = 0;         // work RAM byte 3: 1 = the HUD state is inconsistent (the provider refuses the HUD only)
 };
+constexpr unsigned kHudTile0 = 0x40;   // the HUD glyph tiles of Spec::hud_tiles (VRAM 0x800..0x87F): not referenced by any name table of the fixture
 
 inline int wrap10(long v) { return static_cast<int>(((v + 512) & 1023) - 512); }
 inline long floor8(long v) { return v >= 0 ? v / 8 : -((-v + 7) / 8); }
@@ -107,15 +114,37 @@ inline void build_scene(Scene &sc, const Spec &spec) {
   uint8_t cram[GENESIS_VDP_CRAM_BYTES];
   for (unsigned i = 0; i < 64; ++i) { const unsigned w = ((i * 5 + 3) % 8) << 1 | ((i * 3 + 1) % 8) << 5 | ((i * 7 + 2) % 8) << 9; cram[i * 2] = static_cast<uint8_t>(w >> 8); cram[i * 2 + 1] = static_cast<uint8_t>(w); }
   uint8_t vsram[GENESIS_VDP_VSRAM_BYTES] = {};
+  if (spec.hud_tiles)   // SEG-152-T008: four glyph tiles (4 bpp, colour indices 0..7 by a fixed formula) of the game's own HUD
+    for (unsigned t = 0; t < 4; ++t)
+      for (unsigned row = 0; row < 8; ++row)
+        for (unsigned col = 0; col < 4; ++col) {
+          const unsigned a = (kHudTile0 + t) * 32 + row * 4 + col;
+          const unsigned hi = ((row * 3 + col * 2 + t) % 8), lo = ((row + col * 5 + t * 3) % 8);
+          sc.vram[a] = static_cast<uint8_t>(hi << 4 | lo);
+        }
   vsram[0] = static_cast<uint8_t>(spec.vs[0] >> 8); vsram[1] = static_cast<uint8_t>(spec.vs[0]);
   vsram[2] = static_cast<uint8_t>(spec.vs[1] >> 8); vsram[3] = static_cast<uint8_t>(spec.vs[1]);
   uint16_t regs[GENESIS_VDP_REGISTER_COUNT] = {};
   regs[1] = 0x04; regs[2] = 0x30; regs[3] = 0x34; regs[4] = 0x07; regs[5] = 0x7C; regs[7] = 2; regs[11] = 3; regs[12] = 0x81; regs[13] = 0x3F; regs[16] = 1;   // per-line hscroll, full-screen vscroll, 64 x 32
   if (spec.window_from_row >= 0) regs[18] = static_cast<uint16_t>(0x80U | (spec.window_from_row / 8));
+  unsigned line_no = 0;
   for (auto &line : sc.raster->lines) {
     std::memcpy(line.registers, regs, sizeof(line.registers));
     std::memcpy(line.cram, cram, sizeof(line.cram));
     std::memcpy(line.vsram, vsram, sizeof(line.vsram));
+    const unsigned raise = line_no < static_cast<unsigned>(H) ? spec.pal[line_no] : 0U;   // SEG-152-T008: the per-line palette effect and the fade, on the CRAM words of that line
+    if (raise != 0U || spec.fade != 0U)
+      for (unsigned i = 0; i < 64; ++i) {
+        unsigned w = static_cast<unsigned>(line.cram[i * 2] << 8 | line.cram[i * 2 + 1]);
+        unsigned out = 0;
+        for (unsigned ch = 0; ch < 3; ++ch) {
+          int c = static_cast<int>((w >> (1 + 4 * ch)) & 7U) + static_cast<int>(raise) - static_cast<int>(spec.fade);
+          c = c < 0 ? 0 : (c > 7 ? 7 : c);
+          out |= static_cast<unsigned>(c) << (1 + 4 * ch);
+        }
+        line.cram[i * 2] = static_cast<uint8_t>(out >> 8); line.cram[i * 2 + 1] = static_cast<uint8_t>(out);
+      }
+    ++line_no;
   }
   sc.raster->has_vram_journal = spec.no_journal ? 0 : 1;
   std::memcpy(sc.raster->vram_start, sc.vram.data(), GENESIS_VDP_VRAM_BYTES);
@@ -150,6 +179,8 @@ struct Provider {
   segarecomp::scenery::RowMask mask[2];   // SEG-152-T007: the per-row generic mask (the production type and row test)
   int mask_code = GENESIS_COMPAT_WORD_VDP_START;   // what the adapter answers for a marked row (3); a control run answers GENESIS_COMPAT_WORD_GENERIC instead
   uint8_t private_words = 1U;   // the trusted attach (GenesisFrameExtension::compat_private_words)
+  unsigned components = GENESIS_COMPAT_SCENERY;   // SEG-152-T008: the components the host will use (the gate adds HUD)
+  uint8_t ram[4] = {0, 0, 0, 0};   // SEG-152-T008: work RAM bytes 0..3 of the previous-onset snapshot the provider is handed (scene id, frame number, fade counter, bad-HUD flag)
   unsigned cells = 0;
   const GenesisNativeCompat *table = nullptr;   // optional: another table (the gate cases name the table like the adapter's)
 };
@@ -336,28 +367,74 @@ inline uint64_t fnv1a64(const uint8_t *d, size_t n, uint64_t h = 146959810393466
   for (size_t i = 0; i < n; ++i) { h ^= d[i]; h *= 1099511628211ULL; }
   return h;
 }
-struct Produced { int rc = -1; GenesisExtensionResult res{}; std::vector<uint8_t> surface; size_t pitch = 0; };
+struct Produced {
+  int rc = -1; GenesisExtensionResult res{}; std::vector<uint8_t> surface; size_t pitch = 0;
+  std::vector<uint8_t> overlay, layers;   // SEG-152-T008: the overlay rows the producer reported (overlay_h rows of 128 RGBA pixels) and the layer image bytes the descriptors address
+};
 // The coverage of two produced frames: accepted components, reason, the strict `authored` verdict and the per-row credit (all must be equal to ABI 1: no tolerance).
 inline bool coverage_equal(const Produced &a, const Produced &b) {
   return a.res.compat_accepted == b.res.compat_accepted && a.res.compat_reason == b.res.compat_reason && a.res.authored == b.res.authored && a.res.authored_row_count == b.res.authored_row_count &&
          std::memcmp(a.res.authored_rows, b.res.authored_rows, sizeof a.res.authored_rows) == 0;
 }
+// SEG-152-T008: the ONE presentation digest: the produced surface, the verdict (components, reason, authored, per-row credit, scene token, placement shift, HUD rows) and the overlay and layer output, folded with the same FNV-1a
+// as the surface digest. `Mismatch` names the first component that differs: what a failing gate reports.
+inline uint64_t overlay_digest(const Produced &p) { uint64_t h = fnv1a64(reinterpret_cast<const uint8_t *>(&p.res.overlay_w), sizeof p.res.overlay_w); h = fnv1a64(reinterpret_cast<const uint8_t *>(&p.res.overlay_h), sizeof p.res.overlay_h, h); h = fnv1a64(reinterpret_cast<const uint8_t *>(&p.res.overlay_fx), sizeof p.res.overlay_fx, h); h = fnv1a64(reinterpret_cast<const uint8_t *>(&p.res.overlay_fy), sizeof p.res.overlay_fy, h); return fnv1a64(p.overlay.data(), p.overlay.size(), h); }
+inline uint64_t layers_digest(const Produced &p) { uint64_t h = fnv1a64(&p.res.layer_count, 1); h = fnv1a64(&p.res.layer_bad, 1, h); h = fnv1a64(reinterpret_cast<const uint8_t *>(p.res.layers), sizeof p.res.layers, h); return fnv1a64(p.layers.data(), p.layers.size(), h); }
+inline uint64_t verdict_digest(const Produced &p) {
+  uint64_t h = fnv1a64(&p.res.compat_accepted, 1); h = fnv1a64(&p.res.compat_reason, 1, h); h = fnv1a64(&p.res.authored, 1, h);
+  h = fnv1a64(reinterpret_cast<const uint8_t *>(&p.res.authored_row_count), sizeof p.res.authored_row_count, h); h = fnv1a64(p.res.authored_rows, sizeof p.res.authored_rows, h);
+  h = fnv1a64(reinterpret_cast<const uint8_t *>(p.res.scene), sizeof p.res.scene, h); h = fnv1a64(reinterpret_cast<const uint8_t *>(&p.res.shift), sizeof p.res.shift, h);
+  h = fnv1a64(reinterpret_cast<const uint8_t *>(&p.res.hud_rows), sizeof p.res.hud_rows, h); h = fnv1a64(&p.res.flags, 1, h);
+  return fnv1a64(&p.res.status, 1, h);
+}
 inline uint64_t row_digest(const Produced &p, int row) { return fnv1a64(&p.surface[static_cast<size_t>(row) * p.pitch], p.pitch); }
 inline uint64_t surface_digest(const Produced &p) { uint64_t h = 14695981039346656037ULL; for (int r = 0; r < H; ++r) h = fnv1a64(&p.surface[static_cast<size_t>(r) * p.pitch], p.pitch, h); return h; }
+inline uint64_t presentation_digest(const Produced &p) {
+  uint64_t h = fnv1a64(p.surface.data(), p.surface.size());
+  for (const uint64_t d : {verdict_digest(p), overlay_digest(p), layers_digest(p)}) h = fnv1a64(reinterpret_cast<const uint8_t *>(&d), sizeof d, h);
+  return h;
+}
+// The named failing assertions of a comparison between a reference (ABI 1) and a twin (ABI 2): empty means the presentation is identical component by component.
+inline std::vector<std::string> presentation_mismatches(const Produced &a, const Produced &b) {
+  std::vector<std::string> m;
+  if (a.rc != b.rc) { m.push_back("rc"); return m; }
+  if (a.rc != 0) return m;
+  if (a.res.compat_accepted != b.res.compat_accepted) m.push_back("accepted-components");
+  if (a.res.compat_reason != b.res.compat_reason) m.push_back("reason");
+  if (a.surface != b.surface) m.push_back("surface");
+  if (overlay_digest(a) != overlay_digest(b)) m.push_back("overlay");
+  if (layers_digest(a) != layers_digest(b)) m.push_back("layers");
+  if (std::strcmp(a.res.scene, b.res.scene) != 0) m.push_back("scene");
+  if (a.res.shift != b.res.shift) m.push_back("placement");
+  if (a.res.authored != b.res.authored || a.res.authored_row_count != b.res.authored_row_count || std::memcmp(a.res.authored_rows, b.res.authored_rows, sizeof a.res.authored_rows) != 0) m.push_back("coverage");
+  if (m.empty() && presentation_digest(a) != presentation_digest(b)) m.push_back("digest");
+  return m;
+}
 
 inline Produced produce(const Scene &sc, Provider &prov, unsigned side) {
-  static std::vector<uint8_t> surface(GENESIS_EXT_SURFACE_BYTES), overlay(GENESIS_COMPAT_OVERLAY_BYTES), ram(GENESIS_COMPAT_RAM_BYTES);
+  static std::vector<uint8_t> surface(GENESIS_EXT_SURFACE_BYTES), overlay(GENESIS_COMPAT_OVERLAY_BYTES), ram(GENESIS_COMPAT_RAM_BYTES), layer(GENESIS_COMPAT_LAYER_BYTES);
   PlanCtx pc{side};
   auto native = std::make_unique<GenesisFrameArtifact>();
   Produced o;
   if (genesis_vdp_produce_frame_raster(sc.vram.data(), sc.raster.get(), native.get()) != 0) return o;
   GenesisFrameExtension ext{};
   ext.plan = plan_fn; ext.plan_ctx = &pc; ext.producer = genesis_vdp_produce_extension; ext.pixels = surface.data(); ext.capacity = surface.size(); ext.request = 2;
-  ext.compat = prov.table != nullptr ? prov.table : &twin_table(); ext.compat_state = &prov; ext.compat_components = GENESIS_COMPAT_SCENERY; ext.compat_caps = GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_FRAME_WORK_RAM;
-  ext.compat_private_words = prov.private_words; ext.compat_ram = ram.data(); ext.compat_ram_valid = 1; ext.overlay_rgba = overlay.data(); ext.layer_rgba = nullptr;
+  ext.compat = prov.table != nullptr ? prov.table : &twin_table(); ext.compat_state = &prov; ext.compat_components = prov.components; ext.compat_caps = GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_FRAME_WORK_RAM | ((prov.components & GENESIS_COMPAT_HUD) != 0U ? GENESIS_CAP_OVERLAY_RGBA : 0U);
+  ext.compat_private_words = prov.private_words; ext.compat_ram = ram.data(); ext.compat_ram_valid = 1; ext.overlay_rgba = overlay.data(); ext.layer_rgba = layer.data();
+  std::fill(ram.begin(), ram.end(), static_cast<uint8_t>(0)); std::memcpy(ram.data(), prov.ram, sizeof prov.ram);
+  std::fill(overlay.begin(), overlay.end(), static_cast<uint8_t>(0xEE)); std::fill(layer.begin(), layer.end(), static_cast<uint8_t>(0xEE));   // poison: only what the producer's own clear and the provider write is observable
   std::fill(surface.begin(), surface.end(), static_cast<uint8_t>(0xAA));
   o.rc = genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &o.res);
-  if (o.rc == 0) { o.pitch = o.res.pitch; o.surface.assign(surface.begin(), surface.begin() + static_cast<size_t>(o.res.pitch) * o.res.native_h); }
+  if (o.rc == 0) {
+    o.pitch = o.res.pitch; o.surface.assign(surface.begin(), surface.begin() + static_cast<size_t>(o.res.pitch) * o.res.native_h);
+    o.overlay.assign(overlay.begin(), overlay.begin() + static_cast<size_t>(o.res.overlay_h) * GENESIS_COMPAT_OVERLAY_MAX_W * 4U);
+    size_t used = 0;
+    for (unsigned i = 0; i < o.res.layer_count && i < GENESIS_COMPAT_LAYERS_MAX; ++i) {
+      const GenesisCompatLayer &l = o.res.layers[i];
+      if ((o.res.layer_bad >> i & 1U) == 0U) used = std::max(used, static_cast<size_t>(l.offset) + static_cast<size_t>(l.width) * l.height * 4U);
+    }
+    o.layers.assign(layer.begin(), layer.begin() + used);
+  }
   return o;
 }
 
@@ -404,15 +481,10 @@ inline std::map<std::tuple<unsigned, long, long>, CellTruth> asked_cells(const S
   return truth;
 }
 
-inline Verdict run_case(const Spec &s, int side, int left_px, Timing timing, int built_left = -1, const Options &opt = Options{}) {
-  Scene sc;
-  build_scene(sc, s);
-  Provider ref, twin;
-  ref.kind = Provider::Abi1; ref.spec = &s; ref.scene = &sc; ref.declared_left = left_px;
-  twin.kind = Provider::Abi2; twin.spec = &s; twin.scene = &sc; twin.declared_left = left_px;
-  twin.mask_code = opt.mask_code; twin.private_words = opt.private_words;
-  Built built;
-  for (unsigned plane = 0; plane < 2; ++plane) build_plane(s, sc, plane, side, built_left < 0 ? left_px : built_left, timing, built, opt);
+// SEG-152-T008: builds the ABI 2 twin's scenery submission (the bounded windows and, for the mask-using builder, the per-row mask) for a declared placement and installs it in `twin`. One implementation for
+// `run_case` and for the presentation gate (which arms its twins with it): there is no second builder.
+inline void arm_twin(Provider &twin, const Spec &s, const Scene &sc, int side, int built_left, Timing timing, const Options &opt, Built &built) {
+  for (unsigned plane = 0; plane < 2; ++plane) build_plane(s, sc, plane, side, built_left, timing, built, opt);
   if (opt.use_mask)   // the mask-using builder submits, per plane, the rows its model answers with the VDP's own word (bit r & 7 of byte r >> 3, produced screen rows)
     for (unsigned plane = 0; plane < 2; ++plane) {
       if (!opt.mask_plane[plane]) continue;
@@ -422,6 +494,17 @@ inline Verdict run_case(const Spec &s, int side, int left_px, Timing timing, int
       if (!opt.clear_mask) segarecomp::scenery::mask_store(twin.mask[plane], bytes, (H + 7) / 8);
     }
   for (unsigned plane = 0; plane < 2; ++plane) for (unsigned n = 0; n < 2; ++n) twin.windows[plane][n] = built.w[plane][n];
+}
+
+inline Verdict run_case(const Spec &s, int side, int left_px, Timing timing, int built_left = -1, const Options &opt = Options{}) {
+  Scene sc;
+  build_scene(sc, s);
+  Provider ref, twin;
+  ref.kind = Provider::Abi1; ref.spec = &s; ref.scene = &sc; ref.declared_left = left_px;
+  twin.kind = Provider::Abi2; twin.spec = &s; twin.scene = &sc; twin.declared_left = left_px;
+  twin.mask_code = opt.mask_code; twin.private_words = opt.private_words;
+  Built built;
+  arm_twin(twin, s, sc, side, built_left < 0 ? left_px : built_left, timing, opt, built);
   const Produced a = produce(sc, ref, static_cast<unsigned>(side)), b = produce(sc, twin, static_cast<unsigned>(side));
   Verdict v;
   v.feasible = built.feasible[0] && built.feasible[1];

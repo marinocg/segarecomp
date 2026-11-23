@@ -1,0 +1,41 @@
+# SEG-152-T008: schema 3 test package of the viewer-level parity gate: a BPS image payload (the effective image the ABI 1 twin's schema 2 package targets as well) plus the native-c11 ABI 2 provider, minor 2, with the
+# capabilities of the production widescreen providers. Native code: approval of this exact identity is the boundary.
+[mod]
+id = "parity-gate"
+author = "segarecomp tests"
+version = "0.1.0"
+name = "Parity gate"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "@@SHA@@"
+
+[[source]]
+kind = "bps-image"
+path = "data/game.bps"
+target_sha256 = "@@TARGET_SHA@@"
+
+[[source]]
+kind = "native-c11"
+path = "src/provider.c"
+
+[abi]
+native = 2
+minor = 2
+
+[capabilities]
+required = ["frame.vdp", "frame.work_ram", "overlay.rgba", "scenery.words"]
+
+[build]
+header_repair = "none"
+
+[geometry]
+aspect_max = "32:9"
+
+[[scene]]
+id = "main"
+components = ["scenery", "hud"]
