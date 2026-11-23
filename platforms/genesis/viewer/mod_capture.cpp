@@ -177,6 +177,13 @@ RenderView render_view() {
 // ---- SEG-138-T011: the typed ABI 2 render API (SegaGenesisRenderApi). The rules are luau_api.cpp's (shared with the Luau bindings); a refusal is a fault of the callback with the scheduler's stable cause. ----
 bool in_render() { return g.scheduler != nullptr && g.scheduler->in_callback != 0U && g.scheduler->phase == SEGA_MOD_PHASE_RENDER; }
 int refused_phase() { genesis_mod_fault_current("phase"); return SEGA_MOD_E_PHASE; }
+// The render table is published for overlay.rgba OR scenery.words (a scenery-only provider needs scenery_window), so every overlay/HUD output call checks its own grant: a scenery-only provider cannot draw a HUD through
+// the shared table. Returns 0 when the call may proceed, else the status (phase is checked first, as everywhere).
+int overlay_gate() {
+  if (!in_render()) return refused_phase();
+  if (!sega_mod_is_granted(&g.scheduler->host, SEGA_MOD_CAP_OVERLAY_RGBA)) { genesis_mod_fault_current("capability"); return SEGA_MOD_E_CAPABILITY; }
+  return SEGA_MOD_OK;
+}
 int answer(const luau::OverlayCall &r) {
   if (r.status == luau::OverlayCall::Status::ok) return SEGA_MOD_OK;
   const bool budget = r.status == luau::OverlayCall::Status::budget;
@@ -184,7 +191,7 @@ int answer(const luau::OverlayCall &r) {
   return budget ? SEGA_MOD_E_BUDGET : SEGA_MOD_E_RANGE;
 }
 int api_overlay_layer(std::uint32_t index, std::uint32_t anchor, std::uint32_t reference, std::int32_t dx, std::int32_t dy, std::uint32_t w, std::uint32_t h, std::uint32_t z) {
-  if (!in_render()) return refused_phase();
+  if (const int gate = overlay_gate(); gate != SEGA_MOD_OK) return gate;
   luau::OverlayLayerDecl d;
   d.index = static_cast<int>(index > 1000U ? 1000U : index);
   d.anchor = static_cast<int>(anchor > 1000U ? 1000U : anchor);
@@ -196,21 +203,23 @@ int api_overlay_layer(std::uint32_t index, std::uint32_t anchor, std::uint32_t r
   d.z = static_cast<int>(z > 1000U ? 1000U : z);
   return answer(luau::overlay_declare_layer(g.staged, d));
 }
-int api_overlay_target(std::uint32_t index) { return in_render() ? answer(luau::overlay_select_target(g.staged, g.target, index)) : refused_phase(); }
+int api_overlay_target(std::uint32_t index) { const int gate = overlay_gate(); return gate != SEGA_MOD_OK ? gate : answer(luau::overlay_select_target(g.staged, g.target, index)); }
 int api_overlay_rect(std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h, std::uint32_t rgba) {
-  return in_render() ? answer(luau::overlay_rect(g.staged, g.target, x, y, w, h, rgba)) : refused_phase();
+  const int gate = overlay_gate();
+  return gate != SEGA_MOD_OK ? gate : answer(luau::overlay_rect(g.staged, g.target, x, y, w, h, rgba));
 }
 int api_overlay_text(std::int32_t x, std::int32_t y, const char *ascii, std::uint32_t len, std::uint32_t rgba) {
-  if (!in_render()) return refused_phase();
+  if (const int gate = overlay_gate(); gate != SEGA_MOD_OK) return gate;
   if (ascii == nullptr && len != 0U) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
   return answer(luau::overlay_text(g.staged, g.target, x, y, std::string_view(ascii != nullptr ? ascii : "", len), rgba));
 }
 // SEG-152-T005 (ADR 0320 decision 6): the bounded RGBA bitmap calls: validation, clamping, budgets and notes are luau_api.cpp's (one implementation for the staged output the one compositor consumes).
 int api_overlay_bitmap(std::int32_t x, std::int32_t y, std::uint32_t w, std::uint32_t h, const std::uint8_t *rgba, std::uint32_t stride_bytes) {
-  return in_render() ? answer(luau::overlay_bitmap(g.staged, g.target, x, y, w, h, rgba, stride_bytes)) : refused_phase();
+  const int gate = overlay_gate();
+  return gate != SEGA_MOD_OK ? gate : answer(luau::overlay_bitmap(g.staged, g.target, x, y, w, h, rgba, stride_bytes));
 }
 int api_overlay_layer_bitmap(std::uint32_t index, std::uint32_t anchor, std::uint32_t reference, std::int32_t dx, std::int32_t dy, std::uint32_t w, std::uint32_t h, std::uint32_t z) {
-  if (!in_render()) return refused_phase();
+  if (const int gate = overlay_gate(); gate != SEGA_MOD_OK) return gate;
   luau::OverlayLayerDecl d;
   d.index = static_cast<int>(index > 1000U ? 1000U : index);
   d.anchor = static_cast<int>(anchor > 1000U ? 1000U : anchor);
@@ -223,9 +232,10 @@ int api_overlay_layer_bitmap(std::uint32_t index, std::uint32_t anchor, std::uin
   return answer(luau::overlay_declare_bitmap_layer(g.staged, d));
 }
 int api_overlay_layer_clip(std::uint32_t index, std::uint32_t x, std::uint32_t y, std::uint32_t w, std::uint32_t h) {
-  return in_render() ? answer(luau::overlay_layer_clip(g.staged, index, x, y, w, h)) : refused_phase();
+  const int gate = overlay_gate();
+  return gate != SEGA_MOD_OK ? gate : answer(luau::overlay_layer_clip(g.staged, index, x, y, w, h));
 }
-int api_overlay_fallback(std::uint32_t x, std::uint32_t y) { return in_render() ? answer(luau::overlay_fallback(g.staged, x, y)) : refused_phase(); }
+int api_overlay_fallback(std::uint32_t x, std::uint32_t y) { const int gate = overlay_gate(); return gate != SEGA_MOD_OK ? gate : answer(luau::overlay_fallback(g.staged, x, y)); }
 // SEG-152-T006 (ADR 0320 decision 7): a refusal is not a fault. The provider-selectable reasons are the ABI 1 provider-owned vocabulary; STALE_STATE and FAULT are host-originated (a provider must not impersonate them).
 int api_decline(std::uint32_t components, std::uint32_t reason) {
   if (!in_render()) return refused_phase();
@@ -242,7 +252,7 @@ int api_scene(const char *id, std::uint32_t len) {
   return answer(luau::overlay_scene(g.staged, std::string_view(id, len)));
 }
 int api_virtual_sprites(const GenesisVirtualSpriteSet *set) {
-  if (!in_render()) return refused_phase();
+  if (const int gate = overlay_gate(); gate != SEGA_MOD_OK) return gate;   // documented as needing overlay.rgba
   if (set == nullptr || g.have_staged_set) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }   // one set per callback, and a set is required
   if (!g.staged_set) g.staged_set = std::make_unique<GenesisVirtualSpriteSet>();
   std::memcpy(g.staged_set.get(), set, sizeof *set);
@@ -546,7 +556,10 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   }
 #endif
   const RenderView view_now = render_view();
-  const std::uint32_t declined = view_now.declined;   // SEG-152-T006: components the provider refused for this frame (never a fault): their output is discarded, the generic path serves them
+  std::uint32_t declined = view_now.declined;
+#ifdef SEGARECOMP_MOD_NATIVE
+  if (!current) declined = 0U;   // a refusal belongs to the frame of the callback that made it: the same epoch guard as the windows and the placement (a skipped callback, restore, rewind or any discontinuity drops it)
+#endif   // SEG-152-T006: components the provider refused for this frame (never a fault): their output is discarded, the generic path serves them
   if ((declined & GENESIS_COMPAT_SCENERY) != 0U) { p.scenery = false; accepted &= ~static_cast<unsigned>(GENESIS_COMPAT_SCENERY); }
   if ((frame->requested & GENESIS_COMPAT_HUD) != 0U) {
     const RenderView view = view_now;

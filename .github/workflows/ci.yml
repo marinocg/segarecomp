@@ -223,12 +223,12 @@ jobs:
               grep -q 'tests passed, 0 tests failed out of 4' f29.log || { echo "the four F29 tests did not all pass"; exit 1; }
               if grep -Eiq '(mod_[a-z0-9_]+_test|launcher_[a-z0-9_]+_test): skipped' f29.log; then echo "an F29 test skipped itself"; exit 1; fi ;;
             f32)
-              # F32 acceptance (SEG-152-T003/T004, ADR 0320): the exact-frame callback through the real producer and the SDL3 viewer, with the ADR 0315 viewport suites it must leave unchanged. All three MUST exist, run and not skip themselves on Linux.
-              f32='^(mod_exact_frame_abi2_test|mod_view_abi2_test|mod_view_transitions_abi2_test)$'
+              # F32 acceptance (SEG-152-T003/T004 and F33 T005/T006, ADR 0320): the exact-frame callback and the bitmap/refusal compositor parity through the real producer and the SDL3 viewer, with the ADR 0315 viewport suites they must leave unchanged. All four MUST exist, run and not skip themselves on Linux.
+              f32='^(mod_exact_frame_abi2_test|mod_bitmap_abi2_test|mod_view_abi2_test|mod_view_transitions_abi2_test)$'
               count=$(ctest --test-dir build/sdl3 -N -R "$f32" | sed -n 's/^Total Tests: //p')
-              [ "$count" = "3" ] || { echo "expected 3 F32 acceptance tests, found $count"; exit 1; }
+              [ "$count" = "4" ] || { echo "expected 4 F32 acceptance tests, found $count"; exit 1; }
               ctest --test-dir build/sdl3 -j 2 -R "$f32" --no-tests=error --output-on-failure --timeout 1800 -V | tee f32.log
-              grep -q 'tests passed, 0 tests failed out of 3' f32.log || { echo "the three F32 tests did not all pass"; exit 1; }
+              grep -q 'tests passed, 0 tests failed out of 4' f32.log || { echo "the four F32 tests did not all pass"; exit 1; }
               if grep -Eiq '(mod_[a-z0-9_]+_test): skipped' f32.log; then echo "an F32 test skipped itself"; exit 1; fi ;;
           esac
 

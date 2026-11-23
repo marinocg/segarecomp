@@ -15,6 +15,7 @@ typedef struct ScriptOp {
 
 typedef struct OverlayScript {
   unsigned count, calls, ran;
+  uint64_t last_frame;
   uint32_t has_render_api, has_frame;
   int statuses[96];
   ScriptOp ops[96];
@@ -30,6 +31,7 @@ static void script_phase(void *state, const SegaModHost *host) {
   (void)state;
   if (host->phase != SEGA_MOD_PHASE_RENDER) return;
   ++g_script.calls;
+  g_script.last_frame = host->frame;
   r = f != NULL ? f->render : NULL;
   g_script.has_render_api = r != NULL;
   g_script.has_frame = f != NULL && f->frame != NULL;

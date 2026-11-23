@@ -293,6 +293,18 @@ target_compile_features(genesis_mod_overlay_script_tests PRIVATE cxx_std_20)
 add_test(NAME genesis_mod_bitmap_tests COMMAND genesis_mod_overlay_script_tests bitmap)
 add_test(NAME genesis_mod_refusal_tests COMMAND genesis_mod_overlay_script_tests refusal)
 set_tests_properties(genesis_mod_bitmap_tests genesis_mod_refusal_tests PROPERTIES TIMEOUT 300)
+# The same scripted provider on the ORDINARY after-snapshot route (overlay.rgba + scenery.words: refusal epoch) and with ONLY scenery.words (the render table without an overlay grant: capability isolation).
+foreach(_variant ordinary scenery)
+  add_executable(genesis_mod_overlay_script_${_variant}_tests genesis_mod_overlay_script_test.cpp fixtures/mod_sdk/overlay_script_${_variant}_artifact.c
+    ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/mod_capture.cpp $<TARGET_OBJECTS:genesis_mod_overlay_script>
+    ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c)
+  target_include_directories(genesis_mod_overlay_script_${_variant}_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+  target_link_libraries(genesis_mod_overlay_script_${_variant}_tests PRIVATE segarecomp::luau_host segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+  target_compile_features(genesis_mod_overlay_script_${_variant}_tests PRIVATE cxx_std_20)
+endforeach()
+add_test(NAME genesis_mod_refusal_epoch_tests COMMAND genesis_mod_overlay_script_ordinary_tests ordinary)
+add_test(NAME genesis_mod_capability_isolation_tests COMMAND genesis_mod_overlay_script_scenery_tests capability)
+set_tests_properties(genesis_mod_refusal_epoch_tests genesis_mod_capability_isolation_tests PROPERTIES TIMEOUT 300)
 # SEG-138-T006 (ADR 0299): mod-owned state (MODSTATE) in the Genesis save-state / rewind container, with the shared snapshot codec and the rewind engine compiled in (as programs do).
 add_executable(genesis_mod_state_tests genesis_mod_state_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_persistence.c
@@ -1638,6 +1650,12 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_exact_frame_abi2_test APPEND PROPERTY LABELS full)
   set_property(TEST mod_exact_frame_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_exact_frame_abi2_test PROPERTY TIMEOUT 1500)
+  # SEG-152-T005/T006: the final presented image of ABI 2 bitmaps and a refused HUD through the real compositor (F33 acceptance; ABI 1 twin and independent golden).
+  add_test(NAME mod_bitmap_abi2_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_bitmap_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_bitmap_abi2_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_bitmap_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_bitmap_abi2_test PROPERTY TIMEOUT 1500)
   add_test(NAME mod_view_transitions_abi2_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_view_transitions_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
   set_property(TEST mod_view_transitions_abi2_test APPEND PROPERTY LABELS full)
@@ -2548,7 +2566,7 @@ add_test(NAME luau_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOUR
 add_test(NAME luau_host_golden_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/luau_host_golden_test.py)
 add_test(NAME mod_luau_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_luau_api_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_api_test.py $<TARGET_FILE:segarecomp>)
-foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_frame_cost genesis_mod_exact_adapter_tests genesis_mod_bitmap_tests genesis_mod_refusal_tests genesis_mod_state_tests genesis_mod_replay_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
+foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_frame_cost genesis_mod_exact_adapter_tests genesis_mod_bitmap_tests genesis_mod_refusal_tests genesis_mod_refusal_epoch_tests genesis_mod_capability_isolation_tests genesis_mod_state_tests genesis_mod_replay_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
   set_property(TEST ${_luau_test} APPEND PROPERTY LABELS full fast)
   set_property(TEST ${_luau_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endforeach()

@@ -28,6 +28,7 @@ typedef struct ScriptOp {
 } ScriptOp;
 typedef struct OverlayScript {
   unsigned count, calls, ran;
+  uint64_t last_frame;
   uint32_t has_render_api, has_frame;
   int statuses[96];
   ScriptOp ops[96];
@@ -124,7 +125,7 @@ struct Harness {
     ext->extension_shown = 1U;
     capture->extension = ext.get();
     rt->live_raster = capture.get();
-    g_script.calls = 0U;
+    g_script.calls = 0U; g_script.count = 0U;   // nothing of an earlier scenario runs during the warm-up frames
     check(segarecomp_capture_mod_begin(rt.get()) == 0, "the script provider attaches through the viewer adapter");
     table = segarecomp_patch_provider(&state);
     run_frames(*rt, 3U);
@@ -581,12 +582,101 @@ void refusal_tests() {
     check(h.table->scenery_word(h.state, 1U, 3, -4, 0, 0, &w) == GENESIS_COMPAT_WORD_GENERIC, "a plane without a window is left to the generic extension (ADR 0314), not a failure");
   }
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// The ordinary (after-snapshot) render route: the callback of guest frame N is served for the frame the producer makes when the runtime counts N + 2. A refusal belongs to that frame exactly like the windows.
+void ordinary_tests() {
+  Harness h;
+  const std::vector<uint8_t> img = pattern(8, 8, 1);
+  {
+    Script s; s.rect(0, 0, 4, 4, 0xFF0000FFU); s.window(0, -1, 0, 0x2011U); s.decline(GENESIS_COMPAT_HUD, GENESIS_COMPAT_MISMATCH);
+    run_frames(*h.rt, 8U);
+    check(g_script.calls > 0U && g_script.has_frame == 0U && g_script.has_render_api == 1U && g_script.statuses[2] == 0, "the ordinary render callback ran after the snapshots (no exact-frame view)");
+    h.rt->virtual_frame_count = g_script.last_frame + 2U;
+    const Transport own = h.produce(0x11U);
+    check(own.dec.accepted == GENESIS_COMPAT_SCENERY && !own.drawn && own.word_status == 1, "the produced frame the callback describes (N + 2) gets its refusal: HUD withdrawn, scenery served, mod enabled");
+    h.rt->virtual_frame_count = g_script.last_frame + 7U;   // a skipped callback: the frame sequence jumped
+    const Transport skipped = h.produce(0x12U);
+    check(skipped.dec.reason == GENESIS_COMPAT_OK && (skipped.dec.accepted & GENESIS_COMPAT_SCENERY) == 0U && (skipped.dec.accepted & GENESIS_COMPAT_HUD) != 0U, "after a skipped callback the earlier refusal is not observed (the declared HUD is not withdrawn from another frame)");
+    h.rt->virtual_frame_count = g_script.last_frame;   // rewind / load: the counter goes back
+    const Transport rewound = h.produce(0x13U);
+    check((rewound.dec.accepted & GENESIS_COMPAT_HUD) != 0U && (rewound.dec.accepted & GENESIS_COMPAT_SCENERY) == 0U, "after a rewind or load the earlier refusal is not observed either");
+    h.rt->virtual_frame_count = g_script.last_frame + 2U;
+    const Transport again = h.produce(0x14U);
+    check(again.dec.accepted == GENESIS_COMPAT_SCENERY, "the same epoch is honoured again (presentation re-enabled / aspect change re-asks with the same callback)");
+    const Transport side = [&] { h.frame->make(0x15U, 40U, GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY); Transport t; h.table->prepare(h.state, &h.frame->cf, &t.dec); return t; }();
+    check(side.dec.accepted == GENESIS_COMPAT_SCENERY, "an aspect change (another planned side) keeps the refusal of the callback's own frame");
+  }
+  {
+    Script s2; s2.rect(0, 0, 4, 4, 0xFF0000FFU);   // the next callback has no refusal: nothing carries over
+    run_frames(*h.rt, h.rt->virtual_frame_count + 4U);
+    h.rt->virtual_frame_count = g_script.last_frame + 2U;
+    const Transport t = h.produce(0x16U);
+    check((t.dec.accepted & GENESIS_COMPAT_HUD) != 0U && t.drawn && t.dec.reason == GENESIS_COMPAT_OK, "a later callback without a refusal replaces it");
+  }
+  {
+    Harness h2;   // overlay.rgba granted: the bitmap is accepted on the ordinary route too
+    Script s3; s3.bitmap(0, 0, 8, 8, img.data());
+    run_frames(*h2.rt, 6U);
+    check(g_script.statuses[0] == 0, "with overlay.rgba granted the bitmap call succeeds");
+    h2.rt->virtual_frame_count = g_script.last_frame + 2U;
+    Canvas c(128, 256); c.replace(0, 0, 8, 8, img);
+    check(fixed_equals(h2.produce(0x21U), c), "and its bytes reach the transport");
+  }
+}
+
+// A provider granted ONLY scenery.words receives the render table (it needs scenery_window) but no overlay output call.
+void capability_tests() {
+  const std::vector<uint8_t> img = pattern(8, 8, 1);
+  {
+    Harness h;
+    Script s; s.window(0, -1, 0, 0x2011U);
+    run_frames(*h.rt, 8U);
+    h.rt->virtual_frame_count = g_script.last_frame + 2U;
+    const Transport t = h.produce(0x11U, GENESIS_COMPAT_SCENERY);
+    check(g_script.has_render_api == 1U && g_script.statuses[0] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY && t.word_status == 1 && t.word == 0x2011U, "a scenery-only provider gets the render table and its scenery window is served unchanged");
+    Harness h1;
+    Script s1; s1.window(0, -1, 0, 0x2011U); s1.scene("only-scenery"); s1.decline(GENESIS_COMPAT_HUD, GENESIS_COMPAT_MISMATCH);
+    run_frames(*h1.rt, 8U);
+    check(g_script.ran == 3U && g_script.statuses[1] == 0 && g_script.statuses[2] == 0, "scene and decline need no overlay grant");
+  }
+  {
+    Harness h;
+    Script s; s.window(0, -1, 0, 0x2011U); s.bitmap(0, 0, 8, 8, img.data());
+    run_frames(*h.rt, 8U);
+    check(g_script.statuses[0] == 0 && g_script.statuses[1] == SEGA_MOD_E_CAPABILITY, "a bitmap without overlay.rgba is SEGA_MOD_E_CAPABILITY");
+    h.rt->virtual_frame_count = g_script.last_frame + 2U;
+    const Transport t = h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD);
+    check(faulted(t) && !t.drawn && t.word_status == -1, "the callback faulted: its scenery window and every output are discarded and nothing is presented");
+  }
+  struct Gated { const char *name; void (*build)(Script &, const uint8_t *); };
+  const Gated gated[] = {
+      {"overlay_rect", [](Script &s, const uint8_t *) { s.rect(0, 0, 2, 2, 0xFF0000FFU); }},
+      {"overlay_text", [](Script &s, const uint8_t *) { s.text(0, 0, "x", 0xFF0000FFU); }},
+      {"overlay_layer", [](Script &s, const uint8_t *) { s.layer(1, 0, 0, 0, 0, 8, 8, 0); }},
+      {"overlay_target", [](Script &s, const uint8_t *) { s.target(0); }},
+      {"overlay_bitmap", [](Script &s, const uint8_t *p) { s.bitmap(0, 0, 8, 8, p); }},
+      {"overlay_layer_bitmap", [](Script &s, const uint8_t *) { s.layer_bitmap(1, 0, 0, 0, 0, 8, 8, 0); }},
+      {"overlay_layer_clip", [](Script &s, const uint8_t *) { s.clip(1, 0, 0, 1, 1); }},
+      {"overlay_fallback", [](Script &s, const uint8_t *) { s.fallback(1, 1); }},
+      {"virtual_sprites", [](Script &s, const uint8_t *) { s.sprites(); }}};
+  for (const Gated &g : gated) {
+    Harness h;
+    Script s; g.build(s, img.data());
+    run_frames(*h.rt, 8U);
+    check(g_script.statuses[0] == SEGA_MOD_E_CAPABILITY, std::string(g.name) + " without overlay.rgba is SEGA_MOD_E_CAPABILITY (a fault with cause capability)");
+    h.rt->virtual_frame_count = g_script.last_frame + 2U;
+    check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), std::string(g.name) + ": the mod is disabled and presents nothing");
+  }
+}
 }  // namespace
 
 int main(int argc, char **argv) {
   const std::string mode = argc > 1 ? argv[1] : "";
   if (mode == "bitmap") bitmap_tests();
   else if (mode == "refusal") refusal_tests();
+  else if (mode == "ordinary") ordinary_tests();
+  else if (mode == "capability") capability_tests();
   else { std::puts("usage: genesis_mod_overlay_script_tests bitmap|refusal"); return 2; }
   if (failures != 0) { std::printf("genesis_mod_overlay_script_tests %s: %d FAILED\n", mode.c_str(), failures); return 1; }
   std::printf("genesis_mod_overlay_script_tests %s: OK\n", mode.c_str());
