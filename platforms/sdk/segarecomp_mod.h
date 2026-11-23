@@ -14,7 +14,7 @@
 #include <stdint.h>
 
 #define SEGA_MOD_ABI_MAJOR 2U
-#define SEGA_MOD_ABI_MINOR 1U /* a host with a larger minor accepts a provider requiring a smaller or equal minor. Minor 1 (ADR 0320, SEG-152-T003): the exact-frame view and VDP helpers of the Genesis table */
+#define SEGA_MOD_ABI_MINOR 2U /* a host with a larger minor accepts a provider requiring a smaller or equal minor. Minor 1 (ADR 0320, SEG-152-T003): the exact-frame view and VDP helpers of the Genesis table; minor 2 (SEG-152-T007): SegaGenesisRenderApi::scenery_generic_rows */
 
 #if defined(SEGA_MOD_TARGET_ABI_MAJOR) && (SEGA_MOD_TARGET_ABI_MAJOR != SEGA_MOD_ABI_MAJOR)
 #error "E_ABI_HEADER_MISMATCH: the manifest abi.native differs from SEGA_MOD_ABI_MAJOR of this header"

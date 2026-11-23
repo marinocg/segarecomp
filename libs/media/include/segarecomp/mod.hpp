@@ -41,7 +41,7 @@ inline constexpr std::size_t kMaxHooks = 64;      // manifest `hooks` entries (A
 inline constexpr std::uint32_t kMaxAudioSeconds = 600;
 inline constexpr std::uint64_t kLuauMemoryPolicyMax = 4194304, kLuauBudgetPolicyMax = 100000;
 inline constexpr unsigned kNativeAbiMajor = 2;
-inline constexpr unsigned kNativeAbiMinor = 1;   // ADR 0320 decision 10: equals SEGA_MOD_ABI_MINOR; a manifest `abi.minor` above it is E_ABI_MINOR_TOO_NEW
+inline constexpr unsigned kNativeAbiMinor = 2;   // ADR 0320 decision 10: equals SEGA_MOD_ABI_MINOR; a manifest `abi.minor` above it is E_ABI_MINOR_TOO_NEW
 
 // ---- platform adapters (ADR 0280): a table of capability sets, never a class hierarchy ----
 enum class Support { unsupported, experimental, supported_with_limitations, supported_and_tested };

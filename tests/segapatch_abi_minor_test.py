@@ -44,7 +44,10 @@ v1 = base_manifest("genesis", [nat], head=head, abi={"native": 2, "minor": 1})
 doc = expect_ok("abi.minor 1", v1, [nat])
 cli.check(doc["package_identity"] == sha(canon(v1)) and doc["package_identity"] != old["package_identity"], "the declared minor is part of the package identity")
 expect_class("abi.minor 0 (omitted for minor 0)", base_manifest("genesis", [nat], head=head, abi={"native": 2, "minor": 0}), [nat], "E_FIELD_VALUE")
-expect_class("abi.minor newer than the release (E_ABI_MINOR_TOO_NEW)", base_manifest("genesis", [nat], head=head, abi={"native": 2, "minor": 2}), [nat], "E_ABI_MINOR_TOO_NEW")
+v2 = base_manifest("genesis", [nat], head=head, abi={"native": 2, "minor": 2})
+doc2 = expect_ok("abi.minor 2 (SEG-152-T007: scenery_generic_rows)", v2, [nat])
+cli.check(doc2["package_identity"] == sha(canon(v2)) and doc2["package_identity"] not in (doc["package_identity"], old["package_identity"]), "the minor 2 declaration is part of the package identity")
+expect_class("abi.minor newer than the release (E_ABI_MINOR_TOO_NEW)", base_manifest("genesis", [nat], head=head, abi={"native": 2, "minor": 3}), [nat], "E_ABI_MINOR_TOO_NEW")
 expect_class("a reader that does not know a key refuses it (the strict set that older products apply to `minor`)", base_manifest("genesis", [nat], head=head, abi={"native": 2, "minor_next": 1}), [nat], "E_FIELD_UNKNOWN")
 expect_class("abi.minor must be an integer", base_manifest("genesis", [nat], head=head, abi={"native": 2, "minor": "1"}), [nat], "E_FIELD_VALUE")
 
@@ -83,7 +86,23 @@ size_src = '#include <segarecomp_mod_genesis.h>\nunsigned size(void) { return (u
 cli.check(compile_source(size_src, 0)[0] == 0 and compile_source(size_src, 1)[0] == 0, "SegaGenesisRenderApi compiles at both minors (the minor-0 placeholder keeps the layout)")
 rc, err = compile_source(src_plain, 0)
 cli.check(rc == 0, "a source targeting minor 0 still compiles against the extended header and the table size is unchanged for it")
-rc, err = compile_source(src_plain, 2)
+# SEG-152-T007: SegaGenesisRenderApi::scenery_generic_rows follows the minor-2 rule (minor 0 and 1 do not see it; the table keeps its layout for them)
+use2 = '#include <segarecomp_mod_genesis.h>\nconst void *use(const SegaGenesisRenderApi *r) { return (const void *)r->scenery_generic_rows; }\n'
+rc, err = compile_source(use2, 2)
+cli.check(rc == 0, f"a source targeting minor 2 sees SegaGenesisRenderApi::scenery_generic_rows ({err[:200]})")
+for minor in (0, 1):
+    rc, err = compile_source(use2, minor)
+    cli.check(rc != 0 and "scenery_generic_rows" in err, f"a source targeting minor {minor} does not see SegaGenesisRenderApi::scenery_generic_rows")
+rc, err = compile_source(use2, None)
+cli.check(rc == 0, "a hand-built source that declares no target minor sees scenery_generic_rows")
+sizes = {}
+for m in (0, 1, 2):
+    d = Path(tempfile.mkdtemp(dir=tmp))
+    c = write(d / "s.c", '#include <segarecomp_mod_genesis.h>\n#include <stdio.h>\nint main(void) { printf("%u\\n", (unsigned)sizeof(SegaGenesisRenderApi)); return 0; }\n')
+    p = subprocess.run([cc, "-std=c11", "-o", str(d / "s"), f"-DSEGA_MOD_TARGET_ABI_MINOR={m}U", "-DSEGA_MOD_TARGET_PLATFORM=1", "-DSEGA_MOD_TARGET_ABI_MAJOR=2U", *[f"-I{i}" for i in sdk], str(c)], capture_output=True, text=True, timeout=120)
+    sizes[m] = subprocess.run([str(d / "s")], capture_output=True, text=True, timeout=60).stdout.strip() if p.returncode == 0 else "ERR " + p.stderr[:200]
+cli.check(len(set(sizes.values())) == 1 and "ERR" not in sizes[0], f"the render table has one size at every minor (the placeholders keep the layout, append-only): {sizes}")
+rc, err = compile_source(src_plain, 3)
 cli.check(rc != 0 and "E_ABI_MINOR_TOO_NEW" in err, "a source targeting a minor above the header's fails with E_ABI_MINOR_TOO_NEW")
 rc, err = compile_source(src_use, None)
 cli.check(rc == 0, "a hand-built source that declares no target minor sees the whole table (the host build always declares it)")
@@ -127,7 +146,23 @@ rc, doc, _ = build_project("undeclared", "")
 cli.check(rc == 1 and doc and doc.get("class") == "E_ABI_MINOR_UNDECLARED" and "abi.minor" in (doc.get("error") or ""), f"a source using frame/vdp without abi.minor is E_ABI_MINOR_UNDECLARED naming abi.minor: {doc and (doc.get('class'), (doc.get('error') or '')[:160])}")
 rc, doc, _ = build_project("declared", "minor = 1")
 cli.check(rc == 0 and doc and doc.get("ok") is True, f"the same source with minor = 1 builds ({doc and (doc.get('class'), (doc.get('error') or '')[:200])})")
-rc, doc, _ = build_project("too-new", "minor = 2")
-cli.check(rc == 1 and doc and doc.get("class") == "E_ABI_MINOR_TOO_NEW", f"minor = 2 is E_ABI_MINOR_TOO_NEW from the project reader: {doc and doc.get('class')}")
+rc, doc, _ = build_project("too-new", "minor = 3")
+cli.check(rc == 1 and doc and doc.get("class") == "E_ABI_MINOR_TOO_NEW", f"minor = 3 is E_ABI_MINOR_TOO_NEW from the project reader: {doc and doc.get('class')}")
+# SEG-152-T007: a source using scenery_generic_rows needs abi.minor 2: undeclared (none or 1) is the stable E_ABI_MINOR_UNDECLARED naming abi.minor; minor = 2 builds
+PROVIDER2 = b'#include <segarecomp_mod_genesis.h>\nstatic const SegaModProvider p = {sizeof(SegaModProvider), SEGA_MOD_ABI_MAJOR, 2U, SEGA_MOD_PLATFORM, "d", 1U, 0, 0, 0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0}};\nconst SegaModProvider *segarecomp_mod_provider(void **s) { const SegaGenesisFeatures *f = (const SegaGenesisFeatures *)0; if (s != 0 && f != 0 && f->render != 0 && f->render->scenery_generic_rows != 0) return 0; return &p; }\n'
+
+
+def build_rows(name, minor_line):
+    d = tmp / name
+    write(d / "mod.toml", HEAD.replace("{minor}", minor_line).replace('required = ["frame.vdp", "frame.work_ram"]', 'required = ["scenery.words", "overlay.rgba"]'))
+    write(d / "src/provider.c", PROVIDER2)
+    return cli.run("mod", "build", d, "--out", tmp / (name + ".segapatch"), "--cc", cc, "--sdk-dir", root / "platforms")
+
+
+for name, line in (("rows-none", ""), ("rows-minor1", "minor = 1")):
+    rc, doc, _ = build_rows(name, line)
+    cli.check(rc == 1 and doc and doc.get("class") == "E_ABI_MINOR_UNDECLARED" and "abi.minor" in (doc.get("error") or ""), f"scenery_generic_rows with {line or 'no abi.minor'} is E_ABI_MINOR_UNDECLARED naming abi.minor: {doc and (doc.get('class'), (doc.get('error') or '')[:160])}")
+rc, doc, _ = build_rows("rows-minor2", "minor = 2")
+cli.check(rc == 0 and doc and doc.get("ok") is True, f"the same source with minor = 2 builds ({doc and (doc.get('class'), (doc.get('error') or '')[:200])})")
 
 cli.done("segapatch_abi_minor_test")

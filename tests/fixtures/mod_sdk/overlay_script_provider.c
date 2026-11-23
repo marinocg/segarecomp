@@ -1,10 +1,10 @@
 /* SEG-152-T005/T006 (ADR 0320 decisions 6 and 7): a synthetic, project-authored exact-frame ABI 2 Genesis provider that replays a SCRIPT of render-API calls written by the host test (a bitmap, a layer, a clip, a
- * fallback, a decline, a rect, a text, a scene, a scenery window or a virtual-sprite set), so the test can drive the real viewer adapter with exactly the call sequence it wants to check. Strict C11. */
+ * fallback, a decline, a rect, a text, a scene, a scenery window, a per-row generic scenery mask or a virtual-sprite set), so the test can drive the real viewer adapter with exactly the call sequence it wants to check. Strict C11. */
 #include <segarecomp_mod_genesis.h>
 
 #include <string.h>
 
-enum { OP_RECT = 1, OP_TEXT, OP_BITMAP, OP_TARGET, OP_LAYER, OP_LAYER_BITMAP, OP_CLIP, OP_FALLBACK, OP_DECLINE, OP_SCENE, OP_WINDOW, OP_SPRITES, OP_LAYER_LEGACY_RAW };
+enum { OP_RECT = 1, OP_TEXT, OP_BITMAP, OP_TARGET, OP_LAYER, OP_LAYER_BITMAP, OP_CLIP, OP_FALLBACK, OP_DECLINE, OP_SCENE, OP_WINDOW, OP_SPRITES, OP_LAYER_LEGACY_RAW, OP_MASK };
 
 typedef struct ScriptOp {
   uint32_t kind;
@@ -56,6 +56,7 @@ static void script_phase(void *state, const SegaModHost *host) {
         st = r->scenery_window((uint32_t)o->a[0], o->a[1], o->a[2], 1U, 1U, &word);
         break;
       }
+      case OP_MASK: st = r->scenery_generic_rows((uint32_t)o->a[0], o->px, (uint32_t)o->a[1], (uint32_t)o->a[2]); break; /* SEG-152-T007: plane, rows, mask_bytes, mask pointer (may be NULL) */
       case OP_SPRITES:
         memset(&g_set, 0, sizeof g_set);
         g_set.count = 1U;

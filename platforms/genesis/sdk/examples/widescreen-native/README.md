@@ -2,7 +2,7 @@
 
 ONE schema 3 / native ABI 2 package (SEG-149-T001, ADR 0309) that shows, without any commercial input, every capability a real game mod of this kind needs:
 
-* **authored scenery** beside the picture (`scenery.words`, typed `scenery_window`: a per-frame name-table window of cells the original program never loaded);
+* **authored scenery** beside the picture (`scenery.words`, typed `scenery_window` (and, for lines where the original provider answered with the VDP's own plane, `scenery_generic_rows`, ABI minor 2): a per-frame name-table window of cells the original program never loaded);
 * an **actor** that crosses the right edge of the picture as a mod-authored **virtual sprite** (presentation only);
 * a small **HUD** panel;
 * a **gameplay change**: pressing C restores the fixture's power value to 5 (its maximum), only while it holds a verified in-game value (1..4), through one declared read-write work-RAM word;

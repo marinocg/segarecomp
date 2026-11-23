@@ -44,6 +44,7 @@ constexpr int W = 320, H = 224;
 constexpr unsigned kPlaneCols = 64, kPlaneRows = 32;   // the fixture VDP plane size (reg 16 = 1): 512 x 256 pixels
 
 // ---- fixture format ---------------------------------------------------------------------------------------------------------------
+struct JournalWrite { unsigned line, plane, cell_row; };   // SEG-152-T007: a mid-frame write of every name-table word of one plane cell row (the word is inverted) applied when `line` begins
 struct Spec {
   std::string id;
   int hs[2][H] = {};          // the VDP-applied horizontal scroll per plane and line, in [-512, 511]
@@ -53,6 +54,10 @@ struct Spec {
   uint8_t fallback[2][H] = {};   // 1: the ABI 1 provider answers this line with the VDP's own wrapped word
   uint8_t region[2][H] = {};     // the answer class of the world model on this line
   int clamp_w = 0;            // > 0: world columns clamp to [0, clamp_w) cells (level edges: the edge column repeats outward)
+  uint8_t generic2[2][H] = {};   // SEG-152-T007: the ABI 1 provider answers this line GENESIS_COMPAT_WORD_GENERIC (a plane deliberately left to the generic extension, ADR 0314: uncredited)
+  std::vector<JournalWrite> journal;   // SEG-152-T007: mid-frame name-table writes (the producer replays them; an ABI 1 provider reads the frame-start VRAM)
+  int window_from_row = -1;    // SEG-152-T007: >= 0 (a multiple of 8): the window plane covers the full width from that row down (a status band: window-plane edge / HUD rows)
+  bool no_journal = false;     // SEG-152-T007: the frame carries no VRAM journal (GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)
 };
 
 inline int wrap10(long v) { return static_cast<int>(((v + 512) & 1023) - 512); }
@@ -106,13 +111,20 @@ inline void build_scene(Scene &sc, const Spec &spec) {
   vsram[2] = static_cast<uint8_t>(spec.vs[1] >> 8); vsram[3] = static_cast<uint8_t>(spec.vs[1]);
   uint16_t regs[GENESIS_VDP_REGISTER_COUNT] = {};
   regs[1] = 0x04; regs[2] = 0x30; regs[3] = 0x34; regs[4] = 0x07; regs[5] = 0x7C; regs[7] = 2; regs[11] = 3; regs[12] = 0x81; regs[13] = 0x3F; regs[16] = 1;   // per-line hscroll, full-screen vscroll, 64 x 32
+  if (spec.window_from_row >= 0) regs[18] = static_cast<uint16_t>(0x80U | (spec.window_from_row / 8));
   for (auto &line : sc.raster->lines) {
     std::memcpy(line.registers, regs, sizeof(line.registers));
     std::memcpy(line.cram, cram, sizeof(line.cram));
     std::memcpy(line.vsram, vsram, sizeof(line.vsram));
   }
-  sc.raster->has_vram_journal = 1;
+  sc.raster->has_vram_journal = spec.no_journal ? 0 : 1;
   std::memcpy(sc.raster->vram_start, sc.vram.data(), GENESIS_VDP_VRAM_BYTES);
+  for (const JournalWrite &j : spec.journal)   // `sc.vram` stays the frame-start image (what an ABI 1 provider is handed); the journal evolves the producer's own copy
+    for (unsigned cx = 0; cx < kPlaneCols; ++cx)
+      for (unsigned b = 0; b < 2; ++b) {
+        const uint32_t a = (j.plane == 0U ? 0xC000U : 0xE000U) + ((j.cell_row % kPlaneRows) * kPlaneCols + cx) * 2U + b;
+        sc.raster->vram_writes[sc.raster->vram_write_count++] = GenesisRasterVramWrite{static_cast<uint16_t>(a), static_cast<uint8_t>(sc.vram[a] ^ (b == 0U ? 0x60U : 0x0DU)), static_cast<uint8_t>(j.line)};
+      }
 }
 
 // ---- what a line asks: plane cell keys ------------------------------------------------------------------------------------------------
@@ -135,7 +147,11 @@ struct Provider {
   const Scene *scene = nullptr;
   int declared_left = 0;
   segarecomp::scenery::Window windows[2][2];
+  segarecomp::scenery::RowMask mask[2];   // SEG-152-T007: the per-row generic mask (the production type and row test)
+  int mask_code = GENESIS_COMPAT_WORD_VDP_START;   // what the adapter answers for a marked row (3); a control run answers GENESIS_COMPAT_WORD_GENERIC instead
+  uint8_t private_words = 1U;   // the trusted attach (GenesisFrameExtension::compat_private_words)
   unsigned cells = 0;
+  const GenesisNativeCompat *table = nullptr;   // optional: another table (the gate cases name the table like the adapter's)
 };
 inline void provider_prepare(void *state, const GenesisCompatFrame *f, GenesisCompatDecision *out) {
   Provider *p = static_cast<Provider *>(state);
@@ -150,11 +166,11 @@ inline int provider_word(void *state, unsigned plane, unsigned row, int x, int h
   if (plane > 1U || row >= static_cast<unsigned>(H)) return 0;
   if (p->kind == Provider::Abi1) {   // the reference: the registered world, never constrained by a window
     const long pc = floor8(static_cast<long>(x) - hscroll), pcy = floor8(static_cast<long>(row) + vscroll);
+    if (p->spec->generic2[plane][row] != 0U) return GENESIS_COMPAT_WORD_GENERIC;
     *word = abi1_answer(*p->spec, *p->scene, plane, static_cast<int>(row), pc, pcy);
     return 1;
   }
-  if (!p->windows[plane][0].present && !p->windows[plane][1].present) return GENESIS_COMPAT_WORD_GENERIC;   // ADR 0314
-  return segarecomp::scenery::lookup(p->windows[plane], static_cast<int>(row), x, hscroll, vscroll, word);
+  return segarecomp::scenery::answer(p->mask[plane], p->windows[plane], static_cast<int>(row), x, hscroll, vscroll, word, p->mask_code, GENESIS_COMPAT_WORD_GENERIC);   // the adapter's own answer (mask, ADR 0314 generic plane, window)
 }
 inline int provider_hud(void *, GenesisCompatOverlay *) { return 0; }
 inline GenesisNativeCompat &twin_table() {
@@ -164,6 +180,15 @@ inline GenesisNativeCompat &twin_table() {
 
 // ---- the ABI 2 window builder (the provider model) -------------------------------------------------------------------------------------
 enum class Timing { Exact, Predicted };
+// SEG-152-T007: how the ABI 2 twin is built. `use_mask`: the builder marks every fallback row of a plane in the per-row mask and builds the windows from the other rows only (the mask-using builder);
+// `mask_code`/`private_words` select the host answer for a marked row (the code-3 gate cases) and the trusted-attach flag.
+struct Options {
+  bool use_mask = false;
+  int mask_code = GENESIS_COMPAT_WORD_VDP_START;
+  uint8_t private_words = 1U;
+  bool mask_plane[2] = {true, true};   // which planes submit a mask
+  bool clear_mask = false;             // negative control: the builder computed the mask-aware windows but the submission never reaches the host
+};
 struct Built {
   segarecomp::scenery::Window w[2][2];
   int needed[2] = {0, 0};        // windows the plane needs under the production limits (greedy, left and right separately)
@@ -214,7 +239,8 @@ inline Rect hull(const std::vector<CellSpan> &spans, size_t from, size_t to, int
 inline bool rect_fits(const Rect &r) { return !r.any || fits(r.c1 - r.c0 + 1, r.cy1 - r.cy0 + 1); }
 
 // Builds the windows of one plane for a declared placement. `built_left` is the placement the builder computes for (a stale or wrong margin is a PROVIDER_ERROR of the test, never a limit).
-inline void build_plane(const Spec &s, const Scene &sc, unsigned plane, int side, int built_left, Timing timing, Built &out) {
+inline bool row_skipped(const Spec &s, const Options &opt, unsigned plane, int r) { return s.generic2[plane][r] != 0U || (opt.use_mask && opt.mask_plane[plane] && s.fallback[plane][r] != 0U); }
+inline void build_plane(const Spec &s, const Scene &sc, unsigned plane, int side, int built_left, Timing timing, Built &out, const Options &opt = Options{}) {
   const int left_px = built_left, right_px = 2 * side - built_left;
   long pad = 0;
   if (timing == Timing::Predicted) {
@@ -227,6 +253,7 @@ inline void build_plane(const Spec &s, const Scene &sc, unsigned plane, int side
   std::map<long, std::pair<Span, Span>> by_cy;
   std::map<long, int> first_row;   // the first line of each plane cell row: the provider's answer for a padded cell no line asked yet (a pure function of the world, so the padding is exact)
   for (int r = 0; r < H; ++r) {
+    if (row_skipped(s, opt, plane, r)) continue;   // answered by the mask (or left to the generic extension): no authored word is needed for it
     first_row.emplace(floor8(static_cast<long>(r) + s.vs[plane]), r);
     const int hs = timing == Timing::Predicted ? wrap10(s.hs[plane][r] - 2L * s.speed[plane][r]) : s.hs[plane][r];
     const long cy = floor8(static_cast<long>(r) + s.vs[plane]);
@@ -310,6 +337,11 @@ inline uint64_t fnv1a64(const uint8_t *d, size_t n, uint64_t h = 146959810393466
   return h;
 }
 struct Produced { int rc = -1; GenesisExtensionResult res{}; std::vector<uint8_t> surface; size_t pitch = 0; };
+// The coverage of two produced frames: accepted components, reason, the strict `authored` verdict and the per-row credit (all must be equal to ABI 1: no tolerance).
+inline bool coverage_equal(const Produced &a, const Produced &b) {
+  return a.res.compat_accepted == b.res.compat_accepted && a.res.compat_reason == b.res.compat_reason && a.res.authored == b.res.authored && a.res.authored_row_count == b.res.authored_row_count &&
+         std::memcmp(a.res.authored_rows, b.res.authored_rows, sizeof a.res.authored_rows) == 0;
+}
 inline uint64_t row_digest(const Produced &p, int row) { return fnv1a64(&p.surface[static_cast<size_t>(row) * p.pitch], p.pitch); }
 inline uint64_t surface_digest(const Produced &p) { uint64_t h = 14695981039346656037ULL; for (int r = 0; r < H; ++r) h = fnv1a64(&p.surface[static_cast<size_t>(r) * p.pitch], p.pitch, h); return h; }
 
@@ -321,8 +353,8 @@ inline Produced produce(const Scene &sc, Provider &prov, unsigned side) {
   if (genesis_vdp_produce_frame_raster(sc.vram.data(), sc.raster.get(), native.get()) != 0) return o;
   GenesisFrameExtension ext{};
   ext.plan = plan_fn; ext.plan_ctx = &pc; ext.producer = genesis_vdp_produce_extension; ext.pixels = surface.data(); ext.capacity = surface.size(); ext.request = 2;
-  ext.compat = &twin_table(); ext.compat_state = &prov; ext.compat_components = GENESIS_COMPAT_SCENERY; ext.compat_caps = GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_FRAME_WORK_RAM;
-  ext.compat_ram = ram.data(); ext.compat_ram_valid = 1; ext.overlay_rgba = overlay.data(); ext.layer_rgba = nullptr;
+  ext.compat = prov.table != nullptr ? prov.table : &twin_table(); ext.compat_state = &prov; ext.compat_components = GENESIS_COMPAT_SCENERY; ext.compat_caps = GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_FRAME_WORK_RAM;
+  ext.compat_private_words = prov.private_words; ext.compat_ram = ram.data(); ext.compat_ram_valid = 1; ext.overlay_rgba = overlay.data(); ext.layer_rgba = nullptr;
   std::fill(surface.begin(), surface.end(), static_cast<uint8_t>(0xAA));
   o.rc = genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &o.res);
   if (o.rc == 0) { o.pitch = o.res.pitch; o.surface.assign(surface.begin(), surface.begin() + static_cast<size_t>(o.res.pitch) * o.res.native_h); }
@@ -340,6 +372,9 @@ struct Verdict {
   unsigned rows_differ = 0, rows_window = 0, rows_fallback = 0, rows_condition = 0, rows_unexplained = 0;
   unsigned windows[2] = {0, 0}, words = 0, needed[2] = {0, 0};
   unsigned uncovered = 0;   // requested (plane, line, plane cell) triples outside every submitted window, counted independently of the pixels
+  bool coverage_equal = false;   // SEG-152-T007: compat_accepted/reason, authored, authored_rows and authored_row_count of the twin equal the ABI 1 reference
+  unsigned authored_rows1 = 0, authored_rows2 = 0;   // authored_row_count of the reference and of the twin
+  uint8_t authored1 = 0, authored2 = 0, accepted1 = 0, accepted2 = 0, reason1 = 0, reason2 = 0;
   unsigned abi1_calls = 0, abi2_calls = 0;   // scenery_word calls of the producer: the ABI 1 provider answers each in its own code, the ABI 2 host answers them from <= `words` window words
   bool feasible = true;
   uint64_t digest1 = 0, digest2 = 0;
@@ -347,11 +382,12 @@ struct Verdict {
 
 // The truth of every asked plane cell, computed independently of the builder from the scene alone: how many distinct answers it has over all lines that ask it and whether one comes from a fallback line.
 struct CellTruth { uint16_t first = 0; bool conflict = false, any_fallback = false; };
-inline std::map<std::tuple<unsigned, long, long>, CellTruth> asked_cells(const Spec &s, const Scene &sc, int side, int left_px) {
+inline std::map<std::tuple<unsigned, long, long>, CellTruth> asked_cells(const Spec &s, const Scene &sc, int side, int left_px, const Options &opt = Options{}) {
   std::map<std::tuple<unsigned, long, long>, CellTruth> truth;
   const int right_px = 2 * side - left_px;
   for (unsigned plane = 0; plane < 2; ++plane)
     for (int r = 0; r < H; ++r) {
+      if (row_skipped(s, opt, plane, r)) continue;
       const long cy = floor8(static_cast<long>(r) + s.vs[plane]);
       auto visit = [&](Span sp) {
         for (long c = sp.c0; c <= sp.c1; ++c) {
@@ -368,14 +404,23 @@ inline std::map<std::tuple<unsigned, long, long>, CellTruth> asked_cells(const S
   return truth;
 }
 
-inline Verdict run_case(const Spec &s, int side, int left_px, Timing timing, int built_left = -1) {
+inline Verdict run_case(const Spec &s, int side, int left_px, Timing timing, int built_left = -1, const Options &opt = Options{}) {
   Scene sc;
   build_scene(sc, s);
   Provider ref, twin;
   ref.kind = Provider::Abi1; ref.spec = &s; ref.scene = &sc; ref.declared_left = left_px;
   twin.kind = Provider::Abi2; twin.spec = &s; twin.scene = &sc; twin.declared_left = left_px;
+  twin.mask_code = opt.mask_code; twin.private_words = opt.private_words;
   Built built;
-  for (unsigned plane = 0; plane < 2; ++plane) build_plane(s, sc, plane, side, built_left < 0 ? left_px : built_left, timing, built);
+  for (unsigned plane = 0; plane < 2; ++plane) build_plane(s, sc, plane, side, built_left < 0 ? left_px : built_left, timing, built, opt);
+  if (opt.use_mask)   // the mask-using builder submits, per plane, the rows its model answers with the VDP's own word (bit r & 7 of byte r >> 3, produced screen rows)
+    for (unsigned plane = 0; plane < 2; ++plane) {
+      if (!opt.mask_plane[plane]) continue;
+      uint8_t bytes[(H + 7) / 8] = {};
+      for (int r = 0; r < H; ++r) if (s.fallback[plane][r] != 0U) bytes[r >> 3] = static_cast<uint8_t>(bytes[r >> 3] | (1U << (r & 7)));
+      if (!segarecomp::scenery::mask_in_range(plane, bytes, H, (H + 7) / 8)) { std::printf("HARNESS: the builder's own mask is out of range\n"); std::abort(); }
+      if (!opt.clear_mask) segarecomp::scenery::mask_store(twin.mask[plane], bytes, (H + 7) / 8);
+    }
   for (unsigned plane = 0; plane < 2; ++plane) for (unsigned n = 0; n < 2; ++n) twin.windows[plane][n] = built.w[plane][n];
   const Produced a = produce(sc, ref, static_cast<unsigned>(side)), b = produce(sc, twin, static_cast<unsigned>(side));
   Verdict v;
@@ -384,8 +429,12 @@ inline Verdict run_case(const Spec &s, int side, int left_px, Timing timing, int
   v.words = built.total_words; v.abi1_calls = ref.cells; v.abi2_calls = twin.cells;
   if (a.rc != 0 || b.rc != 0 || a.pitch != b.pitch || a.surface.size() != b.surface.size()) { v.scenario = "HARNESS_ERROR"; return v; }
   v.digest1 = surface_digest(a); v.digest2 = surface_digest(b);
+  v.coverage_equal = coverage_equal(a, b);
+  v.authored_rows1 = a.res.authored_row_count; v.authored_rows2 = b.res.authored_row_count; v.authored1 = a.res.authored; v.authored2 = b.res.authored;
+  v.accepted1 = a.res.compat_accepted; v.accepted2 = b.res.compat_accepted; v.reason1 = a.res.compat_reason; v.reason2 = b.res.compat_reason;
   for (unsigned plane = 0; plane < 2; ++plane)
     for (int r = 0; r < H; ++r) {
+      if (row_skipped(s, opt, plane, r)) continue;
       const long cy = floor8(static_cast<long>(r) + s.vs[plane]);
       for (int sidef = 0; sidef < 2; ++sidef) {
         const int px = sidef == 0 ? left_px : 2 * side - left_px;
@@ -403,9 +452,10 @@ inline Verdict run_case(const Spec &s, int side, int left_px, Timing timing, int
   for (int r = 0; r < H; ++r) {
     if (row_digest(a, r) == row_digest(b, r) && std::memcmp(&a.surface[static_cast<size_t>(r) * a.pitch], &b.surface[static_cast<size_t>(r) * b.pitch], a.pitch) == 0) continue;
     ++v.rows_differ;
-    if (!truth_built) { truth = asked_cells(s, sc, side, left_px); truth_built = true; }   // only a difference needs its cause
+    if (!truth_built) { truth = asked_cells(s, sc, side, left_px, opt); truth_built = true; }   // only a difference needs its cause
     bool window = false, fallback = false, condition = false;
     for (unsigned plane = 0; plane < 2; ++plane) {
+      if (row_skipped(s, opt, plane, r)) continue;
       const long cy = floor8(static_cast<long>(r) + s.vs[plane]);
       for (int sidef = 0; sidef < 2; ++sidef) {
         const int px = sidef == 0 ? left_px : 2 * side - left_px;
