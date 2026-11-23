@@ -177,7 +177,7 @@ def main():
             trace = {t["f"]: t for t in lines.get("VIEWER_TEST_TRACE", [])}
             cov = json.loads(report.read_text()) if report.is_file() else None
             scene = cov["scenes"][0]["components"] if cov and cov.get("scenes") else None
-            return {"bmp": read_bmp(frame), "summary": (lines.get("MOD_SUMMARY") or [{}])[0], "trace": trace, "coverage": scene, "lines": lines, "ram": ram.read_bytes() if ram.is_file() else b""}
+            return {"bmp": read_bmp(frame), "summary": (lines.get("MOD_SUMMARY") or [{}])[0], "trace": trace, "events": [tuple(t[k] for k in ("f",) + VERDICT) for t in lines.get("VIEWER_TEST_TRACE", [])], "coverage": scene, "lines": lines, "ram": ram.read_bytes() if ram.is_file() else b""}
 
         VERDICT = ("status", "side", "shift", "acc", "reason", "auth")
 
@@ -297,8 +297,9 @@ def main():
         check(seq["a1"]["bmp"] == seq["a2"]["bmp"], "transition run: the final presented frame equals the ABI 1 twin's")
         compare_contract("transition-run", seq["a1"], seq["a2"], "wide", off=OFF)
         for k in ("a1", "a2"):
-            check(again[k]["trace"] == seq[k]["trace"] and again[k]["bmp"] == seq[k]["bmp"], f"replay determinism ({k}): the second run reproduces every per-frame verdict and the final frame")
+            check(again[k]["events"] == seq[k]["events"] and again[k]["bmp"] == seq[k]["bmp"], f"replay determinism ({k}): the second run reproduces every per-frame verdict and the final frame")
         lifecycle = {}
+        compared = {}
         for k, (prog, ident) in (("a1", (twin_long, ids["abi1-long"])), ("a2", (abi2_long, ids["abi2-long"]))):
             base = play(prog, f"lcb-{k}", "wide")
             sv = play(prog, f"lcs-{k}", "wide", pad="0 -\n30 K\n31 -\n", save=tmp / f"save-{k}", identity=ident)
@@ -307,21 +308,25 @@ def main():
             check(sv["lines"]["VIEWER_STATE"][0]["status"] == "ok" and ld["lines"]["VIEWER_STATE"][0]["status"] == "ok", f"({k}) the quick save and the load succeed")
             rev = [e for e in rw["lines"].get("VIEWER_STATE", []) if e.get("event") == "rewind"]
             check(rev and rev[0].get("status") == "ok", f"({k}) the rewind took effect")
-            check(verdicts(sv) == verdicts(base) and sv["bmp"] == base["bmp"], f"({k}) taking a save changes nothing")
-            def restored(run):
-                """Every frame the restored run published equals the uninterrupted run's frame of that number, except the ONE first frame after the restore: it has no previous-onset snapshot, so the host reports STALE_STATE (accepted 0,
-                reason 1, no placement) for any provider, ABI 1 and ABI 2 alike (nothing of an earlier frame is served)."""
-                vr, vb_ = verdicts(run), verdicts(base)
-                odd = [f for f in vr if f not in vb_ or vr[f] != vb_[f]]
-                stale = [f for f in odd if f in vb_ and vr[f][3] == 0 and vr[f][4] == 1 and vr[f][2] == 0]
-                return len(odd) <= 1 and odd == stale and len(vr) > 20, odd, stale
-            okl, oddl, _ = restored(ld)
-            okr, oddr, _ = restored(rw)
-            check(okl and ld["bmp"] == base["bmp"] and ld["ram"] == base["ram"], f"({k}) after the load every frame equals the uninterrupted run's but the first (STALE_STATE), and the final frame and guest RAM are equal (odd frames {oddl})")
-            check(okr and rw["bmp"] == base["bmp"] and rw["ram"] == base["ram"], f"({k}) after the rewind every frame equals the uninterrupted run's but the first (STALE_STATE), and the final frame and guest RAM are equal (odd frames {oddr})")
+            check(sv["events"] == base["events"] and sv["bmp"] == base["bmp"], f"({k}) taking a save changes nothing (every trace occurrence equal)")
+            def replayed(run, kind):
+                """Walks the run's COMPLETE ordered trace (repeated frame numbers preserved: the frame-keyed dict keeps only the last occurrence). Every occurrence must equal the uninterrupted run's verdict for that frame number,
+                except the one first newly produced frame after the restore (the frame right after the one the discontinuity lands on), which has no previous-onset snapshot: the host reports STALE_STATE (accepted 0, reason 1, no placement), for ABI 1 and ABI 2 alike."""
+                events, bv = run["events"], verdicts(base)
+                frames = [e[0] for e in events]
+                jumps = [i for i in range(1, len(frames)) if frames[i] != frames[i - 1] + 1]
+                wrong = [(i, e) for i, e in enumerate(events) if e[1:] != bv.get(e[0]) and not (i - 1 in jumps and e[1:][3] == 0 and e[1:][4] == 1 and e[1:][2] == 0)]
+                if kind == "load":
+                    shape = len(jumps) == 1 and frames[jumps[0]] >= 31 and frames[jumps[0]] > frames[jumps[0] - 1] + 1   # a forward jump into the saved timeline (the save was taken near frame 30)
+                else:
+                    shape = len(jumps) == 1 and frames[jumps[0]] <= frames[jumps[0] - 1] and len(frames) > len(set(frames))   # a backward jump: frame numbers repeat
+                check(shape and not wrong, f"({k}) {kind}: a real frame-number discontinuity (jumps at {[(frames[i - 1], frames[i]) for i in jumps]}) and all {len(events)} trace occurrences ({len(events) - len(set(frames))} repeated frame numbers) equal the uninterrupted run's verdicts but the one STALE_STATE restore frame (wrong: {wrong[:2]})")
+                check(run["bmp"] == base["bmp"] and run["ram"] == base["ram"], f"({k}) {kind}: the final presented frame and guest RAM equal the uninterrupted run's")
+                return len(events)
+            compared[k] = (replayed(ld, "load"), replayed(rw, "rewind"))
             lifecycle[k] = (base, ld, rw)
         for i, label in ((0, "uninterrupted"), (1, "load"), (2, "rewind")):
-            check(verdicts(lifecycle["a1"][i]) == verdicts(lifecycle["a2"][i]) and lifecycle["a1"][i]["bmp"] == lifecycle["a2"][i]["bmp"], f"save/load/rewind ({label}): the ABI 2 package's per-frame verdicts and final frame equal the ABI 1 twin's")
+            check(lifecycle["a1"][i]["events"] == lifecycle["a2"][i]["events"] and lifecycle["a1"][i]["bmp"] == lifecycle["a2"][i]["bmp"], f"save/load/rewind ({label}): the ABI 2 package's per-frame verdicts and final frame equal the ABI 1 twin's")
         if printing:
             print("GOLDEN = {")
             for key in sorted(produced):
@@ -329,6 +334,7 @@ def main():
             print("}")
         if h.failures:
             return 1
+    print(f"mod_parity_gate_abi2_test: replayed trace occurrences compared (load, rewind) per package: {compared}")
     print("mod_parity_gate_abi2_test: ok")
     return 0
 
