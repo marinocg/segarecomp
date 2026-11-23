@@ -157,16 +157,30 @@ int compile_natives(const mod::Package &pkg, const std::string &cc, const fs::pa
   for (const std::string_view flag : mod::kNativeCompileFlags) base.emplace_back(flag);
   base.push_back("-DSEGA_MOD_TARGET_PLATFORM=" + std::to_string(adapter.platform_id));
   base.push_back("-DSEGA_MOD_TARGET_ABI_MAJOR=" + std::to_string(m.abi_native) + "U");
+  base.push_back("-DSEGA_MOD_TARGET_ABI_MINOR=" + std::to_string(m.abi_minor) + "U");   // ADR 0320 decision 10: the manifest's declared minimum minor selects which members of the header the source sees
   for (const fs::path &inc : {sdk_root / "sdk", sdk_root / std::string(m.platform) / "sdk", work / "src"}) { base.push_back("-I"); base.push_back(inc.string()); }
   const fs::path log = work / "compile.log";
   const auto fail_with = [&](const std::string &where, bool link) {
     std::ifstream in(log);
     std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     const auto has = [&](const char *needle) { return text.find(needle) != std::string::npos; };
+    // ADR 0320 decision 10 (as amended by F32): a struct member cannot carry a custom #error, so the minor-1 members are absent from the header for a source that declares no minor, the compiler says "no member named
+    // frame/vdp", and the host (not a macro trick in the header) classifies exactly that failure as the stable class below.
+    const auto minor_member_missing = [&]() {
+      if (m.abi_minor != 0) return false;
+      std::size_t at = 0;
+      while (at < text.size()) {
+        const std::size_t end = text.find('\n', at) == std::string::npos ? text.size() : text.find('\n', at);
+        const std::string_view line(text.data() + at, end - at);
+        if (line.find("no member named") != std::string_view::npos && (line.find("frame") != std::string_view::npos || line.find("vdp") != std::string_view::npos)) return true;
+        at = end + 1;
+      }
+      return false;
+    };
     // The entry is missing only when the linker reports THAT symbol as undefined (GNU ld, Apple ld, lld spellings); any other link error is E_LINK_FAILED.
     if (link) class_out = has("undefined reference to `segarecomp_mod_provider'") || has("\"_segarecomp_mod_provider\"") || has("undefined symbol: segarecomp_mod_provider") || has("undefined symbol: _segarecomp_mod_provider") || has("unresolved external symbol segarecomp_mod_provider") || has("unresolved external symbol _segarecomp_mod_provider") ? "E_ABI_ENTRY_MISSING" : "E_LINK_FAILED";
-    else class_out = text.find("E_ABI_PLATFORM") != std::string::npos ? "E_ABI_PLATFORM" : text.find("E_ABI_HEADER_MISMATCH") != std::string::npos ? "E_ABI_HEADER_MISMATCH" : "E_COMPILE_FAILED";
-    detail = where + ": " + text.substr(0, 1500);
+    else class_out = text.find("E_ABI_PLATFORM") != std::string::npos ? "E_ABI_PLATFORM" : text.find("E_ABI_HEADER_MISMATCH") != std::string::npos ? "E_ABI_HEADER_MISMATCH" : text.find("E_ABI_MINOR_TOO_NEW") != std::string::npos ? "E_ABI_MINOR_TOO_NEW" : minor_member_missing() ? "E_ABI_MINOR_UNDECLARED" : "E_COMPILE_FAILED";
+    detail = where + ": " + (std::string_view(class_out) == "E_ABI_MINOR_UNDECLARED" ? "the source uses a member of the ABI minor 1 Genesis table (SegaGenesisFeatures::frame or ::vdp) but the manifest declares no abi.minor; declare \"minor = 1\" under [abi]. " : "") + text.substr(0, 1500);
   };
   for (const auto &[path, bytes] : pkg.files) {   // std::map order: deterministic compile order
     (void)bytes;

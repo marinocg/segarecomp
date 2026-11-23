@@ -41,6 +41,7 @@ inline constexpr std::size_t kMaxHooks = 64;      // manifest `hooks` entries (A
 inline constexpr std::uint32_t kMaxAudioSeconds = 600;
 inline constexpr std::uint64_t kLuauMemoryPolicyMax = 4194304, kLuauBudgetPolicyMax = 100000;
 inline constexpr unsigned kNativeAbiMajor = 2;
+inline constexpr unsigned kNativeAbiMinor = 1;   // ADR 0320 decision 10: equals SEGA_MOD_ABI_MINOR; a manifest `abi.minor` above it is E_ABI_MINOR_TOO_NEW
 
 // ---- platform adapters (ADR 0280): a table of capability sets, never a class hierarchy ----
 enum class Support { unsupported, experimental, supported_with_limitations, supported_and_tested };
@@ -159,6 +160,7 @@ struct Manifest {
   std::string disc_identity;                     // disc-image only
   std::vector<std::string> capabilities, capabilities_optional;
   unsigned abi_native = 0;                       // 0 = none
+  unsigned abi_minor = 0;                        // ADR 0320: the declared minimum ABI minor (absent = 0; serialized only when non-zero so existing manifests keep their canonical bytes)
   unsigned state_schema = 0;                     // 0 = none
   bool has_limits = false;
   std::uint64_t luau_memory_bytes = 0, luau_budget_units = 0;   // 0 = not requested

@@ -227,8 +227,9 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
         if (std::adjacent_find(v->begin(), v->end()) != v->end()) fail("E_FIELD_VALUE", "a capability is listed twice");
       }
     } else if (s.name == "abi") {
-      only(s, {"native"});
+      only(s, {"native", "minor"});
       m.abi_native = number_of(s, "native");
+      m.abi_minor = number_of(s, "minor", false);   // ADR 0320 decision 10: 0 (absent) or the declared minimum ABI minor; validated by the manifest reader (E_ABI_MINOR_TOO_NEW above this release's minor)
     } else if (s.name == "state") {
       only(s, {"schema"});
       m.state_schema = number_of(s, "schema");

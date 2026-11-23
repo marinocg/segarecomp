@@ -71,7 +71,19 @@ typedef struct GenesisModConfig {
   const GenesisHookSiteInfo *sites; /* the program's generated hook site table: lets hook call frames in flight be saved (by index) and restored; NULL = a state with a frame in flight is not capturable */
   uint32_t site_count;
   const SegaGenesisRenderApi *render_api; /* SEG-138-T011: the host adapter's render-phase output API (typed ABI 2 feature); published as SegaGenesisFeatures::render only when overlay.rgba is granted; NULL = none */
+  const SegaGenesisVdpHelpers *vdp_helpers; /* SEG-152-T004 (ADR 0320 decision 5): the host's pure VDP helpers (the ABI 1 GenesisCompatHost functions); published as SegaGenesisFeatures::vdp only when frame.vdp is granted; NULL = none */
 } GenesisModConfig;
+
+/* ADR 0320 (SEG-152-T003): the producer's data of one produced frame, handed to an exact-frame provider (one that REQUIRES frame.vdp). Every pointer is read during the call only and is COPIED into scheduler-owned buffers
+ * (`lines` has the layout of GenesisCompatLine / SegaGenesisFrameLine). work_ram NULL = no valid previous-onset copy or frame.work_ram not granted. */
+typedef struct GenesisModExactFrame {
+  const uint8_t *work_ram;       /* 65536 bytes (the previous-onset copy) or NULL */
+  const uint8_t *vram;           /* 65536 bytes: the frame-start VRAM (vram_frame_start) or the producer's end-of-frame VRAM */
+  const SegaGenesisFrameLine *lines;
+  uint32_t line_count;
+  uint32_t width, height, side, requested;
+  uint32_t vram_frame_start;     /* 1 = a journaled frame (vram is the frame-start state) */
+} GenesisModExactFrame;
 
 typedef struct GenesisModWriteRecord {
   uint64_t frame;
@@ -132,6 +144,12 @@ typedef struct GenesisModScheduler {
   /* ---- render copy (only when frame.work_ram is granted) ---- */
   uint8_t render_copy[GENESIS_MOD_WORK_RAM_BYTES];
   uint8_t render_copy_valid;
+  /* ---- exact-frame provider (ADR 0320; fixed buffers, no per-frame allocation) ---- */
+  uint8_t exact_frame;          /* the provider requires frame.vdp: its render callback runs at the producer seam only */
+  uint64_t exact_calls;         /* exact-frame callbacks delivered */
+  SegaGenesisFrameView view;
+  uint8_t view_vram[GENESIS_MOD_WORK_RAM_BYTES];
+  SegaGenesisFrameLine view_lines[SEGA_GEN_FRAME_MAX_LINES];
   /* ---- committed write log ---- */
   GenesisModWriteRecord write_log[GENESIS_MOD_WRITE_LOG_MAX];
   uint32_t write_log_count;
@@ -144,6 +162,10 @@ typedef struct GenesisModScheduler {
  * E_PHASE_UNSUPPORTED (no phase, an unknown phase, or a hook phase without bindings), E_HOOK_BINDING (a bad or repeated hook id), E_RANGE_DECLARATION (a declared range outside the space, empty, or with a mode whose capability is not granted) and
  * E_PROVIDER_ENTRY (a provider without a `phase` entry or an invalid config). Nothing is attached on rejection. The runtime must not be running. */
 int genesis_mod_scheduler_attach(GenesisModScheduler *scheduler, GenesisRuntime *runtime, const GenesisModConfig *config, const char **rejection);
+/* ADR 0320: runs the exact-frame `render` callback of an exact-frame provider (one that required frame.vdp) for the frame being produced: `render` with host->frame = the produced frame (the runtime's frame count - 1),
+ * the previous-onset work-RAM copy and an immutable host-owned view of `frame`; SegaGenesisFeatures::frame is non-NULL only during the call. Returns 1 when the callback ran and did not fault (the caller may then commit what
+ * the adapter staged), 0 otherwise (not an exact-frame provider, disabled, no render phase, bad input or a fault). The ordinary after-snapshot `render` never runs for such a provider. */
+int genesis_mod_scheduler_present(GenesisModScheduler *scheduler, const GenesisModExactFrame *frame);
 /* Detaches: clears the hooks and the pad interception. The scheduler may then be discarded. */
 void genesis_mod_scheduler_detach(GenesisModScheduler *scheduler);
 

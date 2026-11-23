@@ -100,6 +100,7 @@ std::vector<std::string> native_scheduled_capabilities() {
   caps.push_back("hook.function");
   caps.push_back("frame.work_ram");   // W04 gap B: the render-phase copy of end-of-frame work RAM; it is what binds a game-art virtual-sprite set to its frame epoch (mod_capture.cpp)
   caps.push_back("scenery.words");   // SEG-140-T011: authored offscreen scenery through the typed render feature
+  caps.push_back("frame.vdp");   // SEG-152-T003 (ADR 0320): REQUIRED-only; selects the exact-frame render callback at the producer seam (the package layer refuses an optional declaration)
   return caps;
 }
 

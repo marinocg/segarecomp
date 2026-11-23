@@ -45,13 +45,13 @@ class Code:
             self.out[at + 1] = displacement & 0xFF
 
 
-def make_rom() -> bytes:
+def make_rom(mid_frame: bool = False, interlace: bool = False) -> bytes:
     """VDP: 40-cell picture, plane A at 0xC000 (64 x 32), horizontal scroll table at 0xFC00 (full screen). Plane A alternates tile 1 and tile 3 by column (green / red of palette line 0). Each of the 40 turns: while Right is held the
     camera word at 0xFF0012 grows by one, and the program writes the plane-A horizontal scroll -(camera * 8) into the table. Camera stays inside 0..24 in the tests (a 10-bit scroll value never wraps)."""
     c = Code()
     c.w(0x41F9); c.l(0x00C00004)                     # lea 0xC00004,a0   (VDP control)
     c.w(0x43F9); c.l(0x00C00000)                     # lea 0xC00000,a1   (VDP data)
-    for reg in (0x8004, 0x8144, 0x8230, 0x8407, 0x8578, 0x8700, 0x8B00, 0x8C81, 0x8D3F, 0x8F02, 0x9001):
+    for reg in (0x8004, 0x8144, 0x8230, 0x8407, 0x8578, 0x8700, 0x8B00, 0x8C87 if interlace else 0x8C81, 0x8D3F, 0x8F02, 0x9001):   # SEG-152-T003: interlace=True selects interlace mode 2 (448-line output, 224 field lines)
         c.w(0x30BC, reg)                             # move.w #reg,(a0)
     c.w(0x20BC); c.l(0xC0000000)                     # move.l #CRAM write 0,(a0)
     for colour in (0x0420, 0x00E0, 0x000E):
@@ -86,6 +86,11 @@ def make_rom() -> bytes:
     c.branch_s(0x67, "no_right")
     c.w(0x526A, POSITION_OFFSET)                     # addq.w #1,camera(a2)
     c.label("no_right")
+    if mid_frame:   # SEG-152-T003: no input needed: the camera also advances by itself during the last 22 turns, so a save/load or rewind needs no input timing to reproduce the run
+        c.w(0x0C47, 22)                              # cmpi.w #22,d7
+        c.branch_s(0x64, "auto_skip")                # bcc.s auto_skip   (d7 >= 22)
+        c.w(0x526A, POSITION_OFFSET)                 # addq.w #1,camera(a2)
+        c.label("auto_skip")
     c.w(0x322A, POSITION_OFFSET)                     # move.w camera(a2),d1
     c.w(0xE749)                                      # lsl.w #3,d1
     c.w(0x4441)                                      # neg.w d1
@@ -96,6 +101,22 @@ def make_rom() -> bytes:
     c.w(0x3010)
     c.w(0x0800, 3)
     c.branch_s(0x66, "wait_active")
+    if mid_frame:
+        # SEG-152-T003 (ADR 0320): a raster effect for the exact-frame tests (off by default: the image is then byte-identical to the scenery fixture). Once per turn, at V counter 100, the program changes
+        # (1) a CRAM entry nobody displays (palette line 3 entry 15), (2) VDP register 7 (backdrop index within palette line 3) and (3) a VRAM word nobody displays (0x0800), all from the turn counter d7, so
+        # lines 0..99 and 100..223 of every frame carry different CRAM/register state and the frame-start VRAM differs from the end-of-frame VRAM. No pixel of the picture or of the authored columns changes.
+        c.label("mid_wait")
+        c.w(0x1039); c.l(0x00C00008)                 # move.b 0xC00008,d0   (V counter)
+        c.w(0x0C00, 100)                             # cmpi.b #100,d0
+        c.branch_s(0x65, "mid_wait")                 # bcs.s mid_wait
+        c.w(0x20BC); c.l(0xC07E0000)                 # CRAM write 0x7E (palette line 3, entry 15)
+        c.w(0x3287)                                  # move.w d7,(a1)
+        c.w(0x3007)                                  # move.w d7,d0
+        c.w(0x0240, 0x0003)                          # andi.w #3,d0
+        c.w(0x0040, 0x8730)                          # ori.w #0x8730,d0     (register 7: palette line 3, index d7 & 3)
+        c.w(0x3080)                                  # move.w d0,(a0)
+        c.w(0x20BC); c.l(0x48000000)                 # VRAM write 0x0800
+        c.w(0x3287)                                  # move.w d7,(a1)
     c.w(0x51CF)                                      # dbra d7,turn
     at = len(c.out)
     c.w(0x0000)

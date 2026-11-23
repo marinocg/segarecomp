@@ -238,6 +238,43 @@ target_compile_features(genesis_mod_scheduler_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_mod_scheduler_tests)
 add_test(NAME genesis_mod_scheduler_tests COMMAND genesis_mod_scheduler_tests)
 set_tests_properties(genesis_mod_scheduler_tests PROPERTIES TIMEOUT 300)
+# SEG-152-T003/T004 (ADR 0320): the exact-frame presentation seam and the VDP helper table, driven by a synthetic strict-C11 ABI 2 provider; the provider object is compiled with warnings as errors.
+add_library(genesis_mod_exact_frame_provider OBJECT fixtures/mod_sdk/exact_frame_provider.c)
+set_target_properties(genesis_mod_exact_frame_provider PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_include_directories(genesis_mod_exact_frame_provider PRIVATE ${PROJECT_SOURCE_DIR}/platforms/sdk ${PROJECT_SOURCE_DIR}/platforms/genesis/sdk)
+target_compile_definitions(genesis_mod_exact_frame_provider PRIVATE SEGA_MOD_TARGET_PLATFORM=1 SEGA_MOD_TARGET_ABI_MAJOR=2U SEGA_MOD_TARGET_ABI_MINOR=1U)
+if(NOT MSVC)
+  target_compile_options(genesis_mod_exact_frame_provider PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+add_executable(genesis_mod_exact_frame_tests genesis_mod_exact_frame_test.cpp $<TARGET_OBJECTS:genesis_mod_exact_frame_provider>)
+target_include_directories(genesis_mod_exact_frame_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mod_sdk)
+target_link_libraries(genesis_mod_exact_frame_tests PRIVATE segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+target_compile_features(genesis_mod_exact_frame_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_mod_exact_frame_tests)
+add_test(NAME genesis_mod_exact_frame_tests COMMAND genesis_mod_exact_frame_tests)
+set_tests_properties(genesis_mod_exact_frame_tests PROPERTIES TIMEOUT 300)
+add_test(NAME genesis_mod_vdp_helper_tests COMMAND genesis_mod_exact_frame_tests helpers)   # SEG-152-T004: the helper table against the ABI 1 GenesisCompatHost
+set_tests_properties(genesis_mod_vdp_helper_tests PROPERTIES TIMEOUT 300)
+add_test(NAME genesis_mod_exact_frame_cost COMMAND genesis_mod_exact_frame_tests cost)   # SEG-152-T003: the measured cost of the frame view (EXACT_FRAME_COST evidence line)
+set_tests_properties(genesis_mod_exact_frame_cost PROPERTIES TIMEOUT 300)
+# SEG-152-T003 (ADR 0320): the viewer's scheduled-mod adapter (mod_capture.cpp, compiled as a built native viewer program compiles it) drives a synthetic exact-frame provider from the producer seam:
+# frame exactness of overlay, scenery, placement and scene, Original/aspect/skip/fault cases.
+add_library(genesis_mod_exact_artist OBJECT fixtures/mod_sdk/exact_frame_artist.c)
+set_target_properties(genesis_mod_exact_artist PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_include_directories(genesis_mod_exact_artist PRIVATE ${PROJECT_SOURCE_DIR}/platforms/sdk ${PROJECT_SOURCE_DIR}/platforms/genesis/sdk)
+target_compile_definitions(genesis_mod_exact_artist PRIVATE SEGA_MOD_TARGET_PLATFORM=1 SEGA_MOD_TARGET_ABI_MAJOR=2U SEGA_MOD_TARGET_ABI_MINOR=1U)
+if(NOT MSVC)
+  target_compile_options(genesis_mod_exact_artist PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+add_executable(genesis_mod_exact_adapter_tests genesis_mod_exact_adapter_test.cpp fixtures/mod_sdk/exact_frame_artist_artifact.c
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/mod_capture.cpp $<TARGET_OBJECTS:genesis_mod_exact_artist>
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c)
+set_source_files_properties(${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/mod_capture.cpp PROPERTIES COMPILE_DEFINITIONS "SEGARECOMP_MOD_NATIVE=1;SEGARECOMP_MOD_VIEWER=1")
+target_include_directories(genesis_mod_exact_adapter_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+target_link_libraries(genesis_mod_exact_adapter_tests PRIVATE segarecomp::luau_host segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+target_compile_features(genesis_mod_exact_adapter_tests PRIVATE cxx_std_20)
+add_test(NAME genesis_mod_exact_adapter_tests COMMAND genesis_mod_exact_adapter_tests)
+set_tests_properties(genesis_mod_exact_adapter_tests PROPERTIES TIMEOUT 300)
 # SEG-138-T006 (ADR 0299): mod-owned state (MODSTATE) in the Genesis save-state / rewind container, with the shared snapshot codec and the rewind engine compiled in (as programs do).
 add_executable(genesis_mod_state_tests genesis_mod_state_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_persistence.c
@@ -1576,6 +1613,13 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_view_abi2_test APPEND PROPERTY LABELS full)
   set_property(TEST mod_view_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_view_abi2_test PROPERTY TIMEOUT 1500)
+  # SEG-152-T003/T004 (ADR 0320): the exact-frame callback through the real producer and the SDL3 viewer: one callback per produced frame, ABI 1 twin equality, mid-frame changes, aspect/Original/4:3,
+  # skipped presentation, save/load, rewind, fault; HUD, scenery, placement and sprite belong to the produced frame.
+  add_test(NAME mod_exact_frame_abi2_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_exact_frame_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_exact_frame_abi2_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_exact_frame_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_exact_frame_abi2_test PROPERTY TIMEOUT 1500)
   add_test(NAME mod_view_transitions_abi2_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_view_transitions_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
   set_property(TEST mod_view_transitions_abi2_test APPEND PROPERTY LABELS full)
@@ -2419,6 +2463,10 @@ add_test(NAME mod_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOU
 add_test(NAME mod_project_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_project_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
 add_test(NAME mod_sources_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_sources_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER}
   ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mod_sdk ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
+# SEG-152-T003 (ADR 0320 decision 10): abi.minor, the header minor guard and the required-only frame.vdp rule (name of the decision table: segapatch_abi_minor_tests).
+add_test(NAME segapatch_abi_minor_tests COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segapatch_abi_minor_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST segapatch_abi_minor_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST segapatch_abi_minor_tests APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_test(NAME mod_audio_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_audio_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_workflow_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_workflow_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
 add_test(NAME mod_hooks_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_hooks_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
@@ -2482,7 +2530,7 @@ add_test(NAME luau_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOUR
 add_test(NAME luau_host_golden_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/luau_host_golden_test.py)
 add_test(NAME mod_luau_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_luau_api_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_api_test.py $<TARGET_FILE:segarecomp>)
-foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_state_tests genesis_mod_replay_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
+foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_frame_cost genesis_mod_exact_adapter_tests genesis_mod_state_tests genesis_mod_replay_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
   set_property(TEST ${_luau_test} APPEND PROPERTY LABELS full fast)
   set_property(TEST ${_luau_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endforeach()
