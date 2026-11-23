@@ -177,7 +177,6 @@ def main():
         want = golden(left, right, camera)
         wrong = sum(1 for y in range(H) for xi in range(left + W + right) if want[y][xi] is not None and surf[y][xi] != want[y][xi] and not (xi < 24 and y < 8))
         check(wrong == 0, f"scenery and placement belong to the frame produced: the authored columns equal the golden for THIS frame's scroll ({camera}) and its declared placement {left}/{right} while the camera is still moving ({wrong} pixels differ)")
-        check(camera != final_camera or True, "(informational)")
         base = surface_from_bmp(van["bmp"], side)
         check(all(surf[y][left + x] == base[y][side + x] for y in range(H) for x in range(W) if not (x < 24 and y < 8) and not (40 <= y < 48)), "the native picture at the declared placement equals Vanilla's (outside the HUD panel and the sprite)")
         check(tuple(surf[2][2]) == (last["ess"] & 0xFF, last["f"] & 0xFF, 0), f"the HUD colour is the one computed from THIS frame (essential state {last['ess']}, frame {last['f']}): {surf[2][2]}")
@@ -259,6 +258,12 @@ def main():
         ba_rw = play(badess, "ba-rewind", cfg32, pad="0 -\n40 Y\n41 -\n", save=tmp / "save-ba", identity=identities["badess"])
         ba_u = {e["f"]: e for e in ba["logs"]}
         check(any(ba_u[f] != e for e in ba_rw["logs"] for f in [e["f"]]) and ba_rw["bmp"] != ba["bmp"], "a provider that writes essential state at presentation time is detected: its rewound run differs from its uninterrupted run (the good probe's does not)")
+        # ================= (F) a host without the producer seam refuses the requirement (ADR 0320 decision 5: granted frame.vdp promises the helper table) =================
+        built = h.build(rom, tmp / "exact-headless", tmp / "exact.segapatch", identities["exact"], viewer=False, native=True)
+        check(built.returncode == 0, f"the exact-frame package builds as a headless program: {built.stdout[-200:]}")
+        hrun, hlines = h.headless(tmp / "exact-headless", "headless", "")
+        check(hrun.returncode != 0 and hlines.get("MOD_REFUSED", [{}])[0].get("class") == "E_CAPABILITY_UNSUPPORTED", f"the headless capture, which has no producer seam and no helper table, refuses the required frame.vdp deterministically: rc={hrun.returncode} {hlines.get('MOD_REFUSED')}")
+
         # ================= (E) failed production: the callback is not invoked, exactly as ABI 1 `prepare` is not =================
         # The interlace-mode-2 variant of the fixture makes the raster producer REJECT the frame (frame_render_rejections), so no frame is published and the provider hook is never reached: neither the ABI 1 twin
         # nor the exact-frame provider is called. (448-line frames are covered by genesis_mod_exact_frame_tests: the view carries the 224 captured field lines, see native-sdk-abi-2.md.)
@@ -268,9 +273,9 @@ def main():
         check(ei["summary"].get("faulted") is False, "and the provider is healthy: a failed production is not a fault")
         ft = play(fault, "f-run", cfg32)
         Lf = ft["logs"]
-        check(ft["summary"].get("faulted") is True and "cause=capability" in ft["summary"].get("fault", "") or ft["summary"].get("faulted") is True, f"a genuine fault disables the mod: {ft['summary'].get('fault')}")
+        check(ft["summary"].get("faulted") is True, f"a genuine fault disables the mod: {ft['summary'].get('fault')}")
         check(Lf and max(e["f"] for e in Lf) < 40 and not any(e["f"] >= 40 for e in Lf), "no callback and no output after the fault (the faulting callback's own output is discarded)")
-        check(ft["bmp"] == van["bmp"] or ft["bmp"] == play(tmp / "vanilla", "v-fault", cfg32)["bmp"], "after the fault the presented frame is the generic picture: nothing from an earlier frame remains")
+        check(ft["bmp"] == van["bmp"], "after the fault the presented frame is the generic picture: nothing from an earlier frame remains")
         check(ft["ram"] == van["ram"], "the guest state is unchanged by the fault")
         # R1: guest state and native picture digests are identical with presentation on, off (Vanilla), skipped (scenery-only in Original) and restored
         check(ex["ram"] == van["ram"] == base_run["ram"] == ld["ram"] == rw["ram"], "R1: the final guest work RAM is identical with the provider on, absent, restored and rewound")
@@ -280,8 +285,7 @@ def main():
         check(len(sha_a) == 1 and None not in sha_a and len(frames_a) == 1, f"R1 audio: the mixer output digest and length are identical with the provider on, absent, ABI 1, a cold cache and a faulted provider ({sha_a}, {frames_a})")
         sha_b, frames_b = audio_of(ex2, van2, tw2)
         check(len(sha_b) == 1 and None not in sha_b and len(frames_b) == 1, "R1 audio: and across aspect changes, Original and 4:3")
-        check(ex["audio"]["non_silent"] is False, "(the fixture program is silent: the audio digest is a real but weak witness; the guest never touches the sound devices)")
-        pics = {tuple(map(tuple, r["bmp"][0])) for r in (nc, base_run, ex)}
+        check(ex["audio"]["non_silent"] is False, "documented limitation: the fixture program is silent, so the audio digest is a real but weak witness (the guest never touches the sound devices)")
         check(ex["bmp"] == base_run["bmp"] == nc["bmp"] and ld["bmp"] == base_run["bmp"] and rw["bmp"] == base_run["bmp"], "R1 native picture: the presented frame is identical for the repeated, cold-cache, restored and rewound runs")
         check(len(L) == len(T) == len(base_run["logs"]) == len(nc["logs"]) and [e["f"] for e in L] == [e["f"] for e in base_run["logs"]], "R1 callback counts and frame numbers are identical across repeated runs and equal the ABI 1 prepare count")
         check(ex2["ram"] == van2["ram"] == tw2["ram"] == ex43["ram"] == van43["ram"], "R1: and across aspect changes and skipped presentation")

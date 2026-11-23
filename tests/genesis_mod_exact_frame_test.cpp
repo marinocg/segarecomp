@@ -278,6 +278,35 @@ void test_flags_and_capabilities() {
   }
 }
 
+// ADR 0320 decision 5: SegaGenesisFeatures::vdp is non-NULL exactly when frame.vdp is granted. A host that cannot supply the helper table (the headless capture has no producer seam) must therefore refuse the
+// requirement at attach, deterministically, instead of granting a capability whose guaranteed service is missing.
+void test_helper_table_invariant() {
+  std::puts("STEP helper_table_invariant");
+  {   // positive: a host with the table grants frame.vdp and publishes the table, and no other combination does
+    Harness h;
+    h.init(kExact, 0U, kAllPhases);
+    check(h.attach_result == 0 && sega_mod_is_granted(&h.sched->host, SEGA_MOD_CAP_FRAME_VDP) && h.sched->features.vdp != nullptr, "granted frame.vdp comes with the helper table");
+  }
+  {   // negative: no helper table = required frame.vdp is refused, nothing attached, the runtime is untouched
+    Harness h;
+    h.init(kExact, 0U, kAllPhases, 1U, false);
+    check(h.attach_result == 1 && std::string(h.rejection) == "E_CAPABILITY_UNSUPPORTED", std::string("a required frame.vdp without a helper table is refused at attach: ") + h.rejection);
+    check(h.rt.frame_hooks == nullptr, "nothing is attached on that refusal");
+    run_frames(h.rt, 3U);
+    check(g_exact_obs.render_calls == 0U && h.rt.virtual_frame_count >= 3U, "no callback runs and the guest is unaffected");
+  }
+  {   // a table offered to a provider that does not require frame.vdp is never published (the table follows the grant, not the host's offer)
+    Harness h;
+    h.init(kOrdinary, 0U, kAllPhases, 0U, true);
+    check(h.attach_result == 0 && h.sched->features.vdp == nullptr, "an ordinary provider never sees the helper table");
+  }
+  {   // an optional frame.vdp is not granted, so a host without the table attaches it unchanged (no timing change, no promise broken)
+    Harness h;
+    h.init(kOrdinary, cap(SEGA_MOD_CAP_FRAME_VDP), kAllPhases, 0U, false);
+    check(h.attach_result == 0 && h.sched->features.vdp == nullptr && h.sched->exact_frame == 0U, "an optional frame.vdp on a host without the table attaches as an ordinary provider");
+  }
+}
+
 void test_optional_and_ordinary() {
   std::puts("STEP optional_and_ordinary");
   uint64_t ordinary_frames_seen = 0;
@@ -416,6 +445,7 @@ int main(int argc, char **argv) {
   } else {
     test_opt_in_and_view();
     test_helpers_equal_abi1();
+    test_helper_table_invariant();
     test_interlace_field_lines();
     test_flags_and_capabilities();
     test_optional_and_ordinary();

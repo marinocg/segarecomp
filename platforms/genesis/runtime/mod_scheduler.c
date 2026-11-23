@@ -513,6 +513,10 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
     *rejection = "E_PROVIDER_ENTRY";
     return 1;
   }
+  if (sega_mod_is_granted(&s->host, SEGA_MOD_CAP_FRAME_VDP) && config->vdp_helpers == NULL) { /* ADR 0320 decisions 2 and 5: a granted frame.vdp promises the view AND the helper table; a host that has no producer seam (the headless capture) supplies neither, so the requirement is refused, exactly as before frame.vdp became grantable */
+    *rejection = "E_CAPABILITY_UNSUPPORTED";
+    return 1;
+  }
   if (config->phase_mask == 0U || (config->phase_mask & ~VALID_PHASES) != 0U) { /* none, unknown or bit 0 */
     *rejection = "E_PHASE_UNSUPPORTED";
     return 1;
