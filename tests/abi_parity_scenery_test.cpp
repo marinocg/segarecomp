@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,8 @@ namespace {
 using namespace parity;
 
 int failures = 0;
+// SEG-152-T008: the cases this suite actually ran (the parity gate asserts its mandatory list against it: a case that is missing fails the gate, it is never skipped silently).
+std::set<std::string> ran;
 void check(bool ok, const std::string &what) {
   if (!ok) { std::printf("FAIL: %s\n", what.c_str()); ++failures; }
 }
@@ -131,6 +134,7 @@ struct Tally { unsigned cases = 0, pass = 0, limit = 0; };
 
 void run_matrix(const Scenario &sc, const Aspect &asp, int ai, Timing timing, Tally &t) {
   const int side = asp.side;
+  ran.insert(std::string(timing == Timing::Exact ? "scenario-exact:" : "scenario-predicted:") + sc.spec.id + ":" + asp.name);
   const std::string &want = timing == Timing::Exact ? sc.exact[ai] : sc.predicted[ai];
   const int placements[] = {0, side / 2, side, side + side / 2, 2 * side};   // left-aligned, intermediate, centred, intermediate, right-aligned (picture at left_px)
   for (const int left : placements) {
@@ -323,6 +327,7 @@ void mask_parity_matrix(Tally &t) {
     for (int ai = 0; ai < 3; ++ai) {
       const Aspect &asp = kAspects[ai];
       const int side = asp.side;
+      ran.insert("mask:" + f.spec.id + ":" + asp.name);
       for (const int left : {0, side / 2, side, side + side / 2, 2 * side}) {
         const Verdict v = run_case(f.spec, side, left, Timing::Exact, -1, mask_options());
         ++t.cases;
@@ -430,6 +435,7 @@ void code3_gate() {
     GenesisFrameExtension ext{};
     check(ext.compat_private_words == 0U, "(f) compat_private_words is zero-initialised");
   }
+  ran.insert("code3-gate");
 }
 
 void mask_cost_line() {
@@ -525,11 +531,13 @@ void mask_448_producer() {
   segarecomp::scenery::mask_store(low.mask[0], lower, 56);
   const Produced c = produce(sc, low, static_cast<unsigned>(side));
   check(c.rc == 0 && (c.res.authored_rows[400 >> 3] >> (400 & 7) & 1U) != 0U && (c.res.authored_rows[100 >> 3] >> (100 & 7) & 1U) == 0U, "im2: a mask of the lower half only credits rows >= 224 and not rows < 224 (plane B generic: uncredited)");
+  ran.insert("mask-448-producer");
 }
 
 }  // namespace
 
-int main() {
+// The whole T001/T007 scenery suite as a function: the standalone test runs it, and the SEG-152-T008 gate runs it as its scenery section (one harness, one set of fixtures, one failure counter).
+int run_scenery_suite() {
   Tally exact, predicted;
   const std::vector<Scenario> all = scenarios();
   for (const Scenario &sc : all)
@@ -552,7 +560,13 @@ int main() {
   mask_448_producer();
   std::printf("PARITY mask totals: cases %u (pass %u, limit %u)\n", masked.cases, masked.pass, masked.limit);
   std::printf("PARITY totals: exact cases %u (pass %u, limit %u), predicted cases %u (pass %u, limit %u)\n", exact.cases, exact.pass, exact.limit, predicted.cases, predicted.pass, predicted.limit);
-  if (failures != 0) { std::printf("abi_parity_scenery_test: %d failure(s)\n", failures); return 1; }
+  return failures;
+}
+
+#ifndef ABI_PARITY_NO_MAIN   // the SEG-152-T008 gate includes this file for its fixtures and sections and provides its own main
+int main() {
+  if (run_scenery_suite() != 0) { std::printf("abi_parity_scenery_test: %d failure(s)\n", failures); return 1; }
   std::printf("abi_parity_scenery_test: ok\n");
   return 0;
 }
+#endif

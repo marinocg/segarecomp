@@ -389,6 +389,15 @@ segarecomp_enable_warnings(abi_parity_scenery_tests)
 add_test(NAME abi_parity_scenery_tests COMMAND abi_parity_scenery_tests)
 set_property(TEST abi_parity_scenery_tests APPEND PROPERTY LABELS full)
 
+# SEG-152-T008 (Exit C): the presentation parity gate over the same harness. It includes the T001/T007 suite as its first section, then compares the ABI 1 provider and the ABI 2 twin (production bitmap/overlay rules,
+# window and mask lookup, decline semantics) on the whole presentation of a frame at 4:3/16:9/21:9/32:9, against committed golden digests, with falsification mutants. Public CI: no ROM, no SDL, no clock.
+add_executable(abi_parity_gate_tests abi_parity_gate_test.cpp)
+target_link_libraries(abi_parity_gate_tests PRIVATE segarecomp::runtime_genesis segarecomp::luau_host)
+target_include_directories(abi_parity_gate_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/platforms/genesis/sdk ${CMAKE_CURRENT_SOURCE_DIR})
+segarecomp_enable_warnings(abi_parity_gate_tests)
+add_test(NAME abi_parity_gate_tests COMMAND abi_parity_gate_tests)
+set_property(TEST abi_parity_gate_tests APPEND PROPERTY LABELS full)
+
 # SEG-140 (ADR 0303): authored virtual sprites. T002 differential decode against the VDP's own output; T003 layers, clipping and the original per-line budget.
 add_test(NAME genesis_vsprite_ownership_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_vsprite_ownership_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_vsprite_ownership_test APPEND PROPERTY LABELS full fast)
@@ -1663,6 +1672,13 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_bitmap_abi2_test APPEND PROPERTY LABELS full)
   set_property(TEST mod_bitmap_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_bitmap_abi2_test PROPERTY TIMEOUT 1500)
+
+  # SEG-152-T008 (Exit C): the viewer-level half of the ABI 1 / ABI 2 parity gate (schema 3 bps-image + native-c11 package against the schema 2 ABI 1 twin, frame equality and golden digests, falsification mutants).
+  add_test(NAME mod_parity_gate_abi2_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_parity_gate_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_parity_gate_abi2_test APPEND PROPERTY LABELS full)
+  set_property(TEST mod_parity_gate_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_parity_gate_abi2_test PROPERTY TIMEOUT 1500)
   add_test(NAME mod_view_transitions_abi2_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_view_transitions_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
   set_property(TEST mod_view_transitions_abi2_test APPEND PROPERTY LABELS full)
