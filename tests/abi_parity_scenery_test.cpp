@@ -537,6 +537,144 @@ void mask_448_producer() {
 }  // namespace
 
 // The whole T001/T007 scenery suite as a function: the standalone test runs it, and the SEG-152-T008 gate runs it as its scenery section (one harness, one set of fixtures, one failure counter).
+// ---- SEG-152-T017: the per-row origin delta (ABI minor 3) ----------------------------------------------------------------------------------------------------------------
+// Synthetic fixtures (no game data): two or more bands that ask the SAME plane cell with world origins 512 px (64 cells) apart. Without the delta the ABI 2 windows cannot hold both words (the T001 "origin-multiple-mid-cell"
+// LIMIT, here the failing fixture); with the production `scenery::answer` and the submitted delta[r] = 64 k[r] the twin is identical to ABI 1 in pixels, verdict and coverage.
+Options origin_options() { Options o; o.use_origin = true; return o; }
+std::vector<std::pair<Spec, const char *>> origin_fixtures() {
+  std::vector<std::pair<Spec, const char *>> v;
+  { Spec s = base_spec("origin-two-bands"); set_plane(s, 1, [](int) { return -150; }, [](int r) { return r < 100 ? 0 : 1; }); v.push_back({s, "multiple changes inside a plane cell row (the T001 limit fixture)"}); }
+  { Spec s = base_spec("origin-three-bands"); set_plane(s, 1, [](int) { return -150; }, [](int r) { return r < 70 ? 0 : (r < 150 ? 1 : -1); }); set_plane(s, 0, [](int) { return -300; }, [](int r) { return r >= 120 ? 2 : 0; }); v.push_back({s, "three bands on B, two on A (negative and positive deltas)"}); }
+  { Spec s = base_spec("origin-ramp"); set_plane(s, 1, [](int r) { return -(100 + r); }, [](int r) { return (r / 3) % 2; }); s.vs[1] = 12; v.push_back({s, "per-line scroll ramp: the alias flips between adjacent lines, with a vertical scroll"}); }
+  { Spec s = base_spec("origin-and-mask"); set_plane(s, 1, [](int) { return -150; }, [](int r) { return r < 100 ? 0 : 1; }); for (int r = 150; r < H; ++r) s.fallback[1][r] = 1; v.push_back({s, "origin delta with a per-row mask band (the mask keeps precedence)"}); }
+  return v;
+}
+void origin_parity_matrix() {
+  unsigned cases = 0;
+  for (const auto &f : origin_fixtures()) {
+    const bool masked = f.first.id == "origin-and-mask";
+    Options opt = origin_options(); opt.use_mask = masked;
+    Options none; none.use_mask = masked;   // the same fixture served by the minor-2 builder (no delta): the failing side
+    for (int ai = 0; ai < 3; ++ai) {   // Original / 4:3 (no extension, no scenery asked) is covered by the gate's presentation scene "origin-bands-hud"
+      const Aspect &asp = kAspects[ai];
+      ran.insert("origin:" + f.first.id + ":" + asp.name);
+      for (const int left : std::vector<int>{0, asp.side / 2, asp.side, asp.side + asp.side / 2, 2 * asp.side}) {
+        const Verdict v = run_case(f.first, asp.side, left, Timing::Exact, -1, opt);
+        ++cases;
+        char what[256];
+        std::snprintf(what, sizeof what, "%s %s left_px=%d: %s (rows differing %u; authored %u/%u rows %u/%u accepted %u/%u reason %u/%u)", f.first.id.c_str(), asp.name, left, v.scenario.c_str(), v.rows_differ, v.authored1, v.authored2,
+                      v.authored_rows1, v.authored_rows2, v.accepted1, v.accepted2, v.reason1, v.reason2);
+        std::printf("PARITY origin %s\n", what);
+        check(v.scenario == "PASS" && v.rows_differ == 0 && v.digest1 == v.digest2, std::string("pixel-identical to ABI 1: ") + what);
+        check(v.coverage_equal && v.accepted1 == v.accepted2 && v.reason1 == v.reason2 && v.authored1 == v.authored2 && v.authored_rows1 == v.authored_rows2, std::string("coverage equal to ABI 1: ") + what);
+        check(v.abi1_calls == v.abi2_calls, std::string("no additional host cell queries: ") + what);
+        if (left == asp.side) {   // the failing side: the minor-2 builder (no delta) and the negative control (windows world-keyed, delta dropped) differ from ABI 1 on every extending aspect
+          const Verdict before = run_case(f.first, asp.side, left, Timing::Exact, -1, none);
+          Options drop = opt; drop.clear_origin = true;
+          const Verdict dropped = run_case(f.first, asp.side, left, Timing::Exact, -1, drop);
+          check(before.rows_differ > 0 && before.digest1 != before.digest2, std::string("without the delta the fixture differs from ABI 1 (the failing fixture): ") + f.first.id + " " + asp.name);
+          check(dropped.rows_differ > 0, std::string("dropping the delta makes it differ again: ") + f.first.id + " " + asp.name);
+        }
+      }
+    }
+  }
+  std::printf("PARITY origin totals: cases %u\n", cases);
+}
+// 3.1 Translation falsification: the unmodified control passes, and each wrong origin submission is detected by the same parity checks (pixels differ from ABI 1) on fixtures with line-dependent origins.
+void origin_falsification() {
+  struct Case { const char *name; Options::OriginFault fault; const char *fixture; };
+  const Case cases[] = {{"negated-delta", Options::OriginFault::Negated, "origin-three-bands"}, {"pixel-unit-delta", Options::OriginFault::PixelUnits, "origin-three-bands"},
+                        {"wrong-plane", Options::OriginFault::WrongPlane, "origin-three-bands"}, {"world-row-indexed", Options::OriginFault::WorldRowIndexed, "origin-ramp"},
+                        {"stale-table", Options::OriginFault::Stale, "origin-three-bands"}};
+  for (const auto &f : origin_fixtures())
+    for (const bool dropped : {false, true})   // the dropped-table control
+      for (int ai = 0; ai < 3; ++ai) {
+        const int side = kAspects[ai].side;
+        Options o = origin_options(); o.clear_origin = dropped; o.use_mask = f.first.id == "origin-and-mask";
+        const Verdict v = run_case(f.first, side, side, Timing::Exact, -1, o);
+        if (!dropped) check(v.scenario == "PASS" && v.digest1 == v.digest2, std::string("control passes: ") + f.first.id + " " + kAspects[ai].name);
+        else if (f.first.id != "origin-and-mask") check(v.rows_differ > 0 && v.digest1 != v.digest2, std::string("dropped table is detected: ") + f.first.id + " " + kAspects[ai].name);
+      }
+  for (const Case &c : cases)
+    for (const auto &f : origin_fixtures()) {
+      if (f.first.id != c.fixture) continue;
+      for (int ai = 0; ai < 3; ++ai) {
+        const int side = kAspects[ai].side;
+        Options ok = origin_options();
+        const Verdict good = run_case(f.first, side, side, Timing::Exact, -1, ok);
+        Options bad = ok; bad.origin_fault = c.fault;
+        const Verdict v = run_case(f.first, side, side, Timing::Exact, -1, bad);
+        std::printf("PARITY origin falsify %s %s: control %s, mutated rows differing %u (%s)\n", c.name, kAspects[ai].name, good.scenario.c_str(), v.rows_differ, v.scenario.c_str());
+        check(good.scenario == "PASS" && good.digest1 == good.digest2, std::string("unmodified control passes for ") + c.name + " " + kAspects[ai].name);
+        check(v.rows_differ > 0 && v.digest1 != v.digest2 && v.scenario == "UNEXPLAINED", std::string("the parity check detects (a wrong translation is not a representability limit) ") + c.name + " " + kAspects[ai].name);
+      }
+      ran.insert(std::string("origin-falsify:") + c.name);
+    }
+  ran.insert("origin-falsify:dropped-table");
+}
+// 3.2 Window capacity: more distinct translated spans than two windows can hold. The provider cannot truthfully serve it: it is classified LIMIT:window, the unrepresentable cells are failed answers (never a wrong word), and the limits are unchanged.
+void origin_capacity() {
+  Spec s = base_spec("origin-capacity");
+  // plane B: ten bands, each a different registered multiple (k = 0, 3, 6, ...): far more than two 128-column windows can cover for 64-cell-apart worlds
+  set_plane(s, 1, [](int) { return -150; }, [](int r) { return (r / 22) * 3; });
+  const int side = kAspects[2].side;
+  const Verdict v = run_case(s, side, side, Timing::Exact, -1, origin_options());
+  std::printf("PARITY origin capacity: scenario %s, windows %u/%u needed %u/%u, rows differing %u, uncovered cells %u, feasible %d\n", v.scenario.c_str(), v.windows[0], v.windows[1], v.needed[0], v.needed[1], v.rows_differ, v.uncovered, v.feasible ? 1 : 0);
+  check(!v.feasible && v.needed[1] > 2U && v.windows[1] <= 2U, "more windows are needed than the contract allows, and no more than two are submitted (limits unchanged)");
+  check(v.scenario == "LIMIT:window" && v.rows_differ > 0 && v.digest1 != v.digest2, "the result is a classified window limit, not parity");
+  check(v.uncovered > 0, "uncovered cells exist and are failed answers, never an approximation");
+  // a failed answer is never a wrong word: every asked cell the windows do answer equals the ABI 1 word of its line (checked per cell through the production lookup)
+  Scene sc; build_scene(sc, s);
+  Provider twin; twin.kind = Provider::Abi2; twin.spec = &s; twin.scene = &sc; twin.declared_left = side;
+  Built built; arm_twin(twin, s, sc, side, side, Timing::Exact, origin_options(), built);
+  unsigned answered = 0, failed = 0, wrong = 0;
+  for (int r = 0; r < H; ++r)
+    for (int x : {-1, -side, -side / 2, W, W + side - 1}) {
+      uint16_t word = 0;
+      const int rc = segarecomp::scenery::answer(twin.mask[1], twin.windows[1], r, x, s.hs[1][r], s.vs[1], &word, GENESIS_COMPAT_WORD_VDP_START, GENESIS_COMPAT_WORD_GENERIC, &twin.origin[1]);
+      if (rc == 1) { ++answered; if (word != abi1_answer(s, sc, 1, r, floor8(static_cast<long>(x) - s.hs[1][r]), floor8(static_cast<long>(r) + s.vs[1]))) ++wrong; }
+      else ++failed;
+    }
+  check(wrong == 0 && answered > 0 && failed > 0, "answered cells are exact, the rest fail (answered " + std::to_string(answered) + ", failed " + std::to_string(failed) + ", wrong " + std::to_string(wrong) + ")");
+  ran.insert("origin-capacity");
+}
+// Static memory and copy bounds, from the production type: the adapter keeps a staged and a visible table per plane (4 x 896 bytes) and copies at most one table per plane per callback (2 x 896 bytes).
+void origin_cost_line() {
+  constexpr unsigned table = sizeof(segarecomp::scenery::RowOrigin), state_bytes = 4U * table, copy_bytes = 2U * table;
+  static_assert(table == 896U && state_bytes == 3584U && copy_bytes == 1792U, "origin table, state and per-callback copy bounds");
+  const Spec s = origin_fixtures()[0].first;
+  const int side = kAspects[2].side;
+  const Verdict o = run_case(s, side, side, Timing::Exact, -1, origin_options());
+  std::printf("PARITY cost origin 32:9 centred: table %u bytes, adapter state %u bytes (staged + visible, both planes), copy <= %u bytes per callback, host queries abi2 %u / abi1 %u (one integer add per query, no extra query)\n", table, state_bytes, copy_bytes, o.abi2_calls, o.abi1_calls);
+  check(o.abi2_calls == o.abi1_calls, "the origin delta adds no host queries");
+  ran.insert("origin-cost");
+}
+// The submission rules and the lookup, on the production functions.
+void origin_unit_cases() {
+  std::int16_t d[448] = {};
+  check(segarecomp::scenery::origin_in_range(0, d, 448, 896) && segarecomp::scenery::origin_in_range(1, d, 1, 2), "origin: 1..448 rows are in range");
+  check(!segarecomp::scenery::origin_in_range(2, d, 8, 16) && !segarecomp::scenery::origin_in_range(0, nullptr, 8, 16) && !segarecomp::scenery::origin_in_range(0, d, 0, 0) && !segarecomp::scenery::origin_in_range(0, d, 449, 898) &&
+        !segarecomp::scenery::origin_in_range(0, d, 8, 15) && !segarecomp::scenery::origin_in_range(0, d, 8, 17), "origin: bad plane, NULL, 0 or 449 rows, and a wrong byte count are range faults");
+  segarecomp::scenery::RowOrigin o;
+  d[3] = -64; d[5] = 64;
+  segarecomp::scenery::origin_store(o, d, 6);
+  check(segarecomp::scenery::origin_of(&o, 3) == -64 && segarecomp::scenery::origin_of(&o, 5) == 64 && segarecomp::scenery::origin_of(&o, 6) == 0 && segarecomp::scenery::origin_of(&o, 447) == 0 &&
+        segarecomp::scenery::origin_of(&o, -1) == 0 && segarecomp::scenery::origin_of(nullptr, 3) == 0, "origin: rows beyond the submission and an absent submission are delta 0");
+  segarecomp::scenery::origin_store(o, d, 2);
+  check(segarecomp::scenery::origin_of(&o, 3) == 0 && segarecomp::scenery::origin_of(&o, 5) == 0, "origin: a new submission replaces the old table entirely (nothing of it survives)");
+  d[1] = 7; segarecomp::scenery::origin_store(o, d, 2); d[1] = 99;
+  check(segarecomp::scenery::origin_of(&o, 1) == 7, "origin: the submitted buffer is copied, not retained");
+  segarecomp::scenery::Window w[2];
+  w[0].present = true; w[0].x0 = 10; w[0].y0 = 0; w[0].cols = 2; w[0].rows = 1; w[0].words = {111, 222};
+  std::uint16_t word = 0;
+  check(segarecomp::scenery::lookup(w, 0, 0, 0, 0, &word, 10) == 1 && word == 111 && segarecomp::scenery::lookup(w, 0, 8, 0, 0, &word, 10) == 1 && word == 222, "origin: lookup adds the delta to the plane cell column");
+  check(segarecomp::scenery::lookup(w, 0, 0, 0, 0, &word) == 0 && segarecomp::scenery::lookup(w, 0, 0, 0, 0, &word, 12) == 0, "origin: no delta (or a delta outside the window) is a failed answer");
+  segarecomp::scenery::RowMask m;
+  std::uint8_t bits[1] = {1};
+  segarecomp::scenery::mask_store(m, bits, 1);
+  check(segarecomp::scenery::answer(m, w, 0, 0, 0, 0, &word, 3, 4, &o) == 3, "origin: the per-row mask keeps precedence over the delta");
+}
+
 int run_scenery_suite() {
   Tally exact, predicted;
   const std::vector<Scenario> all = scenarios();
@@ -558,6 +696,11 @@ int run_scenery_suite() {
   mask_viewport_row_index();
   mask_448_row_frame();
   mask_448_producer();
+  origin_parity_matrix();
+  origin_cost_line();
+  origin_falsification();
+  origin_capacity();
+  origin_unit_cases();
   std::printf("PARITY mask totals: cases %u (pass %u, limit %u)\n", masked.cases, masked.pass, masked.limit);
   std::printf("PARITY totals: exact cases %u (pass %u, limit %u), predicted cases %u (pass %u, limit %u)\n", exact.cases, exact.pass, exact.limit, predicted.cases, predicted.pass, predicted.limit);
   return failures;

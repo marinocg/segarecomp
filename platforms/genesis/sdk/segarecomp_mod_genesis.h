@@ -62,7 +62,7 @@ typedef struct SegaGenesisRenderApi {
   void *reserved[4];                          /* NULL */
   /* Appended by SEG-152-T005/T006 (ABI minor 1, ADR 0320 decisions 6 and 7; a provider reads these only when `size` covers them and its manifest declares abi.minor >= 1). */
 #if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR < 1)
-  void *e_abi_minor_1_required_render[6]; /* a source that declares no abi.minor does not see overlay_bitmap, overlay_layer_bitmap, overlay_layer_clip, overlay_fallback, decline or scenery_generic_rows */
+  void *e_abi_minor_1_required_render[7]; /* a source that declares no abi.minor does not see overlay_bitmap, overlay_layer_bitmap, overlay_layer_clip, overlay_fallback, decline, scenery_generic_rows or scenery_row_origin */
 #else
   /* Bounded RGBA bitmap (decision 6). `overlay_bitmap` copies w x h RGBA8 pixels (byte order R,G,B,A, straight alpha, `stride_bytes` >= 4 * w, rows top to bottom; the buffer may be reused at once) into the current target
    * (overlay_target) at (x, y). The pixels REPLACE the destination bytes (alpha 0 and its RGB included, as the ABI 1 transport carries raw bytes); rect and text keep blending, in submission order. 1 <= w,h <= the target's size,
@@ -81,7 +81,7 @@ typedef struct SegaGenesisRenderApi {
   int (*decline)(uint32_t components, uint32_t reason);
   /* Appended by SEG-152-T007 (ABI minor 2, ADR 0320 decision 8 addendum; declare abi.minor = 2 and required_minor = 2, and read it only when `size` covers it). */
 #if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR < 2)
-  void *e_abi_minor_2_required_render; /* a source that declares abi.minor < 2 does not see scenery_generic_rows */
+  void *e_abi_minor_2_required_render[2]; /* a source that declares abi.minor < 2 does not see scenery_generic_rows or scenery_row_origin */
 #else
   /* Per-row generic scenery fallback (the ABI 1 `own_plane` lines). Available only when `scenery.words` was granted (otherwise SEGA_MOD_E_CAPABILITY, a fault of the callback); legal only inside a `render` callback.
    * For plane 0 (A) or 1 (B), marks produced SCREEN rows as answered by the VDP's own plane: the host answers every off-picture cell of a marked row with the plane's own name-table word read from the frame-start VRAM and
@@ -92,6 +92,18 @@ typedef struct SegaGenesisRenderApi {
    * the same plane in one callback. A mask is independent of windows (before or after scenery_window, on a plane with or without windows); a mask with a set bit counts toward the frame being served, one without has no effect.
    * Committed with the callback's other output and bound to exactly the frame it described, like the windows. */
   int (*scenery_generic_rows)(uint32_t plane, const uint8_t *mask, uint32_t rows, uint32_t mask_bytes);
+  /* Appended by SEG-152-T017 (ABI minor 3, ADR 0320 decision 8 addendum 2; declare abi.minor = 3 and required_minor = 3, and read it only when `size` covers it). */
+#if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR < 3)
+  void *e_abi_minor_3_required_render; /* a source that declares abi.minor < 3 does not see scenery_row_origin */
+#else
+  /* Per-row scenery origin delta. Available only when `scenery.words` was granted (otherwise SEGA_MOD_E_CAPABILITY); legal only inside a `render` callback. For plane 0 (A) or 1 (B), `delta_cells[r]` is the signed number of
+   * WHOLE PLANE CELLS by which the world differs from the plane cell the host looks up on produced SCREEN row r (line 0 = first row of the native picture): the host looks the window up at
+   * floor((x - hscroll) / 8) + delta_cells[r] (the plane cell row is unchanged). This lets two screen lines that ask the same plane cell be answered with different words (a line-dependent world origin, e.g. a wrapped
+   * 512 px plane). `rows` is 1..448 and `bytes` must equal rows * 2 (at most 896); rows >= `rows` have delta 0; the host copies the values. NULL, a bad plane, a wrong `bytes` or `rows` outside 1..448 are range faults, as is
+   * a second submission for the same plane in one callback. The per-row generic mask (scenery_generic_rows) keeps precedence on its rows. Independent of window order; committed with the callback's other output and bound
+   * to exactly the frame it described. A provider that never calls it behaves exactly as before. */
+  int (*scenery_row_origin)(uint32_t plane, const int16_t *delta_cells, uint32_t rows, uint32_t bytes);
+#endif
 #endif
 #endif
 } SegaGenesisRenderApi;

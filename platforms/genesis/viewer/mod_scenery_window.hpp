@@ -27,9 +27,10 @@ inline bool submission_in_range(std::uint32_t plane, std::int32_t x0, std::int32
 
 // The host's answer for one off-picture cell: cell = floor((x - hscroll) / 8), floor((row + vscroll) / 8); the FIRST window of the plane that contains it answers (ADR 0313). Returns 1 with
 // the word, or 0 when no window contains the cell (a failed answer, never a guess).
-inline int lookup(const Window (&windows)[kWindowsPerPlane], int row, int x, int hscroll, int vscroll, std::uint16_t *word) {
+// `origin_delta` (SEG-152-T017, ABI minor 3): whole plane cells added to the looked-up plane cell column before the window lookup (the world origin of this line, in cells); 0 for every existing window.
+inline int lookup(const Window (&windows)[kWindowsPerPlane], int row, int x, int hscroll, int vscroll, std::uint16_t *word, int origin_delta = 0) {
   const auto cell = [](long long pixel) { return static_cast<long long>(pixel >= 0 ? pixel / 8 : -((-pixel + 7) / 8)); };   // floor division by 8
-  const long long wx = cell(static_cast<long long>(x) - hscroll), wy = cell(static_cast<long long>(row) + vscroll);
+  const long long wx = cell(static_cast<long long>(x) - hscroll) + origin_delta, wy = cell(static_cast<long long>(row) + vscroll);
   for (const Window &w : windows) {
     if (!w.present) continue;
     const long long cx = wx - w.x0, cy = wy - w.y0;
@@ -66,12 +67,29 @@ inline void mask_store(RowMask &out, const std::uint8_t *mask, std::uint32_t mas
 // The row test: is produced screen row `row` marked generic? One bit test; rows beyond the stored mask are not marked.
 inline bool row_generic(const RowMask &m, unsigned row) { return row < kMaskRowsMax && ((m.bits[row >> 3U] >> (row & 7U)) & 1U) != 0U; }
 
+// SEG-152-T017 (ADR 0320 decision 8 addendum 2, ABI minor 3): the per-row origin delta of one plane. delta[r] is the signed number of whole plane cells the world differs from the plane cell the host looks up on produced SCREEN
+// row r (world column = floor((x - hscroll) / 8) + delta[r]); rows >= `rows` have delta 0. At most 448 rows, 896 bytes per plane. An absent submission is delta 0 everywhere.
+struct RowOrigin {
+  std::int16_t delta[kMaskRowsMax] = {};   // fixed storage, zero-initialised: a row that was not submitted is delta 0
+};
+static_assert(sizeof(RowOrigin) == 896U && sizeof(RowOrigin) == kMaskRowsMax * 2U, "a per-row origin table is exactly 448 x int16 = 896 bytes (no flag, no padding)");
+
+// In range (the adapter faults the callback with `range` otherwise): plane 0/1, non-NULL, 1..448 rows, `bytes` exactly rows * 2.
+inline bool origin_in_range(std::uint32_t plane, const std::int16_t *delta, std::uint32_t rows, std::uint32_t bytes) {
+  return !(plane > 1U || delta == nullptr || rows == 0U || rows > kMaskRowsMax || bytes != rows * 2U);
+}
+inline void origin_store(RowOrigin &out, const std::int16_t *delta, std::uint32_t rows) {
+  out = RowOrigin{};
+  std::memcpy(out.delta, delta, rows * sizeof(std::int16_t));
+}
+inline int origin_of(const RowOrigin *o, int row) { return o != nullptr && row >= 0 && static_cast<unsigned>(row) < kMaskRowsMax ? o->delta[row] : 0; }
+
 // The whole host answer for one off-picture cell of one plane (the adapter's `scenery_word` after its frame checks, shared with the parity harness): a marked screen row answers `vdp_code` (the host-private
 // GENESIS_COMPAT_WORD_VDP_START, before any window of the plane is consulted); a plane without a window answers `generic_code` (ADR 0314); otherwise the first containing window answers, or the cell fails (0).
-inline int answer(const RowMask &mask, const Window (&windows)[kWindowsPerPlane], int row, int x, int hscroll, int vscroll, std::uint16_t *word, int vdp_code, int generic_code) {
-  if (row >= 0 && row_generic(mask, static_cast<unsigned>(row))) return vdp_code;
+inline int answer(const RowMask &mask, const Window (&windows)[kWindowsPerPlane], int row, int x, int hscroll, int vscroll, std::uint16_t *word, int vdp_code, int generic_code, const RowOrigin *origin = nullptr) {
+  if (row >= 0 && row_generic(mask, static_cast<unsigned>(row))) return vdp_code;   // the per-row mask keeps precedence over the origin delta
   if (!windows[0].present && !windows[1].present) return generic_code;
-  return lookup(windows, row, x, hscroll, vscroll, word);
+  return lookup(windows, row, x, hscroll, vscroll, word, origin_of(origin, row));
 }
 
 }  // namespace scenery
