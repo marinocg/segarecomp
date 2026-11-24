@@ -476,16 +476,17 @@ void completeness() {
                                  "raster-condition-cell-row", "level-start", "level-end", "wrap-crossing", "fast-camera"};
   const char *const masks[] = {"fallback-mid-cell", "plane-a-only", "plane-b-only", "different-masks", "shared-cell", "alternating", "boundary-in-cell", "both-masked", "all-rows-masked", "mask-only", "mask-one-plane-windows-other",
                                "window-band", "journal-write", "no-journal", "parallax-mask"};
-  const char *const scenes[] = {"parallax-hud", "split-scroll-hud", "line-palette", "fade-decline", "unsupported-scene", "pause-hud-only", "bad-hud", "generic-plane", "window-band-hud"};
+  const char *const scenes[] = {"parallax-hud", "split-scroll-hud", "line-palette", "fade-decline", "unsupported-scene", "pause-hud-only", "bad-hud", "generic-plane", "origin-bands-hud", "window-band-hud"};
   unsigned required = 0;
   const auto need = [&](const std::string &id, bool in_scenery) { ++required; check((in_scenery ? ran.count(id) : gate_ran.count(id)) != 0U, "MANDATORY case ran: " + id); };
   for (const char *id : scenery) for (const char *asp : {"16:9", "21:9", "32:9"}) { need(std::string("scenario-exact:") + id + ":" + asp, true); need(std::string("scenario-predicted:") + id + ":" + asp, true); }
   for (const char *id : masks) for (const char *asp : {"16:9", "21:9", "32:9"}) need(std::string("mask:") + id + ":" + asp, true);
-  need("mask-448-producer", true); need("code3-gate", true);
+  need("mask-448-producer", true); need("code3-gate", true); need("origin-cost", true);
+  for (const char *id : {"origin-two-bands", "origin-three-bands", "origin-ramp", "origin-and-mask"}) for (const char *asp : {"16:9", "21:9", "32:9"}) need(std::string("origin:") + id + ":" + asp, true);   // SEG-152-T017
   for (const char *id : scenes) for (const char *asp : kAspectName) need(std::string("presentation:") + id + ":" + asp, false);
   for (const char *id : {"stale-scroll", "stale-cache-key", "stale-placement", "skipped-callback", "missing-refusal", "wrong-reason", "oversized-bitmap"}) need(std::string("falsify:") + id, false);
   for (const char *id : {"sequence:fade", "sequence:aspect-transition", "sequence:replay", "sequence:cache-cleared-vs-warm", "sequence:save-load", "sequence:rewind", "fault-injection", "stale-placement-rejection"}) need(id, false);
-  check(required == 15U * 6U + 15U * 3U + 2U + 9U * 4U + 7U + 8U, "the mandatory list has the expected size (" + std::to_string(required) + ")");
+  check(required == 15U * 6U + 15U * 3U + 2U + 1U + 4U * 3U + 10U * 4U + 7U + 8U, "the mandatory list has the expected size (" + std::to_string(required) + ")");
   std::printf("PARITY gate completeness: %u mandatory cases, none missing=%s\n", required, failures == 0 ? "yes" : "see FAIL lines");
   // T001's recorded WATCHED classes: documented synthetic limits with no real-provider failure (T001 decision, stays unimplemented); they must keep failing deterministically, never be silently passed or excused
   const Scenario *watched[2] = {nullptr, nullptr};

@@ -68,11 +68,11 @@ inline void mask_store(RowMask &out, const std::uint8_t *mask, std::uint32_t mas
 inline bool row_generic(const RowMask &m, unsigned row) { return row < kMaskRowsMax && ((m.bits[row >> 3U] >> (row & 7U)) & 1U) != 0U; }
 
 // SEG-152-T017 (ADR 0320 decision 8 addendum 2, ABI minor 3): the per-row origin delta of one plane. delta[r] is the signed number of whole plane cells the world differs from the plane cell the host looks up on produced SCREEN
-// row r (world column = floor((x - hscroll) / 8) + delta[r]); rows >= `rows` have delta 0. At most 448 rows, 896 bytes per plane. An absent submission (any == false) is delta 0 everywhere.
+// row r (world column = floor((x - hscroll) / 8) + delta[r]); rows >= `rows` have delta 0. At most 448 rows, 896 bytes per plane. An absent submission is delta 0 everywhere.
 struct RowOrigin {
-  bool any = false;   // at least one non-zero delta
-  std::int16_t delta[kMaskRowsMax] = {};
+  std::int16_t delta[kMaskRowsMax] = {};   // fixed storage, zero-initialised: a row that was not submitted is delta 0
 };
+static_assert(sizeof(RowOrigin) == 896U && sizeof(RowOrigin) == kMaskRowsMax * 2U, "a per-row origin table is exactly 448 x int16 = 896 bytes (no flag, no padding)");
 
 // In range (the adapter faults the callback with `range` otherwise): plane 0/1, non-NULL, 1..448 rows, `bytes` exactly rows * 2.
 inline bool origin_in_range(std::uint32_t plane, const std::int16_t *delta, std::uint32_t rows, std::uint32_t bytes) {
@@ -80,7 +80,7 @@ inline bool origin_in_range(std::uint32_t plane, const std::int16_t *delta, std:
 }
 inline void origin_store(RowOrigin &out, const std::int16_t *delta, std::uint32_t rows) {
   out = RowOrigin{};
-  for (std::uint32_t i = 0; i < rows; ++i) { out.delta[i] = delta[i]; out.any = out.any || delta[i] != 0; }
+  std::memcpy(out.delta, delta, rows * sizeof(std::int16_t));
 }
 inline int origin_of(const RowOrigin *o, int row) { return o != nullptr && row >= 0 && static_cast<unsigned>(row) < kMaskRowsMax ? o->delta[row] : 0; }
 

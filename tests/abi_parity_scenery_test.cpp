@@ -580,6 +580,17 @@ void origin_parity_matrix() {
   }
   std::printf("PARITY origin totals: cases %u\n", cases);
 }
+// Static memory and copy bounds, from the production type: the adapter keeps a staged and a visible table per plane (4 x 896 bytes) and copies at most one table per plane per callback (2 x 896 bytes).
+void origin_cost_line() {
+  constexpr unsigned table = sizeof(segarecomp::scenery::RowOrigin), state_bytes = 4U * table, copy_bytes = 2U * table;
+  static_assert(table == 896U && state_bytes == 3584U && copy_bytes == 1792U, "origin table, state and per-callback copy bounds");
+  const Spec s = origin_fixtures()[0].first;
+  const int side = kAspects[2].side;
+  const Verdict o = run_case(s, side, side, Timing::Exact, -1, origin_options());
+  std::printf("PARITY cost origin 32:9 centred: table %u bytes, adapter state %u bytes (staged + visible, both planes), copy <= %u bytes per callback, host queries abi2 %u / abi1 %u (one integer add per query, no extra query)\n", table, state_bytes, copy_bytes, o.abi2_calls, o.abi1_calls);
+  check(o.abi2_calls == o.abi1_calls, "the origin delta adds no host queries");
+  ran.insert("origin-cost");
+}
 // The submission rules and the lookup, on the production functions.
 void origin_unit_cases() {
   std::int16_t d[448] = {};
@@ -589,10 +600,12 @@ void origin_unit_cases() {
   segarecomp::scenery::RowOrigin o;
   d[3] = -64; d[5] = 64;
   segarecomp::scenery::origin_store(o, d, 6);
-  check(o.any && segarecomp::scenery::origin_of(&o, 3) == -64 && segarecomp::scenery::origin_of(&o, 5) == 64 && segarecomp::scenery::origin_of(&o, 6) == 0 && segarecomp::scenery::origin_of(&o, 447) == 0 &&
+  check(segarecomp::scenery::origin_of(&o, 3) == -64 && segarecomp::scenery::origin_of(&o, 5) == 64 && segarecomp::scenery::origin_of(&o, 6) == 0 && segarecomp::scenery::origin_of(&o, 447) == 0 &&
         segarecomp::scenery::origin_of(&o, -1) == 0 && segarecomp::scenery::origin_of(nullptr, 3) == 0, "origin: rows beyond the submission and an absent submission are delta 0");
   segarecomp::scenery::origin_store(o, d, 2);
-  check(!o.any, "origin: an all-zero submission has no effect");
+  check(segarecomp::scenery::origin_of(&o, 3) == 0 && segarecomp::scenery::origin_of(&o, 5) == 0, "origin: a new submission replaces the old table entirely (nothing of it survives)");
+  d[1] = 7; segarecomp::scenery::origin_store(o, d, 2); d[1] = 99;
+  check(segarecomp::scenery::origin_of(&o, 1) == 7, "origin: the submitted buffer is copied, not retained");
   segarecomp::scenery::Window w[2];
   w[0].present = true; w[0].x0 = 10; w[0].y0 = 0; w[0].cols = 2; w[0].rows = 1; w[0].words = {111, 222};
   std::uint16_t word = 0;
@@ -626,6 +639,7 @@ int run_scenery_suite() {
   mask_448_row_frame();
   mask_448_producer();
   origin_parity_matrix();
+  origin_cost_line();
   origin_unit_cases();
   std::printf("PARITY mask totals: cases %u (pass %u, limit %u)\n", masked.cases, masked.pass, masked.limit);
   std::printf("PARITY totals: exact cases %u (pass %u, limit %u), predicted cases %u (pass %u, limit %u)\n", exact.cases, exact.pass, exact.limit, predicted.cases, predicted.pass, predicted.limit);
