@@ -34,4 +34,8 @@
     {"window-band-hud:16:9", 0x4c50940593d7fc11ULL},
     {"window-band-hud:21:9", 0xf5afaf8e449c9079ULL},
     {"window-band-hud:32:9", 0x569302b02f9a6dfcULL},
+    {"origin-bands-hud:4:3", 0xe79bbb90f9c21ee1ULL},
+    {"origin-bands-hud:16:9", 0x4211db260d16f4a4ULL},
+    {"origin-bands-hud:21:9", 0xa35eaf29ef39b54bULL},
+    {"origin-bands-hud:32:9", 0x9b74aa44322042fcULL},
     {"sequence:24-frame-chain", 0x5995eced3e7b557bULL},

@@ -97,6 +97,8 @@ struct Mod {
   SceneryWindow staged_scenery[2][2], visible_scenery[2][2];   // [plane][window]: ADR 0313, up to two windows per plane (the playfield rows and a split-scroll band can need disjoint cell ranges)
   // SEG-152-T007 (ADR 0320 decision 8 addendum): the per-plane per-row generic mask, staged / committed / cleared exactly like the windows (2 x 56 bytes staged + 2 x 56 visible; no provider pointer is retained).
   segarecomp::scenery::RowMask staged_row_mask[2], visible_row_mask[2];
+  segarecomp::scenery::RowOrigin staged_row_origin[2], visible_row_origin[2];   // SEG-152-T017
+  bool staged_row_origin_submitted[2] = {false, false};
   bool staged_row_mask_submitted[2] = {false, false};   // at most one submission per plane per callback
   std::uint64_t visible_scenery_frame = 0;   // the guest frame whose render callback committed `visible_scenery` (and the ADR 0315 placement below: they are committed together)
   // ADR 0315: the frame-bound asymmetric placement. `margin` is the per-side margin the provider saw when it chose `left_px`; -1 = none declared.
@@ -295,6 +297,18 @@ int api_scenery_generic_rows(std::uint32_t plane, const std::uint8_t *mask, std:
   g.staged_row_mask_submitted[plane] = true;
   return SEGA_MOD_OK;
 }
+// SEG-152-T017 (ABI minor 3): per-row world-origin delta in whole plane cells (see mod_scenery_window.hpp). Needs `scenery.words`; validated before anything is staged; one submission per plane per callback.
+int api_scenery_row_origin(std::uint32_t plane, const std::int16_t *delta_cells, std::uint32_t rows, std::uint32_t bytes) {
+  if (!in_render()) return refused_phase();
+  if (!sega_mod_is_granted(&g.scheduler->host, SEGA_MOD_CAP_SCENERY_WORDS)) { genesis_mod_fault_current("capability"); return SEGA_MOD_E_CAPABILITY; }
+  if (!segarecomp::scenery::origin_in_range(plane, delta_cells, rows, bytes) || g.staged_row_origin_submitted[plane]) {
+    genesis_mod_fault_current("range");
+    return SEGA_MOD_E_RANGE;
+  }
+  segarecomp::scenery::origin_store(g.staged_row_origin[plane], delta_cells, rows);
+  g.staged_row_origin_submitted[plane] = true;
+  return SEGA_MOD_OK;
+}
 // ADR 0315: the per-side margin of the host's most recently PUBLISHED extension result, read from the runtime's own publication (never cached): zero for Original, 4:3, a failed production or before the first one,
 // because the runtime publishes a result (status NONE / UNAVAILABLE, side 0) for every frame, including the ones that return before prepare().
 std::uint32_t current_margin() {
@@ -337,7 +351,7 @@ static_assert(sizeof(SegaGenesisFrameLine) == sizeof(GenesisCompatLine) && offse
               "the ABI 2 frame line has the layout of the ABI 1 compat line");
 #endif
 SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, api_scenery_window, api_view_margin, api_view_left, {nullptr, nullptr, nullptr, nullptr},
-                                   api_overlay_bitmap, api_overlay_layer_bitmap, api_overlay_layer_clip, api_overlay_fallback, api_decline, api_scenery_generic_rows};
+                                   api_overlay_bitmap, api_overlay_layer_bitmap, api_overlay_layer_clip, api_overlay_fallback, api_decline, api_scenery_generic_rows, api_scenery_row_origin};
 
 // The provider's `phase` entry, wrapped: a render callback starts from an empty staging area, and what it staged becomes visible only if the callback finished without a fault (a faulted callback leaves nothing).
 void wrapped_phase(void *state, const SegaModHost *host) {
@@ -346,7 +360,7 @@ void wrapped_phase(void *state, const SegaModHost *host) {
     g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; g.have_staged_set = false; g.have_visible_set = false;
     for (auto &plane_windows : g.staged_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};
     for (auto &plane_windows : g.visible_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};   // nothing of an earlier frame survives the start of a render callback
-    for (unsigned plane = 0; plane < 2U; ++plane) { g.staged_row_mask[plane] = segarecomp::scenery::RowMask{}; g.visible_row_mask[plane] = segarecomp::scenery::RowMask{}; g.staged_row_mask_submitted[plane] = false; }
+    for (unsigned plane = 0; plane < 2U; ++plane) { g.staged_row_mask[plane] = segarecomp::scenery::RowMask{}; g.visible_row_mask[plane] = segarecomp::scenery::RowMask{}; g.staged_row_origin[plane] = segarecomp::scenery::RowOrigin{}; g.visible_row_origin[plane] = segarecomp::scenery::RowOrigin{}; g.staged_row_origin_submitted[plane] = false; g.staged_row_mask_submitted[plane] = false; }
     g.staged_left_px = g.visible_left_px = -1;
   }
   g.native_phase_entry(state, host);
@@ -359,7 +373,7 @@ void wrapped_phase(void *state, const SegaModHost *host) {
       g.visible_set_digest = g.visible_set_digest_valid ? fnv1a64(g.scheduler->render_copy, GENESIS_MOD_WORK_RAM_BYTES) : 0U;
     }
     for (unsigned plane = 0; plane < 2U; ++plane) for (unsigned k = 0; k < 2U; ++k) std::swap(g.visible_scenery[plane][k], g.staged_scenery[plane][k]);
-    for (unsigned plane = 0; plane < 2U; ++plane) std::swap(g.visible_row_mask[plane], g.staged_row_mask[plane]);
+    for (unsigned plane = 0; plane < 2U; ++plane) { std::swap(g.visible_row_mask[plane], g.staged_row_mask[plane]); std::swap(g.visible_row_origin[plane], g.staged_row_origin[plane]); }
     g.visible_scenery_frame = host->frame;
     g.visible_left_px = g.staged_left_px;
     g.visible_left_margin = g.staged_left_margin;
@@ -368,7 +382,7 @@ void wrapped_phase(void *state, const SegaModHost *host) {
     g.staged_left_px = -1;
     g.staged = luau::Output{}; g.have_staged_set = false;
     for (auto &plane_windows : g.staged_scenery) for (Mod::SceneryWindow &w : plane_windows) w = Mod::SceneryWindow{};
-    for (unsigned plane = 0; plane < 2U; ++plane) { g.staged_row_mask[plane] = segarecomp::scenery::RowMask{}; g.staged_row_mask_submitted[plane] = false; }
+    for (unsigned plane = 0; plane < 2U; ++plane) { g.staged_row_mask[plane] = segarecomp::scenery::RowMask{}; g.staged_row_mask_submitted[plane] = false; g.staged_row_origin[plane] = segarecomp::scenery::RowOrigin{}; g.staged_row_origin_submitted[plane] = false; }
   }
 }
 #endif
@@ -624,7 +638,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
 int scenery_word(void *, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
 #ifdef SEGARECOMP_MOD_NATIVE
   if (!p.scenery || plane > 1U || word == nullptr) return 0;
-  return segarecomp::scenery::answer(g.visible_row_mask[plane], g.visible_scenery[plane], static_cast<int>(row), x, hscroll, vscroll, word, GENESIS_COMPAT_WORD_VDP_START, GENESIS_COMPAT_WORD_GENERIC);   // SEG-152-T007: a marked screen row is the VDP's own word as a provider word (honoured only on this adapter's trusted attach); ADR 0314: a plane without a window is left to the generic extension
+  return segarecomp::scenery::answer(g.visible_row_mask[plane], g.visible_scenery[plane], static_cast<int>(row), x, hscroll, vscroll, word, GENESIS_COMPAT_WORD_VDP_START, GENESIS_COMPAT_WORD_GENERIC, &g.visible_row_origin[plane]);   // SEG-152-T017: the per-row origin delta; SEG-152-T007: a marked screen row is the VDP's own word as a provider word (honoured only on this adapter's trusted attach); ADR 0314: a plane without a window is left to the generic extension
 #else
   (void)plane; (void)row; (void)x; (void)hscroll; (void)vscroll; (void)word;
   return 0;

@@ -7,6 +7,10 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Native mods: per-row scenery origin delta (ABI 2 minor 3, ADR 0320)
+
+* A native Genesis mod can now state, per screen row and plane, a whole-cell world origin delta (`scenery_row_origin`, `abi.minor = 3`), so widescreen scenery whose per-line scroll aliases a wrapped 512 px plane is answered exactly like the original provider. Providers that do not call it, and every existing mod, are unchanged.
+
 ### Sound for the Krisalis driver family: Chuck Rock, Mickey Mania and The Lion King no longer wait forever on the sound handshake (ADR 0318)
 
 * Games that use the Krisalis (Shaun Hollingworth) Mega Drive driver ended with a degraded sound CPU and a 68000 spinning on the mailbox it never saw acknowledged (frozen title / blank screen). The build now selects, automatically, a native C11 replacement

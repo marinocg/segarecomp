@@ -4,7 +4,7 @@
 
 #include <string.h>
 
-enum { OP_RECT = 1, OP_TEXT, OP_BITMAP, OP_TARGET, OP_LAYER, OP_LAYER_BITMAP, OP_CLIP, OP_FALLBACK, OP_DECLINE, OP_SCENE, OP_WINDOW, OP_SPRITES, OP_LAYER_LEGACY_RAW, OP_MASK };
+enum { OP_RECT = 1, OP_TEXT, OP_BITMAP, OP_TARGET, OP_LAYER, OP_LAYER_BITMAP, OP_CLIP, OP_FALLBACK, OP_DECLINE, OP_SCENE, OP_WINDOW, OP_SPRITES, OP_LAYER_LEGACY_RAW, OP_MASK, OP_ORIGIN };
 
 typedef struct ScriptOp {
   uint32_t kind;
@@ -64,6 +64,7 @@ static void script_phase(void *state, const SegaModHost *host) {
         break;
       }
       case OP_MASK: st = r->scenery_generic_rows((uint32_t)o->a[0], o->px, (uint32_t)o->a[1], (uint32_t)o->a[2]); break; /* SEG-152-T007: plane, rows, mask_bytes, mask pointer (may be NULL) */
+      case OP_ORIGIN: st = r->scenery_row_origin((uint32_t)o->a[0], (const int16_t *)o->px, (uint32_t)o->a[1], (uint32_t)o->a[2]); break; /* SEG-152-T017: plane, rows, bytes, delta pointer (may be NULL) */
       case OP_SPRITES:
         memset(&g_set, 0, sizeof g_set);
         g_set.count = 1U;

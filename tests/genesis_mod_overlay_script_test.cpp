@@ -19,7 +19,7 @@ extern "C" {
 int segarecomp_capture_mod_begin(GenesisRuntime *runtime);
 void segarecomp_capture_mod_end(GenesisRuntime *runtime);
 const GenesisNativeCompat *segarecomp_patch_provider(void **state_out);
-enum { OP_RECT = 1, OP_TEXT, OP_BITMAP, OP_TARGET, OP_LAYER, OP_LAYER_BITMAP, OP_CLIP, OP_FALLBACK, OP_DECLINE, OP_SCENE, OP_WINDOW, OP_SPRITES, OP_LAYER_LEGACY_RAW, OP_MASK };
+enum { OP_RECT = 1, OP_TEXT, OP_BITMAP, OP_TARGET, OP_LAYER, OP_LAYER_BITMAP, OP_CLIP, OP_FALLBACK, OP_DECLINE, OP_SCENE, OP_WINDOW, OP_SPRITES, OP_LAYER_LEGACY_RAW, OP_MASK, OP_ORIGIN };
 typedef struct ScriptOp {
   uint32_t kind;
   int32_t a[8];
@@ -80,6 +80,7 @@ struct Script {
   void window(unsigned plane, int cx, int cy, unsigned word) { ScriptOp &o = add(OP_WINDOW); o.a[0] = static_cast<int32_t>(plane); o.a[1] = cx; o.a[2] = cy; o.a[3] = static_cast<int32_t>(word); }
   void sprites() { add(OP_SPRITES); }
   void mask(unsigned plane, unsigned rows, unsigned mask_bytes, const uint8_t *bits) { ScriptOp &o = add(OP_MASK); o.a[0] = static_cast<int32_t>(plane); o.a[1] = static_cast<int32_t>(rows); o.a[2] = static_cast<int32_t>(mask_bytes); o.px = bits; }
+  void origin(unsigned plane, unsigned rows, unsigned bytes, const int16_t *delta) { ScriptOp &o = add(OP_ORIGIN); o.a[0] = static_cast<int32_t>(plane); o.a[1] = static_cast<int32_t>(rows); o.a[2] = static_cast<int32_t>(bytes); o.px = reinterpret_cast<const uint8_t *>(delta); }   // SEG-152-T017
 };
 
 // ---- an attached adapter over a synthetic runtime (fresh per scenario: a fault disables the mod for good) ----
@@ -824,6 +825,75 @@ void rows_phase_tests() {
   h.rt->virtual_frame_count = g_script.last_frame + 2U;
   check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), "the out-of-phase call faulted the callback: the mod presents nothing");
 }
+// ---- SEG-152-T017: scenery_row_origin (ABI minor 3) on the real adapter ----
+void origin_tests(bool exact) {
+  const auto commit = [&](Harness &h) -> Transport {
+    if (!exact) { run_frames(*h.rt, h.rt->virtual_frame_count + 4U); h.rt->virtual_frame_count = g_script.last_frame + 2U; }
+    return h.produce(0x11U, GENESIS_COMPAT_SCENERY);
+  };
+  static int16_t delta[448];
+  for (int16_t &d : delta) d = 0;
+  delta[3] = 11;   // screen row 3: the window cell asked is plane cell + 11
+  delta[5] = -4;
+  {   // the window sits at world cell 10; row 3 asks plane cell -1 and is answered from world cell 10; row 4 (delta 0) asks cell -1 and fails; a mask keeps precedence
+    Harness h;
+    const std::vector<uint8_t> m = rows_bits({5}, 8);
+    Script s; s.window(0, 10, 0, 0x2011U); s.origin(0, 8, 16, delta); s.mask(0, 8, 1, m.data());
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(g_script.statuses[1] == 0 && g_script.statuses[2] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY, "scenery_row_origin is accepted with a window and a mask");
+    check(answer_at(h, 0, 3, -4, &w) == 1 && w == 0x2011U, "row 3 asks plane cell -1 and is answered from world cell -1 + 11");
+    check(answer_at(h, 0, 4, -4, &w) == 0 && answer_at(h, 0, 3, -20, &w) == 0, "a row without a delta (or a cell outside the window) is a failed answer");
+    check(answer_at(h, 0, 5, -4, &w) == kVdpStart, "the per-row mask keeps precedence over the origin delta");
+    check(answer_at(h, 1, 3, -4, &w) == GENESIS_COMPAT_WORD_GENERIC, "the other plane submitted nothing and has no window");
+  }
+  {   // 448 rows are accepted; a submission of all-zero deltas changes nothing
+    Harness h;
+    Script s; s.window(0, -1, 0, 0x2011U); s.origin(0, 448, 896, delta); s.origin(1, 1, 2, delta);
+    const Transport t = commit(h);
+    check(g_script.statuses[1] == 0 && g_script.statuses[2] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY, "448 rows (896 bytes) and a one-row submission are in range");
+  }
+  const auto fault_case = [&](const char *what, void (*build)(Script &)) {
+    Harness h;
+    Script s; s.window(0, -1, 0, 0x2011U); s.origin(0, 8, 16, delta);   // valid staging first: the fault must discard it together with everything else
+    build(s);
+    const Transport t = commit(h);
+    check(g_script.statuses[g_script.ran - 1U] == SEGA_MOD_E_RANGE, std::string(what) + ": a range fault");
+    check(faulted(t) && t.word_status == -1, std::string(what) + ": the whole callback is discarded and nothing is presented");
+  };
+  fault_case("bad plane", [](Script &s) { s.origin(2, 8, 16, delta); });
+  fault_case("rows 0", [](Script &s) { s.origin(1, 0, 0, delta); });
+  fault_case("rows 449", [](Script &s) { s.origin(1, 449, 898, delta); });
+  fault_case("NULL delta", [](Script &s) { s.origin(1, 8, 16, nullptr); });
+  fault_case("bytes too short", [](Script &s) { s.origin(1, 8, 15, delta); });
+  fault_case("bytes too long", [](Script &s) { s.origin(1, 8, 17, delta); });
+  fault_case("duplicate submission for one plane", [](Script &s) { s.origin(0, 8, 16, delta); });
+  if (!exact) {   // frame binding: the delta lives with the callback that described the frame and is replaced by the next one
+    Harness h;
+    Script s; s.window(0, 10, 0, 0x2011U); s.origin(0, 8, 16, delta);
+    run_frames(*h.rt, 8U);
+    const uint64_t frame = g_script.last_frame;
+    h.rt->virtual_frame_count = frame + 2U;
+    uint16_t w = 0;
+    check((h.produce(0x11U, GENESIS_COMPAT_SCENERY).dec.accepted & GENESIS_COMPAT_SCENERY) != 0U && answer_at(h, 0, 3, -4, &w) == 1 && w == 0x2011U, "the frame the callback described is served with its delta");
+    h.rt->virtual_frame_count = frame + 7U;
+    check((h.produce(0x12U, GENESIS_COMPAT_SCENERY).dec.accepted & GENESIS_COMPAT_SCENERY) == 0U, "after a skipped callback the windows (and their delta) are not served");
+    Script s2; s2.window(0, 10, 0, 0x2011U);   // the next callback submits no delta: nothing of the earlier one survives
+    run_frames(*h.rt, h.rt->virtual_frame_count + 4U);
+    h.rt->virtual_frame_count = g_script.last_frame + 2U;
+    h.produce(0x13U, GENESIS_COMPAT_SCENERY);
+    check(answer_at(h, 0, 3, -4, &w) == 0, "a later callback replaces the earlier delta: nothing of it survives");
+  }
+}
+void origin_capability_tests() {
+  static int16_t delta[8] = {};
+  Harness h;
+  Script s; s.origin(0, 8, 16, delta);
+  run_frames(*h.rt, 8U);
+  check(g_script.has_render_api == 1U && g_script.statuses[0] == SEGA_MOD_E_CAPABILITY, "scenery_row_origin without scenery.words is SEGA_MOD_E_CAPABILITY");
+  h.rt->virtual_frame_count = g_script.last_frame + 2U;
+  check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), "the callback faulted: the mod presents nothing");
+}
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -836,6 +906,9 @@ int main(int argc, char **argv) {
   else if (mode == "rows_ordinary") rows_tests(false);
   else if (mode == "rows_capability") rows_capability_tests();
   else if (mode == "rows_phase") rows_phase_tests();
+  else if (mode == "origin_exact") origin_tests(true);
+  else if (mode == "origin_ordinary") origin_tests(false);
+  else if (mode == "origin_capability") origin_capability_tests();
   else { std::puts("usage: genesis_mod_overlay_script_tests bitmap|refusal"); return 2; }
   if (failures != 0) { std::printf("genesis_mod_overlay_script_tests %s: %d FAILED\n", mode.c_str(), failures); return 1; }
   std::printf("genesis_mod_overlay_script_tests %s: OK\n", mode.c_str());

@@ -247,7 +247,7 @@ Pair run_pair(const Spec &s, int side, int left, Mutant m = Mutant::None, Builde
   }
   ref.kind = Provider::Abi1; ref.table = &table1;
   twin.kind = Provider::Abi2; twin.table = &table2; twin.abi2 = true; twin.mutant = m;
-  Options opt; opt.use_mask = true;
+  Options opt; opt.use_mask = true; opt.use_origin = s.origin_delta;
   Spec built_spec = s;
   if (m == Mutant::StaleScroll)   // the provider built its windows from the scroll of the previous frame (3 px behind)
     for (unsigned p = 0; p < 2; ++p) for (int r = 0; r < H; ++r) built_spec.hs[p][r] = wrap10(built_spec.hs[p][r] + 3);
@@ -261,6 +261,11 @@ Pair run_pair(const Spec &s, int side, int left, Mutant m = Mutant::None, Builde
     uint8_t bytes[(H + 7) / 8] = {};
     for (int r = 0; r < H; ++r) if (s.fallback[plane][r] != 0U) bytes[r >> 3] = static_cast<uint8_t>(bytes[r >> 3] | (1U << (r & 7)));
     segarecomp::scenery::mask_store(twin.mask[plane], bytes, (H + 7) / 8);
+    if (s.origin_delta) {   // SEG-152-T017: delta[r] = 64 k[r] whole plane cells, the submission of an ABI minor 3 provider (cached windows are world-keyed)
+      int16_t delta[H];
+      for (int r = 0; r < H; ++r) delta[r] = static_cast<int16_t>(64 * s.k[plane][r]);
+      segarecomp::scenery::origin_store(twin.origin[plane], delta, H);
+    }
   }
   Pair out;
   const auto t0 = std::chrono::steady_clock::now();
@@ -288,6 +293,7 @@ std::vector<GateScene> gate_scenes() {
   { Spec s = gate_base("pause-hud-only"); s.scene_id = 1; v.push_back({s, "a scene whose scenery is left generic: only the HUD is served", GENESIS_COMPAT_HUD, GENESIS_COMPAT_OK}); }
   { Spec s = gate_base("bad-hud"); s.bad_hud = 1; for (int r = 100; r < H; ++r) s.fallback[1][r] = 1; v.push_back({s, "HUD state refused (BAD_STATE), scenery served with a per-row generic mask", GENESIS_COMPAT_SCENERY, GENESIS_COMPAT_OK}); }
   { Spec s = gate_base("generic-plane"); for (int r = 0; r < H; ++r) { s.generic2[0][r] = 1; s.fallback[1][r] = (r % 3 == 0) ? 1 : 0; } v.push_back({s, "plane A left to the generic extension, plane B mixed rows", kBoth, GENESIS_COMPAT_OK}); }
+  { Spec s = gate_base("origin-bands-hud"); s.origin_delta = true; set_plane(s, 1, [](int) { return -150; }, [](int r) { return r < 100 ? 0 : 1; }); set_plane(s, 0, [](int r) { return -(300 + (r / 40) * 16); }, [](int r) { return (r / 3) % 2; }); v.push_back({s, "ABI 2 minor 3: line-dependent world origins on both planes (per-row origin delta), HUD from game tiles", kBoth, GENESIS_COMPAT_OK}); }
   { Spec s = gate_base("window-band-hud"); s.window_from_row = 192; set_plane(s, 1, [](int r) { return -(60 + (r / 56) * 30); }); v.push_back({s, "window-plane status band rows with the HUD", kBoth, GENESIS_COMPAT_OK}); }
   return v;
 }

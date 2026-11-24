@@ -537,6 +537,73 @@ void mask_448_producer() {
 }  // namespace
 
 // The whole T001/T007 scenery suite as a function: the standalone test runs it, and the SEG-152-T008 gate runs it as its scenery section (one harness, one set of fixtures, one failure counter).
+// ---- SEG-152-T017: the per-row origin delta (ABI minor 3) ----------------------------------------------------------------------------------------------------------------
+// Synthetic fixtures (no game data): two or more bands that ask the SAME plane cell with world origins 512 px (64 cells) apart. Without the delta the ABI 2 windows cannot hold both words (the T001 "origin-multiple-mid-cell"
+// LIMIT, here the failing fixture); with the production `scenery::answer` and the submitted delta[r] = 64 k[r] the twin is identical to ABI 1 in pixels, verdict and coverage.
+Options origin_options() { Options o; o.use_origin = true; return o; }
+std::vector<std::pair<Spec, const char *>> origin_fixtures() {
+  std::vector<std::pair<Spec, const char *>> v;
+  { Spec s = base_spec("origin-two-bands"); set_plane(s, 1, [](int) { return -150; }, [](int r) { return r < 100 ? 0 : 1; }); v.push_back({s, "multiple changes inside a plane cell row (the T001 limit fixture)"}); }
+  { Spec s = base_spec("origin-three-bands"); set_plane(s, 1, [](int) { return -150; }, [](int r) { return r < 70 ? 0 : (r < 150 ? 1 : -1); }); set_plane(s, 0, [](int) { return -300; }, [](int r) { return r >= 120 ? 2 : 0; }); v.push_back({s, "three bands on B, two on A (negative and positive deltas)"}); }
+  { Spec s = base_spec("origin-ramp"); set_plane(s, 1, [](int r) { return -(100 + r); }, [](int r) { return (r / 3) % 2; }); s.vs[1] = 12; v.push_back({s, "per-line scroll ramp: the alias flips between adjacent lines, with a vertical scroll"}); }
+  { Spec s = base_spec("origin-and-mask"); set_plane(s, 1, [](int) { return -150; }, [](int r) { return r < 100 ? 0 : 1; }); for (int r = 150; r < H; ++r) s.fallback[1][r] = 1; v.push_back({s, "origin delta with a per-row mask band (the mask keeps precedence)"}); }
+  return v;
+}
+void origin_parity_matrix() {
+  unsigned cases = 0;
+  for (const auto &f : origin_fixtures()) {
+    const bool masked = f.first.id == "origin-and-mask";
+    Options opt = origin_options(); opt.use_mask = masked;
+    Options none; none.use_mask = masked;   // the same fixture served by the minor-2 builder (no delta): the failing side
+    for (int ai = 0; ai < 3; ++ai) {   // Original / 4:3 (no extension, no scenery asked) is covered by the gate's presentation scene "origin-bands-hud"
+      const Aspect &asp = kAspects[ai];
+      ran.insert("origin:" + f.first.id + ":" + asp.name);
+      for (const int left : std::vector<int>{0, asp.side / 2, asp.side, asp.side + asp.side / 2, 2 * asp.side}) {
+        const Verdict v = run_case(f.first, asp.side, left, Timing::Exact, -1, opt);
+        ++cases;
+        char what[256];
+        std::snprintf(what, sizeof what, "%s %s left_px=%d: %s (rows differing %u; authored %u/%u rows %u/%u accepted %u/%u reason %u/%u)", f.first.id.c_str(), asp.name, left, v.scenario.c_str(), v.rows_differ, v.authored1, v.authored2,
+                      v.authored_rows1, v.authored_rows2, v.accepted1, v.accepted2, v.reason1, v.reason2);
+        std::printf("PARITY origin %s\n", what);
+        check(v.scenario == "PASS" && v.rows_differ == 0 && v.digest1 == v.digest2, std::string("pixel-identical to ABI 1: ") + what);
+        check(v.coverage_equal && v.accepted1 == v.accepted2 && v.reason1 == v.reason2 && v.authored1 == v.authored2 && v.authored_rows1 == v.authored_rows2, std::string("coverage equal to ABI 1: ") + what);
+        check(v.abi1_calls == v.abi2_calls, std::string("no additional host cell queries: ") + what);
+        if (left == asp.side) {   // the failing side: the minor-2 builder (no delta) and the negative control (windows world-keyed, delta dropped) differ from ABI 1 on every extending aspect
+          const Verdict before = run_case(f.first, asp.side, left, Timing::Exact, -1, none);
+          Options drop = opt; drop.clear_origin = true;
+          const Verdict dropped = run_case(f.first, asp.side, left, Timing::Exact, -1, drop);
+          check(before.rows_differ > 0 && before.digest1 != before.digest2, std::string("without the delta the fixture differs from ABI 1 (the failing fixture): ") + f.first.id + " " + asp.name);
+          check(dropped.rows_differ > 0, std::string("dropping the delta makes it differ again: ") + f.first.id + " " + asp.name);
+        }
+      }
+    }
+  }
+  std::printf("PARITY origin totals: cases %u\n", cases);
+}
+// The submission rules and the lookup, on the production functions.
+void origin_unit_cases() {
+  std::int16_t d[448] = {};
+  check(segarecomp::scenery::origin_in_range(0, d, 448, 896) && segarecomp::scenery::origin_in_range(1, d, 1, 2), "origin: 1..448 rows are in range");
+  check(!segarecomp::scenery::origin_in_range(2, d, 8, 16) && !segarecomp::scenery::origin_in_range(0, nullptr, 8, 16) && !segarecomp::scenery::origin_in_range(0, d, 0, 0) && !segarecomp::scenery::origin_in_range(0, d, 449, 898) &&
+        !segarecomp::scenery::origin_in_range(0, d, 8, 15) && !segarecomp::scenery::origin_in_range(0, d, 8, 17), "origin: bad plane, NULL, 0 or 449 rows, and a wrong byte count are range faults");
+  segarecomp::scenery::RowOrigin o;
+  d[3] = -64; d[5] = 64;
+  segarecomp::scenery::origin_store(o, d, 6);
+  check(o.any && segarecomp::scenery::origin_of(&o, 3) == -64 && segarecomp::scenery::origin_of(&o, 5) == 64 && segarecomp::scenery::origin_of(&o, 6) == 0 && segarecomp::scenery::origin_of(&o, 447) == 0 &&
+        segarecomp::scenery::origin_of(&o, -1) == 0 && segarecomp::scenery::origin_of(nullptr, 3) == 0, "origin: rows beyond the submission and an absent submission are delta 0");
+  segarecomp::scenery::origin_store(o, d, 2);
+  check(!o.any, "origin: an all-zero submission has no effect");
+  segarecomp::scenery::Window w[2];
+  w[0].present = true; w[0].x0 = 10; w[0].y0 = 0; w[0].cols = 2; w[0].rows = 1; w[0].words = {111, 222};
+  std::uint16_t word = 0;
+  check(segarecomp::scenery::lookup(w, 0, 0, 0, 0, &word, 10) == 1 && word == 111 && segarecomp::scenery::lookup(w, 0, 8, 0, 0, &word, 10) == 1 && word == 222, "origin: lookup adds the delta to the plane cell column");
+  check(segarecomp::scenery::lookup(w, 0, 0, 0, 0, &word) == 0 && segarecomp::scenery::lookup(w, 0, 0, 0, 0, &word, 12) == 0, "origin: no delta (or a delta outside the window) is a failed answer");
+  segarecomp::scenery::RowMask m;
+  std::uint8_t bits[1] = {1};
+  segarecomp::scenery::mask_store(m, bits, 1);
+  check(segarecomp::scenery::answer(m, w, 0, 0, 0, 0, &word, 3, 4, &o) == 3, "origin: the per-row mask keeps precedence over the delta");
+}
+
 int run_scenery_suite() {
   Tally exact, predicted;
   const std::vector<Scenario> all = scenarios();
@@ -558,6 +625,8 @@ int run_scenery_suite() {
   mask_viewport_row_index();
   mask_448_row_frame();
   mask_448_producer();
+  origin_parity_matrix();
+  origin_unit_cases();
   std::printf("PARITY mask totals: cases %u (pass %u, limit %u)\n", masked.cases, masked.pass, masked.limit);
   std::printf("PARITY totals: exact cases %u (pass %u, limit %u), predicted cases %u (pass %u, limit %u)\n", exact.cases, exact.pass, exact.limit, predicted.cases, predicted.pass, predicted.limit);
   return failures;
