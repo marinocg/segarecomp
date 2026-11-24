@@ -236,7 +236,10 @@ struct Pair {
 
 uint8_t fade_counter(const Spec &s) { return s.fade; }
 
-Pair run_pair(const Spec &s, int side, int left, Mutant m = Mutant::None, BuilderCache *cache = nullptr, unsigned fault_at = 0, int stale_left = -1, bool original = false) {
+// SEG-152-T017: what the provider submits as its origin table in a frame: Fresh = the table of this frame; Stale = the table of an earlier frame reused (a skipped callback); Absent = a callback that submits none.
+struct OriginOverride { enum Mode { Fresh, Stale, Absent } mode = Fresh; int16_t table[2][H] = {}; };
+void origin_table_of(const Spec &s, int16_t (&t)[2][H]) { for (unsigned p = 0; p < 2; ++p) for (int r = 0; r < H; ++r) t[p][r] = static_cast<int16_t>(64 * s.k[p][r]); }
+Pair run_pair(const Spec &s, int side, int left, Mutant m = Mutant::None, BuilderCache *cache = nullptr, unsigned fault_at = 0, int stale_left = -1, bool original = false, const OriginOverride *origin = nullptr) {
   Scene sc;
   build_scene(sc, s);
   const bool hud = s.hud_tiles;
@@ -261,9 +264,10 @@ Pair run_pair(const Spec &s, int side, int left, Mutant m = Mutant::None, Builde
     uint8_t bytes[(H + 7) / 8] = {};
     for (int r = 0; r < H; ++r) if (s.fallback[plane][r] != 0U) bytes[r >> 3] = static_cast<uint8_t>(bytes[r >> 3] | (1U << (r & 7)));
     segarecomp::scenery::mask_store(twin.mask[plane], bytes, (H + 7) / 8);
-    if (s.origin_delta) {   // SEG-152-T017: delta[r] = 64 k[r] whole plane cells, the submission of an ABI minor 3 provider (cached windows are world-keyed)
-      int16_t delta[H];
-      for (int r = 0; r < H; ++r) delta[r] = static_cast<int16_t>(64 * s.k[plane][r]);
+    if (s.origin_delta && (origin == nullptr || origin->mode != OriginOverride::Absent)) {   // SEG-152-T017: delta[r] = 64 k[r] whole plane cells, the submission of an ABI minor 3 provider (cached windows are world-keyed)
+      int16_t delta[H], fresh[2][H];
+      origin_table_of(s, fresh);
+      for (int r = 0; r < H; ++r) delta[r] = origin != nullptr && origin->mode == OriginOverride::Stale ? origin->table[plane][r] : fresh[plane][r];
       segarecomp::scenery::origin_store(twin.origin[plane], delta, H);
     }
   }
@@ -431,6 +435,57 @@ void sequences() {
   check_golden("sequence:24-frame-chain", [&] { uint64_t h = 14695981039346656037ULL; for (const uint64_t x : uninterrupted) h = fnv1a64(reinterpret_cast<const uint8_t *>(&x), sizeof x, h); return h; }());
 }
 
+// SEG-152-T017: an origin-using sequence: the registered origin multiples move every frame (so the submitted table changes every frame), and the aspect and placement change every frame.
+struct OriginSession { BuilderCache cache; int16_t last[2][H] = {}; bool have_last = false; };
+Spec origin_frame_spec(unsigned i) {
+  Spec s = gate_scenes().back().spec;   // placeholder, replaced below
+  for (const GateScene &g : gate_scenes()) if (g.spec.id == "origin-bands-hud") s = g.spec;
+  set_plane(s, 1, [](int) { return -150; }, [i](int r) { return r < 60 + static_cast<int>(i) * 7 ? 0 : 1; });
+  set_plane(s, 0, [&](int r) { return -(300 + static_cast<int>(i) * 3 + (r / 40) * 16); }, [i](int r) { return ((r + static_cast<int>(i)) / 3) % 2; });
+  return s;
+}
+std::vector<uint64_t> run_origin_sequence(OriginSession &ses, unsigned from, unsigned count, bool use_cache) {
+  std::vector<uint64_t> out;
+  for (unsigned i = from; i < from + count; ++i) {
+    const Spec s = origin_frame_spec(i);
+    const int side = kSide[1 + i % 3U], left = side / 2 + static_cast<int>(i % 3U) * (side / 4);
+    const Pair p = run_pair(s, side, left, Mutant::None, use_cache ? &ses.cache : nullptr);
+    check(p.mismatches.empty(), "origin sequence frame " + std::to_string(i) + " equals ABI 1");
+    out.push_back(presentation_digest(p.b));
+    origin_table_of(s, ses.last); ses.have_last = true;
+  }
+  return out;
+}
+void origin_sequences() {
+  OriginSession a, b, c;
+  const std::vector<uint64_t> whole = run_origin_sequence(a, 0, 18, true);
+  check(whole == run_origin_sequence(b, 0, 18, true), "origin sequence: deterministic replay twice, identical digests");
+  check(whole == run_origin_sequence(c, 0, 18, false), "origin sequence: cache cleared equals the warm provider state");
+  check(std::set<uint64_t>(whole.begin(), whole.end()).size() == whole.size(), "origin sequence: every frame (a different table, aspect and placement) has its own digest");
+  // save/load and rewind
+  OriginSession live;
+  const std::vector<uint64_t> head = run_origin_sequence(live, 0, 8, true);
+  const OriginSession snapshot = live;
+  const std::vector<uint64_t> tail = run_origin_sequence(live, 8, 10, true);
+  OriginSession restored = snapshot;
+  check(run_origin_sequence(restored, 8, 10, true) == tail && std::equal(head.begin(), head.end(), whole.begin()) && std::equal(tail.begin(), tail.end(), whole.begin() + 8), "origin sequence: save/load, then replay, reproduces the uninterrupted run");
+  OriginSession rewound = snapshot; rewound.cache.clear();
+  check(run_origin_sequence(rewound, 8, 10, true) == tail, "origin sequence: rewind with a cleared cache reproduces the same frames");
+  // a skipped render callback: the provider's table of the previous frame must never be reused for this frame; a callback that submits no table leaves no delta. Both are detected by the gate (and the adapter never serves such a frame).
+  for (unsigned i : {5U, 11U}) {
+    const Spec s = origin_frame_spec(i), prev = origin_frame_spec(i - 1U);
+    const int side = kSide[1 + i % 3U], left = side / 2;
+    OriginOverride stale; stale.mode = OriginOverride::Stale; origin_table_of(prev, stale.table);
+    OriginOverride absent; absent.mode = OriginOverride::Absent;
+    const Pair good = run_pair(s, side, left), old = run_pair(s, side, left, Mutant::None, nullptr, 0, -1, false, &stale), none = run_pair(s, side, left, Mutant::None, nullptr, 0, -1, false, &absent);
+    check(good.mismatches.empty(), "origin sequence: the fresh table equals ABI 1");
+    check(!old.mismatches.empty() && presentation_digest(old.b) != presentation_digest(good.b), "origin sequence: a stale table reused after a skipped callback is detected (frame " + std::to_string(i) + ")");
+    check(!none.mismatches.empty() && presentation_digest(none.b) != presentation_digest(good.b), "origin sequence: a callback that submits no table leaves no delta, and that is detected (frame " + std::to_string(i) + ")");
+  }
+  gate_ran.insert("sequence:origin-replay"); gate_ran.insert("sequence:origin-aspect-transition"); gate_ran.insert("sequence:origin-save-load"); gate_ran.insert("sequence:origin-rewind"); gate_ran.insert("sequence:origin-skipped-callback"); gate_ran.insert("sequence:origin-absent-table");
+  check_golden("sequence:origin-18-frame-chain", [&] { uint64_t h = 14695981039346656037ULL; for (const uint64_t x : whole) h = fnv1a64(reinterpret_cast<const uint8_t *>(&x), sizeof x, h); return h; }());
+}
+
 void fault_and_placement_rules() {
   const std::vector<GateScene> scenes = gate_scenes();
   const Spec &s = scenes[0].spec;
@@ -481,12 +536,14 @@ void completeness() {
   const auto need = [&](const std::string &id, bool in_scenery) { ++required; check((in_scenery ? ran.count(id) : gate_ran.count(id)) != 0U, "MANDATORY case ran: " + id); };
   for (const char *id : scenery) for (const char *asp : {"16:9", "21:9", "32:9"}) { need(std::string("scenario-exact:") + id + ":" + asp, true); need(std::string("scenario-predicted:") + id + ":" + asp, true); }
   for (const char *id : masks) for (const char *asp : {"16:9", "21:9", "32:9"}) need(std::string("mask:") + id + ":" + asp, true);
-  need("mask-448-producer", true); need("code3-gate", true); need("origin-cost", true);
+  need("mask-448-producer", true); need("code3-gate", true); need("origin-cost", true); need("origin-capacity", true);
+  for (const char *id : {"negated-delta", "pixel-unit-delta", "wrong-plane", "world-row-indexed", "stale-table", "dropped-table"}) need(std::string("origin-falsify:") + id, true);
   for (const char *id : {"origin-two-bands", "origin-three-bands", "origin-ramp", "origin-and-mask"}) for (const char *asp : {"16:9", "21:9", "32:9"}) need(std::string("origin:") + id + ":" + asp, true);   // SEG-152-T017
   for (const char *id : scenes) for (const char *asp : kAspectName) need(std::string("presentation:") + id + ":" + asp, false);
   for (const char *id : {"stale-scroll", "stale-cache-key", "stale-placement", "skipped-callback", "missing-refusal", "wrong-reason", "oversized-bitmap"}) need(std::string("falsify:") + id, false);
-  for (const char *id : {"sequence:fade", "sequence:aspect-transition", "sequence:replay", "sequence:cache-cleared-vs-warm", "sequence:save-load", "sequence:rewind", "fault-injection", "stale-placement-rejection"}) need(id, false);
-  check(required == 15U * 6U + 15U * 3U + 2U + 1U + 4U * 3U + 10U * 4U + 7U + 8U, "the mandatory list has the expected size (" + std::to_string(required) + ")");
+  for (const char *id : {"sequence:fade", "sequence:aspect-transition", "sequence:replay", "sequence:cache-cleared-vs-warm", "sequence:save-load", "sequence:rewind", "fault-injection", "stale-placement-rejection",
+                         "sequence:origin-replay", "sequence:origin-aspect-transition", "sequence:origin-save-load", "sequence:origin-rewind", "sequence:origin-skipped-callback", "sequence:origin-absent-table"}) need(id, false);
+  check(required == 15U * 6U + 15U * 3U + 2U + 1U + 1U + 6U + 4U * 3U + 10U * 4U + 7U + 8U + 6U, "the mandatory list has the expected size (" + std::to_string(required) + ")");
   std::printf("PARITY gate completeness: %u mandatory cases, none missing=%s\n", required, failures == 0 ? "yes" : "see FAIL lines");
   // T001's recorded WATCHED classes: documented synthetic limits with no real-provider failure (T001 decision, stays unimplemented); they must keep failing deterministically, never be silently passed or excused
   const Scenario *watched[2] = {nullptr, nullptr};
@@ -508,6 +565,7 @@ int main(int argc, char **argv) {
   presentation_matrix();
   falsification();
   sequences();
+  origin_sequences();
   fault_and_placement_rules();
   cost_and_memory_report();
   if (!print_goldens) completeness();

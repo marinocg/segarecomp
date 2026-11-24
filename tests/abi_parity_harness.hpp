@@ -222,6 +222,8 @@ struct Options {
   bool mask_plane[2] = {true, true};   // which planes submit a mask
   bool use_origin = false;             // SEG-152-T017: the origin-using builder keys its windows by WORLD cell (plane cell + 64 k) and submits delta[r] = 64 k[r] per plane
   bool clear_origin = false;           // negative control: the windows are world-keyed but the delta never reaches the host
+  // SEG-152-T017 negative controls: a WRONG origin submission built from the same world-keyed windows (each must differ from ABI 1 on a fixture with line-dependent origins)
+  enum class OriginFault { None, Negated, PixelUnits, WrongPlane, WorldRowIndexed, Stale } origin_fault = OriginFault::None;
   bool clear_mask = false;             // negative control: the builder computed the mask-aware windows but the submission never reaches the host
 };
 struct Built {
@@ -503,7 +505,16 @@ inline void arm_twin(Provider &twin, const Spec &s, const Scene &sc, int side, i
   if (opt.use_origin && !opt.clear_origin)   // the origin-using builder submits delta[r] = 64 k[r] (whole plane cells) per plane
     for (unsigned plane = 0; plane < 2; ++plane) {
       int16_t delta[H];
-      for (int r = 0; r < H; ++r) delta[r] = static_cast<int16_t>(64 * s.k[plane][r]);
+      for (int r = 0; r < H; ++r) {
+        const unsigned src = opt.origin_fault == Options::OriginFault::WrongPlane ? 1U - plane : plane;   // the other plane's table
+        int rr = r;
+        if (opt.origin_fault == Options::OriginFault::WorldRowIndexed) rr = std::min(H - 1, std::max(0, r + s.vs[plane]));   // indexed by the plane/world row instead of the produced screen row
+        if (opt.origin_fault == Options::OriginFault::Stale) rr = std::max(0, r - 20);   // the table of an earlier frame (band edges 20 rows higher), reused after a skipped callback
+        long d = 64L * s.k[src][rr];
+        if (opt.origin_fault == Options::OriginFault::Negated) d = -d;
+        if (opt.origin_fault == Options::OriginFault::PixelUnits) d *= 8;   // pixels instead of whole plane cells
+        delta[r] = static_cast<int16_t>(d);
+      }
       if (!segarecomp::scenery::origin_in_range(plane, delta, H, H * 2U)) { std::printf("HARNESS: the builder's own origin delta is out of range\n"); std::abort(); }
       segarecomp::scenery::origin_store(twin.origin[plane], delta, H);
     }

@@ -38,4 +38,5 @@
     {"origin-bands-hud:16:9", 0x4211db260d16f4a4ULL},
     {"origin-bands-hud:21:9", 0xa35eaf29ef39b54bULL},
     {"origin-bands-hud:32:9", 0x9b74aa44322042fcULL},
+    {"sequence:origin-18-frame-chain", 0xec57191cf51a5518ULL},
     {"sequence:24-frame-chain", 0x5995eced3e7b557bULL},

@@ -30,7 +30,7 @@ typedef struct OverlayScript {
   unsigned count, calls, ran;
   uint64_t last_frame;
   uint32_t has_render_api, has_frame;
-  uint32_t probe_phase, phase_seen;
+  uint32_t probe_phase, phase_seen, probe_origin;
   int phase_status;
   int statuses[96];
   ScriptOp ops[96];
@@ -868,6 +868,42 @@ void origin_tests(bool exact) {
   fault_case("bytes too short", [](Script &s) { s.origin(1, 8, 15, delta); });
   fault_case("bytes too long", [](Script &s) { s.origin(1, 8, 17, delta); });
   fault_case("duplicate submission for one plane", [](Script &s) { s.origin(0, 8, 16, delta); });
+  {   // an origin table with no window: no authored scenery claim, the plane stays generic
+    Harness h;
+    Script s; s.origin(0, 8, 16, delta);
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(g_script.statuses[0] == 0 && (t.dec.accepted & GENESIS_COMPAT_SCENERY) == 0U, "an origin-only submission does not claim authored scenery (the frame is served generically)");
+    check(answer_at(h, 0, 3, -4, &w) == 0 && answer_at(h, 1, 3, -4, &w) == 0, "an origin-only frame answers no provider word");
+  }
+  {   // a served frame whose plane A has an origin table but no window keeps the generic fallback for that plane (ADR 0314); plane B's window answers
+    Harness h;
+    Script s; s.window(1, 10, 0, 0x2011U); s.origin(0, 8, 16, delta); s.origin(1, 8, 16, delta);
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(g_script.statuses[1] == 0 && g_script.statuses[2] == 0 && t.dec.accepted == GENESIS_COMPAT_SCENERY, "a window on plane B serves the frame");
+    check(answer_at(h, 0, 3, -4, &w) == GENESIS_COMPAT_WORD_GENERIC && answer_at(h, 1, 3, -4, &w) == 1 && w == 0x2011U, "plane A: an origin table without a window preserves the generic fallback; plane B: the translated window answers");
+  }
+  {   // missing rows resolve to zero, and the submitted buffer is copied, not retained
+    static int16_t mine[3] = {0, 0, 11};
+    Harness h;
+    Script s; s.window(0, -1, 0, 0x2011U); s.window(0, 10, 0, 0x2012U); s.origin(0, 3, 6, mine);
+    commit(h);
+    uint16_t w = 0;
+    mine[2] = 0; mine[0] = 99;   // the provider reuses its buffer after the call
+    check(answer_at(h, 0, 2, -4, &w) == 1 && w == 0x2012U && answer_at(h, 0, 0, -4, &w) == 1 && w == 0x2011U, "the submitted table was copied (a later change to the provider's buffer has no effect)");
+    check(answer_at(h, 0, 5, -4, &w) == 1 && w == 0x2011U && answer_at(h, 0, 7, -4, &w) == 1 && w == 0x2011U, "rows beyond the submission resolve to delta 0");
+    mine[2] = 11; mine[0] = 0;
+  }
+  {   // a fault after a valid submission commits neither its table nor its windows, and does not resurrect the previous callback's
+    Harness h;
+    Script s; s.window(0, 10, 0, 0x2011U); s.origin(0, 8, 16, delta);
+    commit(h);
+    Script s2; s2.window(0, 10, 0, 0x2011U); s2.origin(0, 8, 16, delta); s2.origin(0, 8, 16, delta);
+    const Transport t = commit(h);
+    uint16_t w = 0;
+    check(faulted(t) && t.word_status == -1 && answer_at(h, 0, 3, -4, &w) == 0, "a faulted callback commits neither the origin table nor the windows");
+  }
   if (!exact) {   // frame binding: the delta lives with the callback that described the frame and is replaced by the next one
     Harness h;
     Script s; s.window(0, 10, 0, 0x2011U); s.origin(0, 8, 16, delta);
@@ -878,12 +914,28 @@ void origin_tests(bool exact) {
     check((h.produce(0x11U, GENESIS_COMPAT_SCENERY).dec.accepted & GENESIS_COMPAT_SCENERY) != 0U && answer_at(h, 0, 3, -4, &w) == 1 && w == 0x2011U, "the frame the callback described is served with its delta");
     h.rt->virtual_frame_count = frame + 7U;
     check((h.produce(0x12U, GENESIS_COMPAT_SCENERY).dec.accepted & GENESIS_COMPAT_SCENERY) == 0U, "after a skipped callback the windows (and their delta) are not served");
+    h.rt->virtual_frame_count = frame + 2U;   // the same epoch again, then an aspect change: the callback's own table is re-asked unchanged
+    h.produce(0x14U, GENESIS_COMPAT_SCENERY);
+    h.frame->make(0x15U, 40U, GENESIS_COMPAT_SCENERY);
+    Transport side; h.table->prepare(h.state, &h.frame->cf, &side.dec);
+    check((side.dec.accepted & GENESIS_COMPAT_SCENERY) != 0U && answer_at(h, 0, 3, -4, &w) == 1 && w == 0x2011U, "an aspect change re-asks with the same callback's table");
     Script s2; s2.window(0, 10, 0, 0x2011U);   // the next callback submits no delta: nothing of the earlier one survives
     run_frames(*h.rt, h.rt->virtual_frame_count + 4U);
     h.rt->virtual_frame_count = g_script.last_frame + 2U;
     h.produce(0x13U, GENESIS_COMPAT_SCENERY);
     check(answer_at(h, 0, 3, -4, &w) == 0, "a later callback replaces the earlier delta: nothing of it survives");
   }
+}
+// Outside the render phase the call is SEGA_MOD_E_PHASE, also when scenery.words is not granted (the phase check precedes the capability check).
+void origin_phase_tests() {
+  Harness h;
+  Script s;
+  g_script.probe_phase = SEGA_MOD_PHASE_FRAME_END;
+  g_script.probe_origin = 1U;
+  run_frames(*h.rt, 8U);
+  check(g_script.phase_seen == 1U && g_script.phase_status == SEGA_MOD_E_PHASE && g_script.phase_status != SEGA_MOD_E_CAPABILITY, "scenery_row_origin outside the render phase is SEGA_MOD_E_PHASE (not SEGA_MOD_E_CAPABILITY), granted or not");
+  h.rt->virtual_frame_count = g_script.last_frame + 2U;
+  check(faulted(h.produce(0x11U, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD)), "the out-of-phase call faulted the callback: the mod presents nothing");
 }
 void origin_capability_tests() {
   static int16_t delta[8] = {};
@@ -909,6 +961,7 @@ int main(int argc, char **argv) {
   else if (mode == "origin_exact") origin_tests(true);
   else if (mode == "origin_ordinary") origin_tests(false);
   else if (mode == "origin_capability") origin_capability_tests();
+  else if (mode == "origin_phase") origin_phase_tests();
   else { std::puts("usage: genesis_mod_overlay_script_tests bitmap|refusal"); return 2; }
   if (failures != 0) { std::printf("genesis_mod_overlay_script_tests %s: %d FAILED\n", mode.c_str(), failures); return 1; }
   std::printf("genesis_mod_overlay_script_tests %s: OK\n", mode.c_str());

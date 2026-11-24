@@ -17,7 +17,7 @@ typedef struct OverlayScript {
   unsigned count, calls, ran;
   uint64_t last_frame;
   uint32_t has_render_api, has_frame;
-  uint32_t probe_phase, phase_seen; /* SEG-152-T007: when probe_phase != 0 the provider calls scenery_generic_rows once in that (non-render) phase and records the status */
+  uint32_t probe_phase, phase_seen, probe_origin; /* SEG-152-T007: when probe_phase != 0 the provider calls scenery_generic_rows once in that (non-render) phase and records the status */
   int phase_status;
   int statuses[96];
   ScriptOp ops[96];
@@ -34,7 +34,9 @@ static void script_phase(void *state, const SegaModHost *host) {
   if (g_script.probe_phase != 0U && host->phase == g_script.probe_phase && g_script.phase_seen == 0U) {
     static const uint8_t bit[1] = {0x01U};
     const SegaGenesisRenderApi *pr = f != NULL ? f->render : NULL;
-    if (pr != NULL && pr->scenery_generic_rows != NULL) { g_script.phase_status = pr->scenery_generic_rows(0U, bit, 8U, 1U); g_script.phase_seen = 1U; }
+    static const int16_t zero_delta[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    if (pr != NULL && g_script.probe_origin != 0U && pr->scenery_row_origin != NULL) { g_script.phase_status = pr->scenery_row_origin(0U, zero_delta, 8U, 16U); g_script.phase_seen = 1U; }   /* SEG-152-T017 */
+    else if (pr != NULL && pr->scenery_generic_rows != NULL) { g_script.phase_status = pr->scenery_generic_rows(0U, bit, 8U, 1U); g_script.phase_seen = 1U; }
   }
   if (host->phase != SEGA_MOD_PHASE_RENDER) return;
   ++g_script.calls;

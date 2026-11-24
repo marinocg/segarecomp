@@ -580,6 +580,64 @@ void origin_parity_matrix() {
   }
   std::printf("PARITY origin totals: cases %u\n", cases);
 }
+// 3.1 Translation falsification: the unmodified control passes, and each wrong origin submission is detected by the same parity checks (pixels differ from ABI 1) on fixtures with line-dependent origins.
+void origin_falsification() {
+  struct Case { const char *name; Options::OriginFault fault; const char *fixture; };
+  const Case cases[] = {{"negated-delta", Options::OriginFault::Negated, "origin-three-bands"}, {"pixel-unit-delta", Options::OriginFault::PixelUnits, "origin-three-bands"},
+                        {"wrong-plane", Options::OriginFault::WrongPlane, "origin-three-bands"}, {"world-row-indexed", Options::OriginFault::WorldRowIndexed, "origin-ramp"},
+                        {"stale-table", Options::OriginFault::Stale, "origin-three-bands"}};
+  for (const auto &f : origin_fixtures())
+    for (const bool dropped : {false, true})   // the dropped-table control
+      for (int ai = 0; ai < 3; ++ai) {
+        const int side = kAspects[ai].side;
+        Options o = origin_options(); o.clear_origin = dropped; o.use_mask = f.first.id == "origin-and-mask";
+        const Verdict v = run_case(f.first, side, side, Timing::Exact, -1, o);
+        if (!dropped) check(v.scenario == "PASS" && v.digest1 == v.digest2, std::string("control passes: ") + f.first.id + " " + kAspects[ai].name);
+        else if (f.first.id != "origin-and-mask") check(v.rows_differ > 0 && v.digest1 != v.digest2, std::string("dropped table is detected: ") + f.first.id + " " + kAspects[ai].name);
+      }
+  for (const Case &c : cases)
+    for (const auto &f : origin_fixtures()) {
+      if (f.first.id != c.fixture) continue;
+      for (int ai = 0; ai < 3; ++ai) {
+        const int side = kAspects[ai].side;
+        Options ok = origin_options();
+        const Verdict good = run_case(f.first, side, side, Timing::Exact, -1, ok);
+        Options bad = ok; bad.origin_fault = c.fault;
+        const Verdict v = run_case(f.first, side, side, Timing::Exact, -1, bad);
+        std::printf("PARITY origin falsify %s %s: control %s, mutated rows differing %u (%s)\n", c.name, kAspects[ai].name, good.scenario.c_str(), v.rows_differ, v.scenario.c_str());
+        check(good.scenario == "PASS" && good.digest1 == good.digest2, std::string("unmodified control passes for ") + c.name + " " + kAspects[ai].name);
+        check(v.rows_differ > 0 && v.digest1 != v.digest2 && v.scenario == "UNEXPLAINED", std::string("the parity check detects (a wrong translation is not a representability limit) ") + c.name + " " + kAspects[ai].name);
+      }
+      ran.insert(std::string("origin-falsify:") + c.name);
+    }
+  ran.insert("origin-falsify:dropped-table");
+}
+// 3.2 Window capacity: more distinct translated spans than two windows can hold. The provider cannot truthfully serve it: it is classified LIMIT:window, the unrepresentable cells are failed answers (never a wrong word), and the limits are unchanged.
+void origin_capacity() {
+  Spec s = base_spec("origin-capacity");
+  // plane B: ten bands, each a different registered multiple (k = 0, 3, 6, ...): far more than two 128-column windows can cover for 64-cell-apart worlds
+  set_plane(s, 1, [](int) { return -150; }, [](int r) { return (r / 22) * 3; });
+  const int side = kAspects[2].side;
+  const Verdict v = run_case(s, side, side, Timing::Exact, -1, origin_options());
+  std::printf("PARITY origin capacity: scenario %s, windows %u/%u needed %u/%u, rows differing %u, uncovered cells %u, feasible %d\n", v.scenario.c_str(), v.windows[0], v.windows[1], v.needed[0], v.needed[1], v.rows_differ, v.uncovered, v.feasible ? 1 : 0);
+  check(!v.feasible && v.needed[1] > 2U && v.windows[1] <= 2U, "more windows are needed than the contract allows, and no more than two are submitted (limits unchanged)");
+  check(v.scenario == "LIMIT:window" && v.rows_differ > 0 && v.digest1 != v.digest2, "the result is a classified window limit, not parity");
+  check(v.uncovered > 0, "uncovered cells exist and are failed answers, never an approximation");
+  // a failed answer is never a wrong word: every asked cell the windows do answer equals the ABI 1 word of its line (checked per cell through the production lookup)
+  Scene sc; build_scene(sc, s);
+  Provider twin; twin.kind = Provider::Abi2; twin.spec = &s; twin.scene = &sc; twin.declared_left = side;
+  Built built; arm_twin(twin, s, sc, side, side, Timing::Exact, origin_options(), built);
+  unsigned answered = 0, failed = 0, wrong = 0;
+  for (int r = 0; r < H; ++r)
+    for (int x : {-1, -side, -side / 2, W, W + side - 1}) {
+      uint16_t word = 0;
+      const int rc = segarecomp::scenery::answer(twin.mask[1], twin.windows[1], r, x, s.hs[1][r], s.vs[1], &word, GENESIS_COMPAT_WORD_VDP_START, GENESIS_COMPAT_WORD_GENERIC, &twin.origin[1]);
+      if (rc == 1) { ++answered; if (word != abi1_answer(s, sc, 1, r, floor8(static_cast<long>(x) - s.hs[1][r]), floor8(static_cast<long>(r) + s.vs[1]))) ++wrong; }
+      else ++failed;
+    }
+  check(wrong == 0 && answered > 0 && failed > 0, "answered cells are exact, the rest fail (answered " + std::to_string(answered) + ", failed " + std::to_string(failed) + ", wrong " + std::to_string(wrong) + ")");
+  ran.insert("origin-capacity");
+}
 // Static memory and copy bounds, from the production type: the adapter keeps a staged and a visible table per plane (4 x 896 bytes) and copies at most one table per plane per callback (2 x 896 bytes).
 void origin_cost_line() {
   constexpr unsigned table = sizeof(segarecomp::scenery::RowOrigin), state_bytes = 4U * table, copy_bytes = 2U * table;
@@ -640,6 +698,8 @@ int run_scenery_suite() {
   mask_448_producer();
   origin_parity_matrix();
   origin_cost_line();
+  origin_falsification();
+  origin_capacity();
   origin_unit_cases();
   std::printf("PARITY mask totals: cases %u (pass %u, limit %u)\n", masked.cases, masked.pass, masked.limit);
   std::printf("PARITY totals: exact cases %u (pass %u, limit %u), predicted cases %u (pass %u, limit %u)\n", exact.cases, exact.pass, exact.limit, predicted.cases, predicted.pass, predicted.limit);
