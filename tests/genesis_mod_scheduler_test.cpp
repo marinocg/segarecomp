@@ -781,6 +781,41 @@ void rom_read_service() {
   check(rom_case(SEGA_MOD_PHASE_RESET, {{Op::read, R, 0x100, 1, 0}}) == "phase", "a ROM read in reset");
   check(rom_case(SEGA_MOD_PHASE_FRAME_END, {{Op::write, R, 0x100, 1, 0}}, kMemCaps) == "readonly", "a ROM write is read-only");
   check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, SEGA_GEN_SPACE_M68K_WORK_RAM, 0x100, 1, 0}}) == "capability", "the work-RAM render read still needs frame.work_ram");
+  // cross-space isolation at runtime: a ROM-only declaration authorises no live work RAM; a work-RAM-only declaration and capability authorise no ROM (order: capability, phase, width, alignment, range)
+  check(rom_case(SEGA_MOD_PHASE_FRAME_END, {{Op::read, SEGA_GEN_SPACE_M68K_WORK_RAM, 0x100, 1, 0}}) == "range", "a ROM-only declaration cannot read live work RAM at the same offset");
+  check(rom_case(SEGA_MOD_PHASE_FRAME_END, {{Op::read, SEGA_GEN_SPACE_M68K_WORK_RAM, 0x108, 4, 0}}) == "range", "a ROM-only declaration cannot read live work RAM (second range offset)");
+  {
+    Harness w;   // work-RAM-only declaration (the default kRanges) with memory.read: no ROM range, so a ROM read is E_RANGE
+    w.init(kAllPhases, kMemCaps);
+    g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+    g_probe.script.ops = {{Op::read, R, 0x100, 1, 0}};
+    run_frames(w.rt, 2U);
+    check(w.sched->fault.faulted && std::string(w.sched->fault.cause) == "range", "a work-RAM-only declaration cannot authorise a ROM read (range)");
+    Harness c;   // work-RAM capabilities alone (frame.work_ram, no memory.read) cannot read ROM: the capability check comes first
+    c.init(kAllPhases, cap(SEGA_MOD_CAP_HOST_LOG) | cap(SEGA_MOD_CAP_FRAME_WORK_RAM), false);
+    g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+    g_probe.script.ops = {{Op::read, R, 0x100, 1, 0}};
+    run_frames(c.rt, 2U);
+    check(c.attach_result == 0, std::string("attach of the frame.work_ram-only mod: ") + c.rejection);
+    check(c.sched->fault.faulted && std::string(c.sched->fault.cause) == "capability", "work-RAM render capability alone cannot read ROM (capability)");
+  }
+  {   // a render ROM read is independent of the frame.work_ram copy: same values with and without that grant, with the copy's source zeroed
+    auto run = [&](bool grant, std::vector<uint32_t> &values) {
+      Harness h;
+      h.custom = rom_ranges();
+      h.rom = rom_bytes();
+      h.init(kAllPhases, kRomCaps | (grant ? cap(SEGA_MOD_CAP_FRAME_WORK_RAM) : 0U));
+      g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+      g_probe.script.ops = {{Op::read, R, 0x100, 4, 0}, {Op::read, R, 0x108, 4, 0}, {Op::read, R, 0x41C, 4, 0}};
+      run_frames(h.rt, 3U);
+      values = g_probe.values;
+      return !h.sched->fault.faulted;
+    };
+    std::vector<uint32_t> without, with;
+    check(run(false, without) && run(true, with), "render ROM reads do not fault with or without frame.work_ram");
+    check(without.size() == 3U && without == with, "render ROM read values are independent of frame.work_ram");
+    check(!without.empty() && without[0] == 0xA0A1A2A3U, "the independent values are the materialised bytes");
+  }
   // budgets: 4096 reads and 8192 bytes per callback
   {
     std::vector<Op> ops(4096U, Op{Op::read, R, 0x100, 1, 0});

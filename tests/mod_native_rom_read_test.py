@@ -172,14 +172,6 @@ def main():
         _, lines = h.headless(tmp / "ok", "ok-end", "10:1:0x00", frames="1", first="200")
         check(lines["CAPTURE_SUMMARY"][0]["final_work_ram_sha256"] == vanilla_ram, "ROM reads never change guest state")
 
-        # ---- (4) a range past the effective image is refused at build ----
-        p, pid = packed("past-end", ranges=[(len(image) - 4, 8)])
-        out = tmp / "past-end"
-        r = h.build(rom, out, p, pid, viewer=False, native=True)
-        diag = h.status(out).get("diagnostic") if (out / "status.json").exists() else None
-        check(r.returncode != 0 and not (out / "game").exists() and diag == "E_MEMORY_RANGE", f"a range past the image is E_MEMORY_RANGE at build: {diag}")
-
-        # ---- (5) declaration rules ----
         def declared(what, code, text):
             d = tmp / ("decl-" + what)
             d.mkdir(exist_ok=True)
@@ -189,6 +181,51 @@ def main():
             r, doc, _ = pack(d)
             check(r.returncode != 0 and doc.get("class") == code, f"{what}: expected {code}, got {doc.get('class')} ({doc.get('error')})")
 
+        # ---- (3b) an effective image changed by a verified typed edit: different materialised bytes, values and effective identity ----
+        EDIT_SITE = 0x104   # inside the declared range [0x100, 0x110); the word is read by the probe as the 32-bit value at 0x104
+        old_word = int.from_bytes(image[EDIT_SITE:EDIT_SITE + 2], "big")
+        new_word = old_word ^ 0x5A5A
+        d = project("edited")
+        (d / "edits").mkdir()
+        (d / "edits/word.edits").write_text(f"fixture u16 0x{EDIT_SITE:08x} 0x{old_word:04x} 0x{new_word:04x}\n")
+        (d / "mod.toml").write_text(manifest(image_sha, RANGES).replace('[[source]]\nkind = "native-c11"\npath = "src/provider.c"\n', '[[source]]\nkind = "native-c11"\npath = "src/provider.c"\n\n[[source]]\nkind = "rom-edit-set"\npath = "edits/word.edits"\n'))
+        r, doc, edit_pkg = pack(d)
+        check(r.returncode == 0 and doc.get("ok"), f"pack edited: {r.stdout[:300]}")
+        r = h.run_cli("mod", "apply", edit_pkg, "--rom", rom, "--out", tmp / "effective.rom")
+        effective = (tmp / "effective.rom").read_bytes() if r.returncode == 0 else b""
+        diff = [i for i in range(min(len(image), len(effective))) if image[i] != effective[i]]
+        check(len(effective) == len(image) and EDIT_SITE in diff and set(diff) <= {EDIT_SITE, EDIT_SITE + 1, 0x18E, 0x18F}, f"the verified edit changes the effective image at the edited word only: {[hex(i) for i in diff]}")
+        r = h.build(rom, tmp / "edited", edit_pkg, doc.get("package_identity"), viewer=False, native=True)
+        check(r.returncode == 0 and (tmp / "edited/game").is_file(), f"the edited ROM-reading provider builds: {r.stdout[-300:]}{r.stderr[-300:]}")
+        if (tmp / "edited/game").is_file():
+            _, elines = h.headless(tmp / "edited", "edited", "10:1:0x00", frames="1", first="3")
+            ewant = "R:%02x %04x %08x %08x %02x" % (effective[0x100], int.from_bytes(effective[0x102:0x104], "big"), int.from_bytes(effective[0x104:0x108], "big"), int.from_bytes(effective[0x180:0x184], "big"), effective[0x187])
+            elogs = [e.get("line") for e in elines.get("MOD_LOG", [])]
+            check(ewant in elogs and ewant != want, f"the provider reads the EDITED effective image's bytes, different from the unedited ones: {elogs} vs {ewant}")
+            eart = (tmp / "edited/native-mod/native_artifact.c").read_text()
+            edata = [int(x) for x in re.search(r"segarecomp_mod_rom_data\[\] = \{([^}]*)\}", eart).group(1).split(",") if x.strip()][:-1]
+            check(bytes(edata) == b"".join(effective[o:o + n] for o, n in RANGES) and bytes(edata) != declared, "the generated program materialises the EDITED effective bytes, not the original ones")
+            eid = re.search(r'segarecomp_mod_effective_sha256\[\] = "([0-9a-f]{64})"', eart)
+            oid = re.search(r'segarecomp_mod_effective_sha256\[\] = "([0-9a-f]{64})"', art)
+            check(eid is not None and oid is not None and eid.group(1) == hashlib.sha256(effective).hexdigest() and oid.group(1) != eid.group(1),
+                  "the edited program's effective-image identity is the edited image's SHA-256 and differs from the unedited program's (the state compatibility digest follows it: genesis_mod_scheduler_tests)")
+
+        # ---- (3c) package-level cross-space isolation: a work-RAM capability/declaration never authorises m68k.rom ranges, and vice versa ----
+        wram = '\n[[memory]]\nrevision = "fixture"\nspace = "m68k.work_ram"\noffset = 256\nlength = 16\naccess = "read"\n'
+        declared("rom-range-wram-capability-only", "E_CAPABILITY_INCONSISTENT", manifest(image_sha, RANGES, caps='"host.log", "memory.read.m68k.work_ram"'))
+        declared("wram-range-rom-capability-only", "E_CAPABILITY_INCONSISTENT", manifest(image_sha, [], extra_memory=wram))
+        declared("rom-write-capability-only", "E_CAPABILITY_INCONSISTENT", manifest(image_sha, RANGES, caps='"host.log", "memory.write.m68k.rom"'))
+        r, doc, _ = pack(project("both-spaces", text=manifest(image_sha, RANGES, extra_memory=wram, caps='"host.log", "memory.read.m68k.rom", "memory.read.m68k.work_ram"')))
+        check(r.returncode == 0 and doc.get("ok"), f"a package declaring both spaces with both capabilities packs: {r.stdout[:200]}")
+
+        # ---- (4) a range past the effective image is refused at build ----
+        p, pid = packed("past-end", ranges=[(len(image) - 4, 8)])
+        out = tmp / "past-end"
+        r = h.build(rom, out, p, pid, viewer=False, native=True)
+        diag = h.status(out).get("diagnostic") if (out / "status.json").exists() else None
+        check(r.returncode != 0 and not (out / "game").exists() and diag == "E_MEMORY_RANGE", f"a range past the image is E_MEMORY_RANGE at build: {diag}")
+
+        # ---- (5) declaration rules ----
         good = manifest(image_sha, RANGES)
         declared("write-access", "E_MEMORY_ACCESS", good.replace('access = "read"', 'access = "write"', 1))
         declared("read-write-access", "E_MEMORY_ACCESS", good.replace('access = "read"', 'access = "read-write"', 1))
