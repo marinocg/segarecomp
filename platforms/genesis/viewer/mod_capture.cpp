@@ -64,6 +64,10 @@ extern const char segarecomp_mod_effective_sha256[];
 extern const unsigned long segarecomp_mod_state_schema;
 extern const unsigned long segarecomp_mod_range_count;
 extern const unsigned long segarecomp_mod_ranges[][4];   // space, offset, length, modes
+// ADR 0321: the materialised bytes of the declared m68k.rom ranges (concatenated in range order). Every NATIVE artifact (generated or hand-written fixture) defines them, empty when no ROM range is declared; a Luau artifact cannot declare a ROM range and neither defines nor references them.
+#ifdef SEGARECOMP_MOD_NATIVE
+extern const unsigned char segarecomp_mod_rom_data[];
+#endif
 #if defined(SEGARECOMP_MOD_NATIVE) && defined(SEGARECOMP_MOD_HOOKS)
 // SEG-138-T012 (ADR 0308): the function hooks of the built program: the artifact's bindings (generated site id, the hook id the provider is called with), the hook phases it registers, and the generated site table.
 extern const unsigned long segarecomp_mod_hook_count, segarecomp_mod_hook_phases;
@@ -456,6 +460,17 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
   for (unsigned long i = 0; i < segarecomp_mod_range_count && i < GENESIS_MOD_RANGES_MAX; ++i)
     g.ranges[i] = GenesisModRange{static_cast<std::uint32_t>(segarecomp_mod_ranges[i][0]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][1]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][2]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][3])};
   c.ranges = g.ranges;
+  {   // the ROM bytes are the sum of the ROM-space range lengths; the scheduler checks the sum against its bound and refuses a mismatch
+    std::uint32_t rom_bytes = 0;
+    for (unsigned long i = 0; i < segarecomp_mod_range_count && i < GENESIS_MOD_RANGES_MAX; ++i)
+      if (g.ranges[i].space == SEGA_GEN_SPACE_M68K_ROM) rom_bytes += g.ranges[i].length;
+#ifdef SEGARECOMP_MOD_NATIVE
+    c.rom_data = rom_bytes != 0 ? segarecomp_mod_rom_data : nullptr;
+#else
+    c.rom_data = nullptr;   // a Luau program has no ROM range (the capability is native-only), so rom_bytes is 0 here
+#endif
+    c.rom_data_bytes = rom_bytes;
+  }
   c.range_count = static_cast<std::uint32_t>(segarecomp_mod_range_count);
   c.state_schema = static_cast<std::uint32_t>(segarecomp_mod_state_schema);
   c.log_sink = log_sink;

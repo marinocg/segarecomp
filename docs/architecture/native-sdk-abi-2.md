@@ -64,7 +64,7 @@ append-only, mirroring [adapter](mod-platform-adapters.md) space names.
 
 | Table | Contents (skeleton) |
 |---|---|
-| `SegaGenesisFeatures` (Genesis, and the main side of Sega CD reuses its VDP view only) | `SEGA_GEN_SPACE_M68K_WORK_RAM`, `SEGA_GEN_SPACE_M68K_ROM` (read at build only), `SEGA_GEN_SPACE_Z80_RAM` (limited read), `SEGA_GEN_SPACE_VDP_*`; sizes (work RAM 65536, VRAM 65536, 24 registers, CRAM 128, VSRAM 80, 224 lines) as ABI 1 |
+| `SegaGenesisFeatures` (Genesis, and the main side of Sega CD reuses its VDP view only) | `SEGA_GEN_SPACE_M68K_WORK_RAM`, `SEGA_GEN_SPACE_M68K_ROM` (read at build; at run time only the manifest-declared ranges, `render` phase, see 3.2), `SEGA_GEN_SPACE_Z80_RAM` (limited read), `SEGA_GEN_SPACE_VDP_*`; sizes (work RAM 65536, VRAM 65536, 24 registers, CRAM 128, VSRAM 80, 224 lines) as ABI 1 |
 | `SegaMasterSystemFeatures` | `SEGA_SMS_SPACE_Z80_WORK_RAM` (8 KiB, mirror is one space), `SEGA_SMS_SPACE_Z80_CART_RAM` (read), mapper family (declared), VDP view sizes |
 | `SegaCdFeatures` | `SEGA_SCD_SPACE_MAIN_WORK_RAM`, `SEGA_SCD_SPACE_MAIN_WORD_RAM` (read, owner-gated), VDP view as Genesis, disc identity digest (read-only) |
 
@@ -80,6 +80,15 @@ append-only, mirroring [adapter](mod-platform-adapters.md) space names.
 
 `view_margin(&margin)` and `view_left(left_px, margin_px)` (ADR [0315](../decisions/0315-asymmetric-widescreen-viewport.md); the third and fourth reserved slots; render phase only; they need the render table, i.e. either grant) are the asymmetric-viewport seam. `view_margin` writes the per-side margin (source pixels) of the host's most recent extension that is presented: 0 in Original (a verified-HUD package makes the producer run there, but nothing of it is shown), at 4:3, after a failed production and before the first one; it is read from the runtime's own per-frame publication, never cached. `view_left` declares, for the frame the callback describes, that `left_px` of the planned `2 * margin_px` extra columns lie left of the picture and the rest right of it (0 = picture at the left edge of the view, `margin_px` = centred); `margin_px` is the margin the placement and the scenery windows built for it were computed for. The provider supplies a placement, never dimensions: the host validates it against the plan the frame is produced with, serves it only for the frame it was declared for (the same N + 2 epoch as a scenery window; restore, rewind, load and a skipped callback discard it) and only if `margin_px` is the margin that frame is produced with; when it is not, the placement AND the scenery windows of that callback are both withheld (the scenery is the generic extension; HUD and sprite contributions are independent of the view and stay), and the centred layout is presented. A `left_px` above 1344 or a `margin_px` above 672 is a range fault of the callback. A provider that wants its scenery to cover the placed view sizes its windows from `left_px` and the margin it learnt.
 
+### 3.2 Declared ROM ranges (SEG-152-T018, ADR 0321)
+
+`memory.read.m68k.rom` (capability id 7, the existing memory-read id; no header, struct, enum or minor change) lets a native provider read bytes of the machine's EFFECTIVE cartridge image through `host->read(SEGA_GEN_SPACE_M68K_ROM, offset, width, &value)`.
+`offset` is a byte offset into the effective image of the declared revision (never a CPU address, never bank-dependent). Only `[[memory]]` ranges with `space = "m68k.rom"`, `access = "read"` and a named `revision` exist (`E_MEMORY_ACCESS`,
+`E_MEMORY_REVISION`, empty `E_MEMORY_RANGE`); the ranges of one revision total at most 4096 bytes (`E_MEMORY_ROM_BUDGET`) and, with the work-RAM ranges, at most 16. The build materialises exactly those bytes from the effective image into the
+locally generated program (a range past the image is `E_MEMORY_RANGE` at build); the runtime never holds the image. Reads are legal in `render` only, width 1/2/4 big-endian, even offsets for width 2/4, inside ONE declared range, at most 4096
+reads and 8192 bytes per callback. Check order: capability, phase, width, alignment, range, budget (`E_CAPABILITY`, `E_PHASE`, `E_RANGE`, `E_ALIGNMENT`, `E_RANGE`, `E_BUDGET`); every violation faults the callback. `host->write` to the ROM space stays
+`E_READONLY`. A host that does not list the capability refuses the package at the reader (`E_CAPABILITY_UNKNOWN`/`E_CAPABILITY_UNSUPPORTED`).
+
 ## 4. Capability catalogue
 
 Legality by phase uses the phase names of [mod-execution-phases.md](mod-execution-phases.md). **Mutation**: R read-only, W mutates guest-visible state, O output only (presentation), S host service. **Trust**: every capability requires the package to be at least the class shown
@@ -93,7 +102,7 @@ Legality by phase uses the phase names of [mod-execution-phases.md](mod-executio
 | 4 | `frame.sms_vdp` | `render` | R (copy) | none | S | `sega.frame.sms_vdp` |
 | 5 | `scenery.words` | `render` | O | none | G, C | not bound (native only) |
 | 6 | `overlay.rgba` | `render` | O | none | G, S, C | `sega.overlay` |
-| 7 | `memory.read.<space>` | `reset`, `frame-begin`, `input`, `post-input`, `hook-entry`, `hook-exit`, `frame-end` | R | none | per [adapters](mod-platform-adapters.md) | `sega.mem.read` |
+| 7 | `memory.read.<space>` (`memory.read.m68k.rom`: `render` only, section 3.2) | `reset`, `frame-begin`, `input`, `post-input`, `hook-entry`, `hook-exit`, `frame-end` | R | none | per [adapters](mod-platform-adapters.md) | `sega.mem.read` |
 | 8 | `memory.write.<space>` (work RAM spaces only) | `frame-begin`, `post-input`, `hook-entry`, `hook-exit`, `frame-end` | W | **changes guest behavior**; affects save-state eligibility (below) | G (`m68k.work_ram`), S (`z80.work_ram`), C (`main.work_ram`) | `sega.mem.write` |
 | 9 | `input.read` | `frame-begin`, `input`, `post-input` | R | none | G, S, C | `sega.input.get` |
 | 10 | `input.intercept` | `input` | W (input state) | changes what the guest reads | G, S, C | `sega.input.set` |

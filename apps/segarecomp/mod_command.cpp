@@ -10,6 +10,7 @@
 #include "segarecomp/patch.hpp"
 #include "segarecomp/sha256.hpp"
 
+#include <map>
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -95,13 +96,28 @@ std::string package_json(const mod::Manifest &m, const std::string &identity, co
     for (std::size_t i = 0; i < m.geometry_scenes.size(); ++i) geometry += std::string(i ? "," : "") + "{\"id\":\"" + esc(m.geometry_scenes[i].id) + "\",\"components\":" + json_list(m.geometry_scenes[i].components) + "}";
     geometry += "],\"declaration\":\"" + esc(mod::geometry_declaration_text(m)) + "\"}";
   }
+  std::string rom_read;   // ADR 0321: shown only when m68k.rom read ranges are declared (offsets are bytes of the revision's effective image), so every other inspect output is unchanged
+  {
+    std::string list;
+    std::map<std::string, std::uint64_t> totals;
+    for (const mod::MemoryRange &r : m.memory) {
+      if (r.space != "m68k.rom") continue;
+      list += std::string(list.empty() ? "" : ",") + "{\"revision\":\"" + esc(r.revision) + "\",\"offset\":" + std::to_string(r.offset) + ",\"length\":" + std::to_string(r.length) + "}";
+      totals[r.revision] += r.length;
+    }
+    if (!list.empty()) {
+      std::string t;
+      for (const auto &e : totals) t += std::string(t.empty() ? "" : ",") + "{\"revision\":\"" + esc(e.first) + "\",\"bytes\":" + std::to_string(e.second) + "}";
+      rom_read = ",\"rom_read\":{\"ranges\":[" + list + "],\"totals\":[" + t + "],\"limit_bytes\":4096}";
+    }
+  }
   std::string revs = "[";
   for (std::size_t i = 0; i < m.revisions.size(); ++i) revs += std::string(i ? "," : "") + "{\"label\":\"" + esc(m.revisions[i].label) + "\",\"sha256\":\"" + m.revisions[i].sha256 + "\"}";
   revs += "]";
   return "\"id\":\"" + esc(m.id) + "\",\"version\":\"" + esc(m.version) + "\",\"name\":\"" + esc(m.name) + "\",\"platform\":\"" + m.platform + "\",\"source_identity_kind\":\"" + m.source_kind +
          "\",\"revisions\":" + revs + ",\"trust_class\":\"" + mod::trust_class(m) + "\",\"capabilities\":" + json_list(m.capabilities) + ",\"capabilities_optional\":" + json_list(m.capabilities_optional) +
          ",\"abi_native\":" + std::to_string(m.abi_native) + ",\"payloads\":{\"native\":" + std::to_string(native) + ",\"luau\":" + std::to_string(luau) + ",\"assets\":" + std::to_string(assets) +
-         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + hooks + geometry + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
+         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + hooks + geometry + rom_read + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
 }
 
 bool read_all(const fs::path &path, std::size_t limit, std::vector<std::uint8_t> &out) {

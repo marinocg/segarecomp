@@ -260,7 +260,7 @@ struct EditRanges {
 
 // Declaration check run by the reader and `mod check`: known space of the platform, non-empty and inside the space, 16/32-bit friendly (no alignment is imposed on the range itself), a declared revision label,
 // no exact duplicate, and an access backed by the declared `memory.read.<space>` / `memory.write.<space>` capability. Stable classes: E_MEMORY_RANGE, E_MEMORY_SPACE, E_MEMORY_ACCESS, E_MEMORY_REVISION,
-// E_MEMORY_DUPLICATE, E_MEMORY_COUNT, E_CAPABILITY_INCONSISTENT.
+// E_MEMORY_DUPLICATE, E_MEMORY_COUNT, E_CAPABILITY_INCONSISTENT, E_MEMORY_ROM_BUDGET (ADR 0321: `m68k.rom` ranges are read-only, revision-named, at most 4096 bytes per revision in total).
 [[nodiscard]] std::optional<Rejection> check_memory(const Manifest &manifest);
 // Declaration check run by the reader and `mod check` (SEG-139-T004): ratios are canonical decimal "N:M" (no leading zeros, terms 1..4096) inside 4:3..32:9 with min <= max; scenes require
 // `aspect_max`, are at most 32, have token ids in strictly ascending order and at least one component each, components from kGeometryComponents strictly ascending. A geometry object that

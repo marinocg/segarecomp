@@ -54,12 +54,17 @@ struct ModMem {
   bool refuse_load = false;     // refuses the NEXT load only (the restore blob); taking the previous state back then succeeds
   bool refuse_always = false;   // refuses every load: it cannot even take its own previous state back
   uint32_t loads = 0;
+  std::vector<uint32_t> rom_values;   // SEG-152-T018: what the render phase read from the declared ROM range, one entry per render
 };
 void mod_phase(void *state, const SegaModHost *h) {
   auto *m = static_cast<ModMem *>(state);
   if (h->phase == SEGA_MOD_PHASE_FRAME_BEGIN) {
     ++m->counter;
     h->write(SEGA_GEN_SPACE_M68K_WORK_RAM, 0x100, 4, m->counter);
+  }
+  if (h->phase == SEGA_MOD_PHASE_RENDER) {   // only attached with a ROM range (see Rig::rom)
+    uint32_t v = 0;
+    if (h->read(SEGA_GEN_SPACE_M68K_ROM, 0x104, 4, &v) == 0) m->rom_values.push_back(v);
   }
 }
 int mod_save(void *state, uint8_t *out, uint32_t cap_bytes, uint32_t *len) {
@@ -94,6 +99,10 @@ SegaModProvider make_provider(bool with_state) {
 }
 const GenesisModRange kRanges[] = {{SEGA_GEN_SPACE_M68K_WORK_RAM, 0x100U, 0x100U, GENESIS_MOD_ACCESS_READ | GENESIS_MOD_ACCESS_WRITE}};
 
+// SEG-152-T018: a synthetic effective-image slice; the declared ROM range [0x104, 0x10C) is materialised from it (project-authored bytes).
+const GenesisModRange kRomRanges[] = {{SEGA_GEN_SPACE_M68K_ROM, 0x104U, 8U, GENESIS_MOD_ACCESS_READ}};
+const uint8_t kRomBytes[8] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
+
 const GenesisModRange kReadRanges[] = {{SEGA_GEN_SPACE_M68K_WORK_RAM, 0x100U, 0x100U, GENESIS_MOD_ACCESS_READ}};
 
 struct Rig {
@@ -105,18 +114,25 @@ struct Rig {
   GenesisSnapshotMachine machine;
   GenesisSnapshotIdentity id;
   std::string rejection;
+  uint8_t rom_copy[8] = {};
   bool attached = false;
-  Rig(uint8_t identity_byte, uint32_t schema, bool state_cap = true, bool write_cap = true) {
+  Rig(uint8_t identity_byte, uint32_t schema, bool state_cap = true, bool write_cap = true, bool rom = false, uint8_t rom_salt = 0) {
     setup(*rt);
     provider = make_provider(state_cap);
     GenesisModConfig c{};
     c.mod_id = "state-mod";
     c.provider = &provider;
     c.provider_state = &mem;
-    c.phase_mask = bit(SEGA_MOD_PHASE_FRAME_BEGIN);
+    c.phase_mask = rom ? bit(SEGA_MOD_PHASE_RENDER) : bit(SEGA_MOD_PHASE_FRAME_BEGIN);
     c.required[0] = cap(SEGA_MOD_CAP_MEMORY_READ) | (write_cap ? cap(SEGA_MOD_CAP_MEMORY_WRITE) : 0U) | (state_cap ? cap(SEGA_MOD_CAP_STATE_MOD) : 0U);
-    c.ranges = write_cap ? kRanges : kReadRanges;
+    c.ranges = rom ? kRomRanges : (write_cap ? kRanges : kReadRanges);
     c.range_count = 1U;
+    if (rom) {
+      std::memcpy(rom_copy, kRomBytes, sizeof rom_copy);
+      rom_copy[7] = static_cast<uint8_t>(rom_copy[7] + rom_salt);
+      c.rom_data = rom_copy;
+      c.rom_data_bytes = sizeof rom_copy;
+    }
     std::memset(c.identity_sha256, identity_byte, 32U);
     c.state_schema = state_cap ? schema : 0U;
     const char *why = "";
@@ -547,6 +563,72 @@ void rewind_through_a_mod_state_change() {
   genesis_viewer_state_destroy(vs);
 }
 
+// SEG-152-T018 (ADR 0321): the ROM-read service is derived from the build-materialised bytes, not from snapshot data, so a real restore and a real rewind change neither the values nor the compatibility identity.
+void rom_read_survives_restore_and_rewind() {
+  Rig a(0x11, 7, true, false, true);
+  check(a.attached, "a mod with a ROM range and state.mod attaches: " + a.rejection);
+  if (!a.attached) return;
+  uint8_t compat0[32];
+  std::memcpy(compat0, a.snap.compat, 32U);
+  run_to_frame(*a.rt, 8);
+  check(a.mem.rom_values.size() >= 7U, "the render phase read the ROM range every frame");
+  bool all_same = true;
+  for (uint32_t v : a.mem.rom_values) all_same = all_same && v == 0xDEADBEEFU;
+  check(all_same, "the ROM reads return the materialised bytes, big-endian");
+  Shot s1;
+  check(s1.take(a), "capture with a ROM-reading mod");
+  run_to_frame(*a.rt, 14);
+  check(genesis_snapshot_restore(&a.machine, &a.id, s1.buf.data, s1.buf.size) == GENESIS_SNAPSHOT_OK, "restore of a ROM-reading mod's state");
+  GenesisSnapshotModState after{};
+  genesis_mod_snapshot_state(a.sched.get(), &after);
+  check(std::memcmp(after.compat, compat0, 32U) == 0, "the compatibility identity is identical after the restore");
+  const std::size_t before_run = a.mem.rom_values.size();
+  run_to_frame(*a.rt, a.rt->virtual_frame_count + 3U);
+  bool again_same = a.mem.rom_values.size() > before_run;
+  for (std::size_t i = before_run; i < a.mem.rom_values.size(); ++i) again_same = again_same && a.mem.rom_values[i] == 0xDEADBEEFU;
+  check(again_same, "the ROM reads after the restore return the same values");
+
+  // a different effective image: a different compatibility digest, so the state is refused (E_STATE_MOD_MISMATCH) rather than replayed over other bytes
+  {
+    Rig other(0x11, 7, true, false, true, 1U);
+    check(other.attached && std::memcmp(other.snap.compat, compat0, 32U) != 0, "a different effective image has a different compatibility digest");
+    check(genesis_snapshot_restore(&other.machine, &other.id, s1.buf.data, s1.buf.size) == GENESIS_SNAPSHOT_MOD_MISMATCH, "a state of another effective image is refused (E_STATE_MOD_MISMATCH)");
+  }
+
+  // the real rewind path
+  Rig r(0x11, 7, true, false, true);
+  RewindHost host;
+  GenesisViewerStateConfig cfg{};
+  cfg.machine = r.machine;
+  cfg.identity = r.id;
+  cfg.after_restore = after_restore;
+  cfg.after_restore_context = &host;
+  cfg.rewind_budget_bytes = 8U * 1024U * 1024U;
+  cfg.rewind_interval_ms = 100U;
+  cfg.rewind_target_ms = 60000U;
+  GenesisViewerState *vs = genesis_viewer_state_create(&cfg);
+  check(vs != nullptr, "the viewer state service is created for a ROM-reading mod");
+  if (vs == nullptr) return;
+  SvStateProvider prov{};
+  genesis_viewer_state_provider(vs, &prov);
+  for (uint64_t frame = 1; frame <= 30; ++frame) {
+    run_to_frame(*r.rt, frame);
+    genesis_viewer_state_after_slice(vs);
+  }
+  check(prov.history_count(prov.ctx) >= 3, "rewind recorded several moments of a ROM-reading mod");
+  char err[96] = "";
+  check(prov.restore_entry(prov.ctx, 1, err, sizeof err) == 0, std::string("rewind restore of a ROM-reading mod: ") + err);
+  GenesisSnapshotModState rw{};
+  genesis_mod_snapshot_state(r.sched.get(), &rw);
+  check(std::memcmp(rw.compat, compat0, 32U) == 0, "the compatibility identity is identical after the rewind");
+  const std::size_t n0 = r.mem.rom_values.size();
+  run_to_frame(*r.rt, r.rt->virtual_frame_count + 3U);
+  bool rw_same = r.mem.rom_values.size() > n0;
+  for (std::size_t i = n0; i < r.mem.rom_values.size(); ++i) rw_same = rw_same && r.mem.rom_values[i] == 0xDEADBEEFU;
+  check(rw_same, "the ROM reads after the rewind return the same values");
+  genesis_viewer_state_destroy(vs);
+}
+
 void limits_and_negative_attach() {
   {
     Rig bad(0x11, 0, true, true);   // state.mod granted but schema 0
@@ -587,6 +669,7 @@ int main() {
   hook_frames_round_trip();
   hook_table_bounds_and_identity();
   rewind_through_a_mod_state_change();
+  rom_read_survives_restore_and_rewind();
   limits_and_negative_attach();
   if (failures != 0) {
     std::printf("%d failure(s)\n", failures);

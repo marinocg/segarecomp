@@ -8,3 +8,5 @@ const char segarecomp_mod_effective_sha256[] = "00000000000000000000000000000000
 const unsigned long segarecomp_mod_state_schema = 0UL;
 const unsigned long segarecomp_mod_range_count = 0UL;
 const unsigned long segarecomp_mod_ranges[][4] = {{0, 0, 0, 0}};
+const unsigned long segarecomp_mod_rom_data_size = 0UL;
+const unsigned char segarecomp_mod_rom_data[] = {0};   /* ADR 0321: no m68k.rom range declared */

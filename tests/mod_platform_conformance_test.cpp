@@ -61,7 +61,7 @@ std::vector<Row> make_rows() {
     r.expect["audio_command_mapping"] = "E_CAPABILITY_UNSUPPORTED:runtime";
     r.declared_capabilities = {
         {"host.log", "experimental"}, {"frame.work_ram", "supported-with-limitations"}, {"frame.vdp", "supported-with-limitations"}, {"scenery.words", "supported-with-limitations"},
-        {"overlay.rgba", "supported-with-limitations"}, {"memory.read.m68k.work_ram", "experimental"}, {"memory.write.m68k.work_ram", "experimental"}, {"input.read", "experimental"},
+        {"overlay.rgba", "supported-with-limitations"}, {"memory.read.m68k.work_ram", "experimental"}, {"memory.read.m68k.rom", "experimental"}, {"memory.write.m68k.work_ram", "experimental"}, {"input.read", "experimental"},
         {"input.intercept", "experimental"}, {"hook.function", "experimental"}, {"state.mod", "experimental"}, {"audio.event.read", "experimental"}, {"audio.command.send", "experimental"}};
     rows.push_back(r);
   }

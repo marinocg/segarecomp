@@ -24,7 +24,7 @@ constexpr Support U = Support::unsupported, E = Support::experimental, L = Suppo
 // Capability table (native-sdk-abi-2.md section 4). Genesis keeps the four ABI 1 names at `supported-with-limitations` (they run today). The ABI 2 services are declarable on Genesis
 // (`experimental`) while their runtime lands in M05; function hooks and host audio are gated. Master System and Sega CD register lifecycle + `host.log` only (SEG-146-T003);
 // everything else is `unsupported` until SEG-147 / SEG-148 raise it, and a package that needs it is rejected, never ignored.
-constexpr std::array<CapabilityInfo, 23> kCapabilities = {{
+constexpr std::array<CapabilityInfo, 24> kCapabilities = {{
     {"host.log", 1, {E, E, E}, true},
     {"frame.work_ram", 2, {L, U, U}, true},
     {"frame.vdp", 3, {L, U, U}, true},
@@ -32,6 +32,7 @@ constexpr std::array<CapabilityInfo, 23> kCapabilities = {{
     {"scenery.words", 5, {L, U, U}, false},
     {"overlay.rgba", 6, {L, U, U}, true},
     {"memory.read.m68k.work_ram", 7, {E, U, U}, true},
+    {"memory.read.m68k.rom", 7, {E, U, U}, true},   // ADR 0321: build-time materialised effective-image ranges, render phase only
     {"memory.read.z80.ram", 7, {U, U, U}, true},
     {"memory.read.z80.work_ram", 7, {U, U, U}, true},
     {"memory.read.z80.cart_ram", 7, {U, U, U}, true},

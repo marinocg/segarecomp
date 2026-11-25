@@ -181,6 +181,7 @@ struct Harness {
   ~Harness() { delete sched; }
   static void log_sink(void *ctx, const char *line, uint32_t len) { static_cast<Harness *>(ctx)->sink.emplace_back(line, len); }
   std::vector<GenesisModRange> custom;   // used instead of kRanges when non-empty
+  std::vector<uint8_t> rom;              // ADR 0321: the materialised bytes of the ROM-space ranges in `custom`
   void init(uint32_t mask, uint64_t required = kMemCaps, bool with_ranges = true) {
     setup(rt);
     g_probe = Probe{};
@@ -192,6 +193,8 @@ struct Harness {
     c.required[0] = required;
     c.ranges = !custom.empty() ? custom.data() : (with_ranges ? kRanges : nullptr);
     c.range_count = !custom.empty() ? static_cast<uint32_t>(custom.size()) : (with_ranges ? 2U : 0U);
+    c.rom_data = rom.empty() ? nullptr : rom.data();
+    c.rom_data_bytes = static_cast<uint32_t>(rom.size());
     c.log_sink = log_sink;
     c.log_ctx = this;
     attach_result = genesis_mod_scheduler_attach(sched, &rt, &c, &rejection);
@@ -720,6 +723,165 @@ void overhead_without_mods() {
 
 }  // namespace
 
+
+// ---- SEG-152-T018 (ADR 0321): provider reads of declared, build-materialised m68k.rom ranges (synthetic bytes only) ----
+// Two adjacent ranges A = [0x100,0x108) and B = [0x108,0x10C) of a synthetic effective image; the bytes below are project-authored, not game data.
+constexpr uint64_t kRomCaps = cap(SEGA_MOD_CAP_HOST_LOG) | cap(SEGA_MOD_CAP_MEMORY_READ);
+std::vector<GenesisModRange> rom_ranges() {
+  return {{SEGA_GEN_SPACE_M68K_ROM, 0x100U, 8U, GENESIS_MOD_ACCESS_READ}, {SEGA_GEN_SPACE_M68K_ROM, 0x108U, 4U, GENESIS_MOD_ACCESS_READ}, {SEGA_GEN_SPACE_M68K_ROM, 0x400U, 0x20U, GENESIS_MOD_ACCESS_READ}};
+}
+std::vector<uint8_t> rom_bytes(uint8_t salt = 0) {
+  std::vector<uint8_t> v;
+  for (uint32_t i = 0; i < 0x2CU; ++i) v.push_back(static_cast<uint8_t>(0xA0U + i + salt));
+  return v;
+}
+// Runs `ops` in `phase` of frame 0 (the render phase of frame 0 / the boundary phases of frame 0) and returns the fault cause ("" = none).
+std::string rom_case(uint32_t phase, const std::vector<Op> &ops, uint64_t caps = kRomCaps, bool with_ranges = true) {
+  Harness h;
+  if (with_ranges) { h.custom = rom_ranges(); h.rom = rom_bytes(); }
+  h.init(kAllPhases, caps, with_ranges);
+  check(h.attach_result == 0, "rom case attach");
+  g_probe.script.phase = phase;
+  g_probe.script.frame = 0;
+  g_probe.script.ops = ops;
+  run_frames(h.rt, 2U);
+  return h.sched->fault.faulted ? h.sched->fault.cause : "";
+}
+
+void rom_read_service() {
+  const uint32_t R = SEGA_GEN_SPACE_M68K_ROM;
+  {   // widths 1/2/4, big-endian, across the three ranges, with the memory.read capability only (no frame.work_ram)
+    Harness h;
+    h.custom = rom_ranges();
+    h.rom = rom_bytes();
+    h.init(kAllPhases, kRomCaps);
+    check(h.attach_result == 0, "attach with ROM ranges");
+    g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+    g_probe.script.ops = {{Op::read, R, 0x100, 1, 0}, {Op::read, R, 0x102, 2, 0}, {Op::read, R, 0x104, 4, 0}, {Op::read, R, 0x108, 4, 0}, {Op::read, R, 0x41F, 1, 0}, {Op::read, R, 0x41C, 4, 0}, {Op::read, R, 0x105, 1, 0}};
+    run_frames(h.rt, 2U);
+    check(!h.sched->fault.faulted && g_probe.status.size() == 7U, "the ROM reads in render do not fault");
+    // the third range is materialised after the first two (12 bytes), so 0x41F is the last byte and 0x41C starts the last long
+    const uint32_t expect[] = {0xA0U, 0xA2A3U, 0xA4A5A6A7U, 0xA8A9AAABU, 0xA0U + 0x2BU, ((0xA0U + 0x28U) << 24U) | ((0xA0U + 0x29U) << 16U) | ((0xA0U + 0x2AU) << 8U) | (0xA0U + 0x2BU), 0xA5U};
+    for (std::size_t i = 0; i < 7U && i < g_probe.values.size(); ++i) check(g_probe.values[i] == expect[i], "ROM read " + std::to_string(i) + " value");
+  }
+  // each error class is a stable status and faults the callback
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x300, 1, 0}}) == "range", "an undeclared offset");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x0FF, 1, 0}}) == "range", "just below a range");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x106, 4, 0}}) == "range", "an access straddling two adjacent ranges");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x10A, 4, 0}}) == "range", "an access leaving a range");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0xFFFFFFFEU, 4, 0}}) == "range", "an offset overflow");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x100, 3, 0}}) == "range", "an invalid width");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x101, 2, 0}}) == "alignment", "an odd word");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x103, 4, 0}}) == "alignment", "an odd long");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x101, 3, 0}}) == "range", "width is checked before alignment");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x301, 2, 0}}) == "alignment", "alignment is checked before the range");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, R, 0x100, 1, 0}}, cap(SEGA_MOD_CAP_HOST_LOG), false) == "capability", "no memory.read capability");
+  for (uint32_t phase : {SEGA_MOD_PHASE_FRAME_BEGIN, SEGA_MOD_PHASE_INPUT, SEGA_MOD_PHASE_POST_INPUT, SEGA_MOD_PHASE_FRAME_END})
+    check(rom_case(phase, {{Op::read, R, 0x100, 1, 0}}) == "phase", std::string("a ROM read in ") + genesis_mod_phase_name(phase));
+  check(rom_case(SEGA_MOD_PHASE_RESET, {{Op::read, R, 0x100, 1, 0}}) == "phase", "a ROM read in reset");
+  check(rom_case(SEGA_MOD_PHASE_FRAME_END, {{Op::write, R, 0x100, 1, 0}}, kMemCaps) == "readonly", "a ROM write is read-only");
+  check(rom_case(SEGA_MOD_PHASE_RENDER, {{Op::read, SEGA_GEN_SPACE_M68K_WORK_RAM, 0x100, 1, 0}}) == "capability", "the work-RAM render read still needs frame.work_ram");
+  // cross-space isolation at runtime: a ROM-only declaration authorises no live work RAM; a work-RAM-only declaration and capability authorise no ROM (order: capability, phase, width, alignment, range)
+  check(rom_case(SEGA_MOD_PHASE_FRAME_END, {{Op::read, SEGA_GEN_SPACE_M68K_WORK_RAM, 0x100, 1, 0}}) == "range", "a ROM-only declaration cannot read live work RAM at the same offset");
+  check(rom_case(SEGA_MOD_PHASE_FRAME_END, {{Op::read, SEGA_GEN_SPACE_M68K_WORK_RAM, 0x108, 4, 0}}) == "range", "a ROM-only declaration cannot read live work RAM (second range offset)");
+  {
+    Harness w;   // work-RAM-only declaration (the default kRanges) with memory.read: no ROM range, so a ROM read is E_RANGE
+    w.init(kAllPhases, kMemCaps);
+    g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+    g_probe.script.ops = {{Op::read, R, 0x100, 1, 0}};
+    run_frames(w.rt, 2U);
+    check(w.sched->fault.faulted && std::string(w.sched->fault.cause) == "range", "a work-RAM-only declaration cannot authorise a ROM read (range)");
+    Harness c;   // work-RAM capabilities alone (frame.work_ram, no memory.read) cannot read ROM: the capability check comes first
+    c.init(kAllPhases, cap(SEGA_MOD_CAP_HOST_LOG) | cap(SEGA_MOD_CAP_FRAME_WORK_RAM), false);
+    g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+    g_probe.script.ops = {{Op::read, R, 0x100, 1, 0}};
+    run_frames(c.rt, 2U);
+    check(c.attach_result == 0, std::string("attach of the frame.work_ram-only mod: ") + c.rejection);
+    check(c.sched->fault.faulted && std::string(c.sched->fault.cause) == "capability", "work-RAM render capability alone cannot read ROM (capability)");
+  }
+  {   // a render ROM read is independent of the frame.work_ram copy: same values with and without that grant, with the copy's source zeroed
+    auto run = [&](bool grant, std::vector<uint32_t> &values) {
+      Harness h;
+      h.custom = rom_ranges();
+      h.rom = rom_bytes();
+      h.init(kAllPhases, kRomCaps | (grant ? cap(SEGA_MOD_CAP_FRAME_WORK_RAM) : 0U));
+      g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+      g_probe.script.ops = {{Op::read, R, 0x100, 4, 0}, {Op::read, R, 0x108, 4, 0}, {Op::read, R, 0x41C, 4, 0}};
+      run_frames(h.rt, 3U);
+      values = g_probe.values;
+      return !h.sched->fault.faulted;
+    };
+    std::vector<uint32_t> without, with;
+    check(run(false, without) && run(true, with), "render ROM reads do not fault with or without frame.work_ram");
+    check(without.size() == 3U && without == with, "render ROM read values are independent of frame.work_ram");
+    check(!without.empty() && without[0] == 0xA0A1A2A3U, "the independent values are the materialised bytes");
+  }
+  // budgets: 4096 reads and 8192 bytes per callback
+  {
+    std::vector<Op> ops(4096U, Op{Op::read, R, 0x100, 1, 0});
+    check(rom_case(SEGA_MOD_PHASE_RENDER, ops) == "", "4096 one-byte ROM reads fit the budget");
+    ops.push_back(Op{Op::read, R, 0x100, 1, 0});
+    check(rom_case(SEGA_MOD_PHASE_RENDER, ops) == "budget", "the 4097th ROM read is E_BUDGET");
+    std::vector<Op> longs(2048U, Op{Op::read, R, 0x100, 4, 0});
+    check(rom_case(SEGA_MOD_PHASE_RENDER, longs) == "", "8192 bytes of ROM reads fit the byte budget");
+    longs.push_back(Op{Op::read, R, 0x100, 4, 0});
+    check(rom_case(SEGA_MOD_PHASE_RENDER, longs) == "budget", "the byte past 8192 is E_BUDGET");
+  }
+  // declaration validation at attach
+  {
+    Harness h;
+    h.custom = {{R, 0x100U, 8U, GENESIS_MOD_ACCESS_READ | GENESIS_MOD_ACCESS_WRITE}};
+    h.rom = rom_bytes();
+    h.rom.resize(8U);
+    h.init(kAllPhases, kMemCaps);
+    check(h.attach_result == 1 && std::string(h.rejection) == "E_RANGE_DECLARATION", "a writable ROM range is refused");
+    h.custom = {{R, 0x100U, 8U, GENESIS_MOD_ACCESS_READ}};
+    h.init(kAllPhases, kMemCaps);   // rom bytes 8 = sum
+    check(h.attach_result == 0, "a matching ROM declaration attaches");
+    h.rom.resize(7U);
+    h.init(kAllPhases, kMemCaps);
+    check(h.attach_result == 1 && std::string(h.rejection) == "E_RANGE_DECLARATION", "materialised bytes that do not match the declared lengths are refused");
+    h.custom = {{R, 0x100U, 0U, GENESIS_MOD_ACCESS_READ}};
+    h.rom.clear();
+    h.init(kAllPhases, kMemCaps);
+    check(h.attach_result == 1 && std::string(h.rejection) == "E_RANGE_DECLARATION", "an empty ROM range is refused");
+    h.custom = {{R, 0U, 2048U, GENESIS_MOD_ACCESS_READ}, {R, 4096U, 2049U, GENESIS_MOD_ACCESS_READ}};
+    h.rom.assign(4097U, 0U);
+    h.init(kAllPhases, kMemCaps);
+    check(h.attach_result == 1 && std::string(h.rejection) == "E_RANGE_DECLARATION", "more than 4096 ROM bytes are refused");
+    h.custom = {{R, 0U, 2048U, GENESIS_MOD_ACCESS_READ}, {R, 4096U, 2048U, GENESIS_MOD_ACCESS_READ}};
+    h.rom.assign(4096U, 0U);
+    h.init(kAllPhases, kMemCaps);
+    check(h.attach_result == 0, "exactly 4096 ROM bytes attach");
+    h.init(kAllPhases, cap(SEGA_MOD_CAP_HOST_LOG));
+    check(h.attach_result == 1 && std::string(h.rejection) == "E_RANGE_DECLARATION", "a ROM range without memory.read is refused");
+  }
+  // replay and state identity: identical reads and frames in two runs; a different image changes the configuration digest
+  {
+    auto run = [&](uint8_t salt, std::vector<uint32_t> &values, uint8_t compat[32]) {
+      Harness h;
+      h.custom = rom_ranges();
+      h.rom = rom_bytes(salt);
+      h.init(kAllPhases, kRomCaps);
+      g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+      g_probe.script.ops = {{Op::read, R, 0x100, 4, 0}, {Op::read, R, 0x410, 2, 0}};
+      run_frames(h.rt, 3U);
+      values = g_probe.values;
+      GenesisSnapshotModState st;
+      genesis_mod_snapshot_state(h.sched, &st);
+      std::memcpy(compat, st.compat, 32U);
+      return guest_digest(h.rt);
+    };
+    std::vector<uint32_t> v1, v2, v3;
+    uint8_t c1[32], c2[32], c3[32];
+    const std::string d1 = run(0, v1, c1), d2 = run(0, v2, c2), d3 = run(1, v3, c3);
+    check(d1 == d2 && v1 == v2 && std::memcmp(c1, c2, 32U) == 0, "two runs of the same image read identically and share a configuration digest");
+    check(v1.size() == 2U && v3.size() == 2U && v1 != v3, "a different effective image changes the bytes read");
+    check(std::memcmp(c1, c3, 32U) != 0, "a different effective image changes the state compatibility digest");
+    check(d1 == d3, "ROM reads never change guest state");
+  }
+}
+
 #define STEP(fn) do { std::printf("STEP " #fn "\n"); std::fflush(stdout); fn(); } while (0)
 int main() {
   STEP(phase_order_and_zero_guest_time);
@@ -733,6 +895,7 @@ int main() {
   STEP(replay_is_byte_identical);
   STEP(digest_covers_dropped_records);
   STEP(logging_budget);
+  STEP(rom_read_service);
   STEP(overhead_without_mods);
   if (failures != 0) {
     std::printf("%d failure(s)\n", failures);

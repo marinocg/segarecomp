@@ -30,12 +30,16 @@ extern "C" {
 #define GENESIS_MOD_WRITE_LOG_MAX 4096U     /* committed writes kept for diagnostics/replay */
 #define GENESIS_MOD_RANGES_MAX 16U
 #define GENESIS_MOD_WORK_RAM_BYTES 65536U
+/* SEG-152-T018 (ADR 0321): declared m68k.rom read ranges (SEGA_GEN_SPACE_M68K_ROM, GENESIS_MOD_ACCESS_READ only) are materialised from the effective image at build; bounds below. */
+#define GENESIS_MOD_ROM_BYTES_MAX 4096U         /* sum of the ROM ranges' lengths */
+#define GENESIS_MOD_ROM_READS_MAX 4096U         /* read operations per callback */
+#define GENESIS_MOD_ROM_READ_BYTES_MAX 8192U    /* bytes read per callback */
 
 /* Access modes of a declared range. */
 #define GENESIS_MOD_ACCESS_READ 1U
 #define GENESIS_MOD_ACCESS_WRITE 2U
 
-/* A range a mod declared (per revision) for one space and the modes it may use on it. Only SEGA_GEN_SPACE_M68K_WORK_RAM is accessible in this version. */
+/* A range a mod declared (per revision) for one space and the modes it may use on it. SEGA_GEN_SPACE_M68K_WORK_RAM (read/write) and, for the render phase, SEGA_GEN_SPACE_M68K_ROM (read only; `offset` is a byte offset into the effective image). */
 typedef struct GenesisModRange {
   uint32_t space; /* SegaGenesisSpace */
   uint32_t offset;
@@ -61,6 +65,8 @@ typedef struct GenesisModConfig {
   uint64_t optional[2]; /* granted only when supported */
   const GenesisModRange *ranges;
   uint32_t range_count;
+  const uint8_t *rom_data; /* HOST-INTERNAL (not SDK/ABI): the concatenated bytes of the ROM-space ranges in `ranges` order; rom_data_bytes must equal their length sum (<= GENESIS_MOD_ROM_BYTES_MAX); NULL/0 = none */
+  uint32_t rom_data_bytes;
   const GenesisModHookBinding *hooks; /* function hooks this mod implements (T004); NULL/0 = none */
   uint32_t hook_count;
   GenesisModLogSink log_sink; /* host.log lines and fault diagnostics; NULL = discarded */
@@ -105,6 +111,7 @@ typedef struct GenesisModScheduler {
   SegaModHost host;
   SegaGenesisFeatures features;
   GenesisModRange ranges[GENESIS_MOD_RANGES_MAX];
+  uint32_t rom_base[GENESIS_MOD_RANGES_MAX]; /* offset of range i's bytes in config.rom_data (ROM ranges only) */
   GenesisRuntime *runtime;
   GenesisFunctionHooks function_hooks; /* the callback set and call-frame stack of the static function hooks (runtime->function_hooks points here when hook phases are registered) */
   GenesisModHookBinding bindings[GENESIS_MOD_HOOKS_MAX];
@@ -128,6 +135,7 @@ typedef struct GenesisModScheduler {
   uint8_t staged_pad[2], staged_pad_set[2];
   GenesisModStagedWrite staged[GENESIS_MOD_WRITE_OPS_MAX];
   uint32_t staged_count, staged_bytes;
+  uint32_t rom_reads, rom_read_bytes; /* ROM read budget of the callback in flight */
   char staged_log[GENESIS_MOD_LOG_LINES_MAX][GENESIS_MOD_LOG_LINE_BYTES + 1U];
   uint32_t staged_log_count;
   int fault_status; /* SegaModStatus of the first violation (SEGA_MOD_OK = none) */
