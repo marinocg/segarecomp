@@ -126,12 +126,33 @@ static int service_reg_write(GenesisModScheduler *s, uint32_t slot, uint32_t wid
   return SEGA_MOD_OK;
 }
 
+/* SEG-152-T018 (ADR 0321): a read of the materialised ROM ranges. Check order: capability, phase, width, alignment, range (one declared range), budget. */
+static int service_rom_read(GenesisModScheduler *s, uint32_t offset, uint32_t width, uint32_t *value) {
+  uint32_t i, k;
+  if (!granted(s, SEGA_MOD_CAP_MEMORY_READ)) return violation(s, SEGA_MOD_E_CAPABILITY);
+  if (s->phase != SEGA_MOD_PHASE_RENDER) return violation(s, SEGA_MOD_E_PHASE);
+  if (value == NULL || !width_ok(width)) return violation(s, SEGA_MOD_E_RANGE);
+  if (width > 1U && (offset & 1U) != 0U) return violation(s, SEGA_MOD_E_ALIGNMENT);
+  for (i = 0; i < s->config.range_count; ++i) {
+    const GenesisModRange *r = &s->ranges[i];
+    if (r->space == SEGA_GEN_SPACE_M68K_ROM && offset >= r->offset && (uint64_t)offset + width <= (uint64_t)r->offset + r->length) break;
+  }
+  if (i == s->config.range_count) return violation(s, SEGA_MOD_E_RANGE);
+  if (s->rom_reads >= GENESIS_MOD_ROM_READS_MAX || s->rom_read_bytes + width > GENESIS_MOD_ROM_READ_BYTES_MAX) return violation(s, SEGA_MOD_E_BUDGET);
+  ++s->rom_reads;
+  s->rom_read_bytes += width;
+  *value = 0U;
+  for (k = 0; k < width; ++k) *value = (*value << 8U) | s->config.rom_data[s->rom_base[i] + (offset - s->ranges[i].offset) + k];
+  return SEGA_MOD_OK;
+}
+
 static int service_read(uint32_t space, uint32_t offset, uint32_t width, uint32_t *value) {
   GenesisModScheduler *s = g_current;
   const int render = s != NULL && s->phase == SEGA_MOD_PHASE_RENDER;
   uint32_t i, result = 0;
   if (s == NULL || !s->in_callback) return SEGA_MOD_E_PHASE;
   if (space == SEGA_GEN_SPACE_M68K_HOOK_REGS) return service_reg_read(s, offset, width, value);
+  if (space == SEGA_GEN_SPACE_M68K_ROM) return service_rom_read(s, offset, width, value);
   if (render ? !granted(s, SEGA_MOD_CAP_FRAME_WORK_RAM) : !granted(s, SEGA_MOD_CAP_MEMORY_READ)) return violation(s, SEGA_MOD_E_CAPABILITY);
   if (!render && (READ_PHASES & PHASE_BIT(s->phase)) == 0U) return violation(s, SEGA_MOD_E_PHASE);
   if (value == NULL || !width_ok(width)) return violation(s, SEGA_MOD_E_RANGE);
@@ -225,6 +246,8 @@ static void begin_callback(GenesisModScheduler *s, uint32_t phase, uint64_t fram
   s->host.frame = frame;
   s->staged_count = 0U;
   s->staged_bytes = 0U;
+  s->rom_reads = 0U;
+  s->rom_read_bytes = 0U;
   s->staged_log_count = 0U;
   s->staged_reg_set = 0U;
   if ((HOOK_PHASES & PHASE_BIT(phase)) == 0U) s->hook_site = NULL;
@@ -574,9 +597,34 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
     *rejection = "E_RANGE_DECLARATION";
     return 1;
   }
+  {
+    uint32_t rom_total = 0U;
+    for (i = 0; i < config->range_count; ++i) {
+      const GenesisModRange *r = &config->ranges[i];
+      if (r->space != SEGA_GEN_SPACE_M68K_ROM) continue;
+      if (r->length == 0U || r->length > GENESIS_MOD_ROM_BYTES_MAX || r->modes != GENESIS_MOD_ACCESS_READ || !sega_mod_is_granted(&s->host, SEGA_MOD_CAP_MEMORY_READ)) {
+        *rejection = "E_RANGE_DECLARATION";
+        return 1;
+      }
+      s->rom_base[i] = rom_total;
+      rom_total += r->length;
+      if (rom_total > GENESIS_MOD_ROM_BYTES_MAX) {
+        *rejection = "E_RANGE_DECLARATION";
+        return 1;
+      }
+    }
+    if (rom_total != config->rom_data_bytes || (rom_total != 0U && config->rom_data == NULL)) {
+      *rejection = "E_RANGE_DECLARATION";
+      return 1;
+    }
+  }
   for (i = 0; i < config->range_count; ++i) {
     const GenesisModRange *r = &config->ranges[i];
     const uint32_t modes = r->modes;
+    if (r->space == SEGA_GEN_SPACE_M68K_ROM) {
+      s->ranges[i] = *r;
+      continue;
+    }
     if (r->space != SEGA_GEN_SPACE_M68K_WORK_RAM || r->length == 0U || (uint64_t)r->offset + r->length > GENESIS_MOD_WORK_RAM_BYTES || modes == 0U ||
         (modes & ~(GENESIS_MOD_ACCESS_READ | GENESIS_MOD_ACCESS_WRITE)) != 0U ||
         ((modes & GENESIS_MOD_ACCESS_READ) != 0U && !sega_mod_is_granted(&s->host, SEGA_MOD_CAP_MEMORY_READ)) ||
@@ -927,6 +975,10 @@ static void compat_digest(const GenesisModScheduler *s, uint8_t out[32]) {
   sha_u32(&sha, s->config.provider != NULL ? s->config.provider->implementation_version : 0U);
   sha_u32(&sha, s->config.range_count);
   for (i = 0; i < s->config.range_count; ++i) { sha_u32(&sha, s->ranges[i].space); sha_u32(&sha, s->ranges[i].offset); sha_u32(&sha, s->ranges[i].length); sha_u32(&sha, s->ranges[i].modes); }
+  if (s->config.rom_data_bytes != 0U) { /* the materialised bytes are part of the configuration (only when ROM ranges exist, so other digests are unchanged) */
+    sha_u32(&sha, s->config.rom_data_bytes);
+    genesis_sha256_update(&sha, s->config.rom_data, s->config.rom_data_bytes);
+  }
   sha_u32(&sha, s->config.hook_count);
   for (i = 0; i < s->config.hook_count; ++i) {
     const uint32_t n = (uint32_t)strlen(s->bindings[i].id);

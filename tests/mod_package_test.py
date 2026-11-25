@@ -338,7 +338,7 @@ reject("a range for an undeclared revision", memory_manifest(mem(revision="rev-z
 reject("a range past the end of the work RAM", memory_manifest(mem(offset=65535, length=2)), "E_MEMORY_RANGE")
 reject("an empty range", memory_manifest(mem(length=0)), "E_MEMORY_RANGE")
 reject("an offset beyond the reader's number cap is not valid JSON for it", memory_manifest(mem(offset=2**33)), "E_MANIFEST_SYNTAX")
-reject("a space the platform does not expose", memory_manifest(mem(space="m68k.rom")), "E_MEMORY_SPACE")
+reject("a space the platform does not expose", memory_manifest(mem(space="z80.ram")), "E_MEMORY_SPACE")   # SEG-152-T018 (ADR 0321): m68k.rom is exposed read-only; see mod_native_rom_read_test.py
 reject("an unknown access", memory_manifest(mem(access="rw")), "E_MEMORY_ACCESS")
 reject("a duplicated range", memory_manifest(mem(), mem()), "E_MEMORY_DUPLICATE")
 reject("ranges out of canonical order", memory_manifest(mem(offset=32), mem(offset=16)), "E_FIELD_VALUE")

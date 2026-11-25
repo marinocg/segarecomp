@@ -217,7 +217,7 @@ def derived(name, mutate):
 refused("a range for an undeclared revision", "E_MEMORY_REVISION", "mod", "check", derived("m1", lambda t: t.replace('revision = "fixture"\nspace', 'revision = "nope"\nspace')))
 refused("a range outside the 64 KiB", "E_MEMORY_RANGE", "mod", "check", derived("m2", lambda t: t.replace("offset = 16", "offset = 65535").replace("length = 2", "length = 2")))
 refused("an empty range", "E_MEMORY_RANGE", "mod", "check", derived("m3", lambda t: t.replace("length = 2", "length = 0")))
-refused("an unknown space", "E_MEMORY_SPACE", "mod", "check", derived("m4", lambda t: t.replace('space = "m68k.work_ram"', 'space = "m68k.rom"')))
+refused("an unknown space", "E_MEMORY_SPACE", "mod", "check", derived("m4", lambda t: t.replace('space = "m68k.work_ram"', 'space = "z80.ram"')))
 refused("a bad access", "E_MEMORY_ACCESS", "mod", "check", derived("m5", lambda t: t.replace('access = "read-write"', 'access = "rw"')))
 refused("write access without the capability", "E_CAPABILITY_INCONSISTENT", "mod", "check", derived("m6", lambda t: t.replace('"memory.write.m68k.work_ram", ', "")))
 refused("a duplicated range", "E_MEMORY_DUPLICATE", "mod", "check", derived("m7", lambda t: t + '\n[[memory]]\nrevision = "fixture"\nspace = "m68k.work_ram"\noffset = 16\nlength = 2\naccess = "read-write"\n'))
