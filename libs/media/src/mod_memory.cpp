@@ -35,9 +35,9 @@ std::optional<Rejection> check_memory(const Manifest &m) {
     if (write && !has_cap(m, "memory.write." + r.space)) return Rejection{"E_CAPABILITY_INCONSISTENT", "a writable memory range needs the memory.write." + r.space + " capability"};
     if (rom) {
       std::uint64_t total = 0;
-      for (std::size_t j = 0; j <= i; ++j)
+      for (std::size_t j = 0; j < m.memory.size(); ++j)   // the revision's whole declared total, so the diagnostic states the actual figure
         if (m.memory[j].space == "m68k.rom" && m.memory[j].revision == r.revision) total += m.memory[j].length;
-      if (total > kRomBudgetBytes) return Rejection{"E_MEMORY_ROM_BUDGET", "the m68k.rom ranges of revision \"" + r.revision + "\" total more than 4096 bytes"};
+      if (total > kRomBudgetBytes) return Rejection{"E_MEMORY_ROM_BUDGET", "the m68k.rom ranges of revision \"" + r.revision + "\" declare " + std::to_string(total) + " bytes in total; the limit is " + std::to_string(kRomBudgetBytes) + " bytes"};
     }
     for (std::size_t j = 0; j < i; ++j)
       if (m.memory[j] == r) return Rejection{"E_MEMORY_DUPLICATE", "a memory range is declared twice"};

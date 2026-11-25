@@ -180,6 +180,7 @@ def main():
             (d / "mod.toml").write_text(text)
             r, doc, _ = pack(d)
             check(r.returncode != 0 and doc.get("class") == code, f"{what}: expected {code}, got {doc.get('class')} ({doc.get('error')})")
+            return doc
 
         # ---- (3b) an effective image changed by a verified typed edit: different materialised bytes, values and effective identity ----
         EDIT_SITE = 0x104   # inside the declared range [0x100, 0x110); the word is read by the probe as the 32-bit value at 0x104
@@ -231,7 +232,8 @@ def main():
         declared("read-write-access", "E_MEMORY_ACCESS", good.replace('access = "read"', 'access = "read-write"', 1))
         declared("no-revision", "E_MEMORY_REVISION", good.replace('revision = "fixture"\nspace = "m68k.rom"', 'space = "m68k.rom"', 1))
         declared("empty", "E_MEMORY_RANGE", manifest(image_sha, [(0x100, 0)]))
-        declared("budget", "E_MEMORY_ROM_BUDGET", manifest(image_sha, [(0x0, 2048), (0x1000, 2049)]))
+        budget_doc = declared("budget", "E_MEMORY_ROM_BUDGET", manifest(image_sha, [(0x0, 2048), (0x1000, 2049)]))
+        check("4097" in str(budget_doc.get("error")) and "4096" in str(budget_doc.get("error")), f"the budget diagnostic states the declared total and the limit: {budget_doc.get('error')}")
         declared("no-capability", "E_CAPABILITY_INCONSISTENT", manifest(image_sha, RANGES, caps='"host.log"'))
         r, doc, _ = pack(project("limit", ranges=[(0x0, 2048), (0x1000, 2048)]))
         check(r.returncode == 0 and doc.get("ok"), f"exactly 4096 ROM bytes are accepted: {r.stdout[:200]}")
