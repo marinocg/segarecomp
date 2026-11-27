@@ -24,7 +24,7 @@ segarecomp build --rom <original> --output <dir> --cc <compiler> --runtime-dir <
   --luau-package mod.segapatch --luau-identity <package_identity>          # or --native-package / --native-identity
 ```
 
-Add `--sdl3-include` and `--sdl3-lib` for the played program. A headless program must always be run with a bound: `--frames` and/or `--cycle-budget`. **The launcher does not install Master System mods yet.**
+Add `--sdl3-include` and `--sdl3-lib` for the played program. A headless program must always be run with a bound: `--frames` and/or `--cycle-budget`. The cycle budget covers the whole run, a mod checkpoint included; if it ends first, or a loaded state is already past it, the run exits 2. **The launcher does not install Master System mods yet.**
 
 ## What a mod can do
 

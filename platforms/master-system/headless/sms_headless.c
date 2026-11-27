@@ -209,6 +209,7 @@ int main(int argc, char **argv) {
   const char *coverage_dir = NULL;
 #endif
   SmsStop stop;
+  int budget_spent = 0;
   SmsError init;
   uint8_t digest[32];
   char digest_hex[65];
@@ -266,9 +267,16 @@ int main(int argc, char **argv) {
 #endif
   if (frames != SMS_NO_LIMIT && frames > UINT64_MAX / SMS_CYCLES_PER_FRAME) return 64;
 #if defined(SEGARECOMP_SMS_MOD)
-  if (sms_headless_mod_before_run(&machine, &psg_device, &pad_device, frames) != 0) return 5;
-#endif
   {
+    const SmsHeadlessModStart start = sms_headless_mod_before_run(&machine, &psg_device, &pad_device, cycle_budget, frames);
+    if (start == SMS_HEADLESS_MOD_REFUSED) return 5;
+    budget_spent = start == SMS_HEADLESS_MOD_BUDGET_SPENT;
+  }
+#endif
+  if (budget_spent) { /* a restored mod state already past the budget: no instruction runs */
+    stop = sms_run_until_cycle(&machine, 0);
+    if (stop.kind == SMS_STOP_CYCLE) stop.kind = SMS_STOP_CYCLE_BUDGET;
+  } else {
     const uint64_t frame_limit = frames == SMS_NO_LIMIT ? SMS_NO_LIMIT : frames * SMS_CYCLES_PER_FRAME;
     const uint64_t final_cycle = cycle_budget < frame_limit ? cycle_budget : frame_limit;
     uint64_t rng = slice_seed * 6364136223846793005ull + 1442695040888963407ull;

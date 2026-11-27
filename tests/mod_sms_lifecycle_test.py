@@ -303,6 +303,64 @@ cli.check(changed_id != identity, "a changed script is another identity")
 refused_load("a state of a changed mod identity", changed_program, state)
 refused_load("another package's state (the native twin's) in the Luau program", luau, native_state)
 
+# ---------------------------------------------------------------- the cycle budget is ONE absolute bound, checkpoints and loaded states included
+FRAME_T = 59736   # T-states per frame; a run stops at the first instruction boundary at or after its bound, a few T-states past a frame start
+
+
+def bounded(tag, budget, frames=40, checkpoint=None, load=None, save=True):
+    """One run under an explicit cycle budget; returns (result, stop line as (kind, cycles, frames), path of the state it may have written)."""
+    target = tmp / ("budget-" + tag + ".state")
+    work = tmp / (luau.name + "-run-budget-" + tag)
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    (work / "input.txt").write_text(INPUT)
+    args = [str(luau / "game"), "--frames", str(frames), "--cycle-budget", str(budget), "--input", str(work / "input.txt"), "--artifacts", str(work)]
+    if checkpoint is not None:
+        args += ["--mod-checkpoint", str(checkpoint)] + (["--mod-state-save", str(target)] if save else [])
+    if load is not None:
+        args += ["--mod-state-load", str(load)]
+    p_ = subprocess.run(args, text=True, capture_output=True, timeout=120)
+    first = p_.stdout.split()
+    stop = (first[1], int(first[3]), int(first[5])) if first[:1] == ["stop"] else None
+    summary = [json.loads(x.split(" ", 1)[1]) for x in p_.stderr.splitlines() if x.startswith("MOD_SUMMARY ")]
+    refused_ = [json.loads(x.split(" ", 1)[1]) for x in p_.stderr.splitlines() if x.startswith("MOD_REFUSED ")]
+    return {"rc": p_.returncode, "mod": summary[0] if summary else None, "refused": refused_[0] if refused_ else None}, stop, target
+
+
+for tag, budget, checkpoint in (("before", 100, 20), ("final", 100, 40), ("final-near", 40 * FRAME_T - 100, 40), ("mid", 20 * FRAME_T - 100, 20)):
+    r, stop, target = bounded(tag, budget, checkpoint=checkpoint)
+    cli.check(r["rc"] == 2 and stop and stop[0] == "cycle_budget" and budget <= stop[1] < budget + 100, f"budget {budget} before checkpoint {checkpoint}: the run stops AT the budget and exits 2: {r['rc']} {stop}")
+    cli.check(r["mod"] and r["mod"]["roundtrip"] == {"status": "not_reached", "frame": checkpoint} and not target.exists(), f"... with no checkpoint evidence and no state file: {r['mod'] and r['mod'].get('roundtrip')}")
+r, stop, target = bounded("after", 25 * FRAME_T, checkpoint=20)
+cli.check(r["rc"] == 2 and stop and stop[0] == "cycle_budget" and stop[2] == 25 and r["mod"]["roundtrip"]["status"] == "ok" and target.is_file(),
+          f"enough for the checkpoint, not for the run: a verified checkpoint, then exit 2 at the budget: {r['rc']} {stop} {r['mod']['roundtrip']}")
+r, stop, target = bounded("enough", 41 * FRAME_T, checkpoint=40)
+cli.check(r["rc"] == 0 and stop and stop[0] == "frame" and r["mod"]["roundtrip"]["status"] == "ok" and target.is_file() and r["mod"]["write_digest"] == ms["write_digest"],
+          f"enough for a final-frame checkpoint and the run: success, the usual replay witness: {r['rc']} {stop}")
+# the barrier counter of the frame-26 state saved above: what a loaded run starts from
+_r, at26, _t = bounded("barrier", 41 * FRAME_T, frames=26, load=state)
+barrier = at26[1]
+cli.check(_r["rc"] == 0 and at26[0] == "frame" and 26 * FRAME_T <= barrier < 26 * FRAME_T + 100, f"a loaded state resumes at its barrier: {at26}")
+for tag, budget, frames, checkpoint in (("over-more", barrier - 1, 40, None), ("over-done", barrier - 1, 26, None), ("over-past", barrier - 1, 10, None), ("over-cp", barrier - 1, 40, 30)):
+    r, stop, target = bounded(tag, budget, frames=frames, checkpoint=checkpoint, load=state)
+    cli.check(r["rc"] == 2 and stop and stop[0] == "cycle_budget" and stop[1] == barrier, f"a loaded state past the budget runs nothing and exits 2 (--frames {frames}): {r['rc']} {stop}")
+    cli.check(not target.exists() and (checkpoint is None or r["mod"]["roundtrip"] == {"status": "not_reached", "frame": checkpoint}), f"... and takes no checkpoint: {r['mod'] and r['mod'].get('roundtrip')}")
+r, stop, _t = bounded("equal-done", barrier, frames=26, load=state)
+cli.check(r["rc"] == 0 and stop == ("frame", barrier, 26), f"a counter equal to the budget is not over it: the requested frame is already reached: {r['rc']} {stop}")
+r, stop, _t = bounded("equal-more", barrier, frames=40, load=state)
+cli.check(r["rc"] == 2 and stop == ("cycle_budget", barrier, 26), f"... and nothing more can run: {r['rc']} {stop}")
+r, stop, target = bounded("equal-cp", barrier, checkpoint=26, load=state)
+cli.check(r["rc"] == 2 and r["mod"]["roundtrip"]["status"] == "ok" and target.is_file() and stop[1] == barrier, f"the checkpoint of the loaded barrier itself is reachable at that budget: {r['rc']} {stop}")
+r, stop, target = bounded("passed", 41 * FRAME_T, checkpoint=10, load=state)
+cli.check(r["rc"] == 5 and r["refused"] and r["refused"]["class"] == "E_ARGUMENT" and not target.exists(), f"a checkpoint the loaded state already passed is refused, not reported: {r['rc']} {r['refused']}")
+# ... and `mod test` reports it: the scenario fails, whatever the checkpoint
+for name, frames, checkpoint, budget in (("final-checkpoint", 40, 40, 100), ("early-checkpoint", 40, 20, 100), ("after-checkpoint", 40, 20, 25 * FRAME_T)):
+    d = project("bounded-" + name)
+    write(d / "tests.toml", f'[[scenario]]\nname = "{name}"\nframes = {frames}\ncheckpoint = {checkpoint}\nbudget = {budget}\ntimeout = 30\n'.encode("ascii"))
+    rc, t, _p = cli.run("mod", "test", d, "--rom", rom, "--cc", CC, "--sdk-dir", SDK)
+    cli.check(rc == 1 and t and t.get("class") == "E_TEST_FAILED" and t["scenarios"][0]["passed"] is False and t["scenarios"][0]["first_divergence"].get("class") == "E_RUN_INCOMPLETE",
+              f"mod test, {name} under budget {budget}: failure, E_RUN_INCOMPLETE: {t}")
+
 # ---------------------------------------------------------------- faults: only the mod is disabled; Luau and C11 give the SAME diagnostic; the guest ends as Vanilla
 FAULTS = {   # mode (selected by player 2's pad bits in `input`, applied in the named phase): (cause, phase, Luau statement, C statement)
     1: ("range", "post-input", 'sega.mem.write("z80.work_ram", 0x40, 1, 9)', "host->write(1U, 0x40U, 1U, 9U);"),

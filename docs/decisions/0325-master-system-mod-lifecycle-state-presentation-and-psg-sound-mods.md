@@ -55,11 +55,16 @@ restore" is not implemented on either platform.
 provider's memory are not recreated: a mod must initialize its own state in `reset`. A recording made after a reset reproduces the run in a fresh process only for a mod that does so and had not faulted
 before the reset.
 
+**Identity.** A program with a mod takes a state's source digest (the effective cartridge) and variant (the package) from its own verified artifact. External `SEGARECOMP_ROM_SHA256` /
+`SEGARECOMP_SAVE_VARIANT` values are ignored by such a program, whether they agree or not; the launcher still names the save folder. A Vanilla program's identity handling is unchanged.
+
 ## 5. Build route and tooling
 
 `segarecomp build --luau-package` / `--native-package` accept Master System packages; the verified package's platform selects the route and supplies the mapper (`MOD_MAPPER_MISMATCH` for a conflicting
 declaration). Injected code passes the Z80 owner's admission. Headless and played programs link the scheduler. The headless driver of such a program adds `--mod-ram`, `--mod-checkpoint`,
-`--mod-state-save` / `--mod-state-load` and writes `mod.json` and `presented.rgb`; its bounds are `--frames` and `--cycle-budget`. `segarecomp mod test` runs Master System scenarios (the scenario `budget` is
+`--mod-state-save` / `--mod-state-load` and writes `mod.json` and `presented.rgb`; its bounds are `--frames` and `--cycle-budget`. The cycle budget is one absolute T-state bound over the whole run,
+the checkpoint included: an unreached checkpoint is reported as `not_reached`, writes no state and the run exits 2 (`mod test`: `E_RUN_INCOMPLETE`). A loaded state whose counter exceeds the budget runs
+nothing and exits 2 whatever `--frames` says (equal is not over). A state file is written only after its round trip verified, and a checkpoint a loaded state already passed is refused. `segarecomp mod test` runs Master System scenarios (the scenario `budget` is
 the cycle budget, frames are 0-based machine frames, pad masks are Master System bits); a data-only package supports `expect_state` and `expect_pcm`. `mod diff-run` stays Genesis only (`E_DIFF_PLATFORM`).
 
 ## 6. PSG sound mods (SEG-145-T004)

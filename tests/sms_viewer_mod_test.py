@@ -7,6 +7,7 @@ The synthetic gameplay example is built through the production `segarecomp build
 every frame. Proved: the played program is deterministic with the mod; its recorded PHYSICAL input replayed by the headless build of the same mod reproduces the mod's write witness; a state saved in one
 process and loaded in another resumes the identical canonical state (MODSTATE included); a rewind across mod-state changes is deterministic and cancelling it changes nothing; a Vanilla program and a
 modded program refuse each other's states."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -61,10 +62,13 @@ def main():
     work = tmp / "work"
     work.mkdir()
 
-    def session(program, frames, script, save=None, interval=None, record=None):
+    def session(program, frames, script, save=None, interval=None, record=None, identity_env=None):
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SEGARECOMP_VIEWER_SETTINGS=str(work / "viewer-settings.cfg"), SEGARECOMP_ROM_SHA256="11" * 32)
         for name in ("SEGARECOMP_SAVE_DIR", "SEGARECOMP_SAVE_VARIANT", "SEGARECOMP_REWIND", "SEGARECOMP_REWIND_INTERVAL_MS"):
             env.pop(name, None)
+        if identity_env is not None:   # exactly these identity variables, nothing else
+            env.pop("SEGARECOMP_ROM_SHA256")
+            env.update(identity_env)
         (work / "pad.txt").write_text(script)
         report = work / "report.json"
         report.unlink(missing_ok=True)
@@ -107,6 +111,30 @@ def main():
     check(ev and ev[0]["event"] == "load" and ev[0]["status"] == "ok", "a separate process loads the state: %s" % ev)
     check(rep is not None and rep["canonical_sha256"] == plain["canonical_sha256"] and loaded["write_digest"] == mod["write_digest"],
           "... and reaches the uninterrupted run's canonical state and write witness (the mod's run counter was restored with the guest)")
+
+    # ---- the embedded identity is authoritative: no external value changes what a modded program records or accepts ----
+    effective = hashlib.sha256(fixture.build()).digest()   # a script-only mod: the effective cartridge is the fixture itself
+    environments = {"agreeing": {"SEGARECOMP_ROM_SHA256": effective.hex(), "SEGARECOMP_SAVE_VARIANT": identity}, "conflicting": {"SEGARECOMP_ROM_SHA256": "22" * 32, "SEGARECOMP_SAVE_VARIANT": "33" * 32},
+                    "vanilla-claim": {"SEGARECOMP_ROM_SHA256": "11" * 32, "SEGARECOMP_SAVE_VARIANT": "vanilla"}, "malformed": {"SEGARECOMP_ROM_SHA256": "zz", "SEGARECOMP_SAVE_VARIANT": "zz"}, "absent": {}}
+    digests = set()
+    for label, environment in environments.items():
+        folder = tmp / ("identity-" + label)
+        r, rep, ev, _ = session(played, 120, "20 12\n60 12K\n61 12\n", folder, identity_env=environment)
+        data = (folder / "states" / "quick.sgstate").read_bytes()
+        check(ev and ev[0]["status"] == "ok" and data[32:64] == effective and data[64:96] == bytes.fromhex(identity),
+              "%s environment: the state records the program's own cartridge and package identity (%s %s)" % (label, data[32:36].hex(), data[64:68].hex()))
+        digests.add(rep["canonical_sha256"])
+    check(len(digests) == 1, "the canonical machine state (identity included) does not depend on the environment: %s" % digests)
+    r, rep, ev, loaded = session(played, 70, "10 12M\n11 12\n", tmp / "identity-conflicting", identity_env=environments["agreeing"])
+    check(ev and ev[0]["status"] == "ok" and rep["canonical_sha256"] in digests, "a state written under a conflicting environment loads under the right one: %s" % ev)
+    foreign = tmp / "identity-foreign"
+    (foreign / "states").mkdir(parents=True)
+    forged = bytearray((save / "states" / "quick.sgstate").read_bytes())
+    forged[32:64] = bytes.fromhex("22" * 32)   # a state that claims another cartridge, resealed
+    forged[-32:] = hashlib.sha256(bytes(forged[:-32])).digest()
+    (foreign / "states" / "quick.sgstate").write_bytes(bytes(forged))
+    r, rep, ev, _ = session(played, 70, "10 M\n", foreign, identity_env={"SEGARECOMP_ROM_SHA256": "22" * 32})
+    check(ev and ev[0]["status"] == "failed" and "different game or version" in ev[0]["detail"], "an environment cannot make the program accept another cartridge's state: %s" % ev)
 
     # ---- rewind across mod-state changes ----
     quiet = tmp / "rewind"

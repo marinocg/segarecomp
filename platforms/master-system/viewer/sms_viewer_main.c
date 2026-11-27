@@ -164,13 +164,11 @@ static void state_setup(SmsSdl3Viewer *viewer, const SmsViewerOptions *options) 
     int have_source = parse_hex32(getenv("SEGARECOMP_ROM_SHA256"), cfg.identity.source_sha256);
     int have_variant = variant == NULL || *variant == '\0' || strcmp(variant, "vanilla") == 0 || parse_hex32(variant, cfg.identity.variant_sha256);
 #if defined(SEGARECOMP_SMS_MOD)
-    {  /* a program with a mod knows its own identity: the effective image it was built from and the package it links */
-      uint8_t image[32];
-      sms_mod_host_identity(image, cfg.identity.variant_sha256);
-      if (!have_source) memcpy(cfg.identity.source_sha256, image, 32U);
-      have_source = 1;
-      have_variant = 1;
-    }
+    /* A program with a mod knows its own identity (the effective image it was built from and the package it links), and that identity is authoritative: external SEGARECOMP_ROM_SHA256 and
+     * SEGARECOMP_SAVE_VARIANT values are ignored, so no environment can record this program's states as another game or version. */
+    sms_mod_host_identity(cfg.identity.source_sha256, cfg.identity.variant_sha256);
+    have_source = 1;
+    have_variant = 1;
 #endif
     if (options->record != NULL) {   /* a recording describes the run since the last reset: a restore would rewrite the history it describes */
       slots_reason = "Save states are not available while input is being recorded.";

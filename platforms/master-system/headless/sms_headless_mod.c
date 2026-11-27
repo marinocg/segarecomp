@@ -18,6 +18,12 @@ static uint64_t checkpoint;
 static int have_checkpoint;
 static char extra[256];
 
+/* The checkpoint the cycle budget never allowed: stated, so that its absence can never be read as success. */
+static void not_reached(void) {
+  const size_t used = strlen(extra);
+  snprintf(extra + used, sizeof extra - used, ",\"roundtrip\":{\"status\":\"not_reached\",\"frame\":%llu}", (unsigned long long)checkpoint);
+}
+
 int sms_headless_mod_option(int argc, char **argv, int *index) {
   const char *arg = argv[*index];
   const char *value = *index + 1 < argc ? argv[*index + 1] : NULL;
@@ -51,9 +57,9 @@ int sms_headless_mod_attach(SmsMachine *machine, SmsPad *pad) {
   return 0;
 }
 
-static int refused(const char *cls, const char *why) {
+static SmsHeadlessModStart refused(const char *cls, const char *why) {
   fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\",\"reason\":\"%s\"}\n", cls, why);
-  return 1;
+  return SMS_HEADLESS_MOD_REFUSED;
 }
 
 static void digest_hex(const uint8_t *data, size_t size, char out[65]) {
@@ -71,7 +77,7 @@ static void digest_hex(const uint8_t *data, size_t size, char out[65]) {
   out[64] = '\0';
 }
 
-int sms_headless_mod_before_run(SmsMachine *machine, SmsPsg *psg, SmsPad *pad, uint64_t frames) {
+SmsHeadlessModStart sms_headless_mod_before_run(SmsMachine *machine, SmsPsg *psg, SmsPad *pad, uint64_t cycle_budget, uint64_t frames) {
   static uint8_t file[SMS_SNAPSHOT_MAX_FILE_BYTES + 1u];
   SmsSnapshotMachine m;
   SmsSnapshotIdentity identity;
@@ -97,6 +103,11 @@ int sms_headless_mod_before_run(SmsMachine *machine, SmsPsg *psg, SmsPad *pad, u
     if (st != SMS_SNAPSHOT_OK) return refused("E_STATE_RESTORE", sms_snapshot_status_text(st));
     digest_hex(file, size, sha);
     snprintf(extra, sizeof extra, ",\"loaded_state_sha256\":\"%s\"", sha);
+    if (cycle_budget != SMS_NO_LIMIT && machine->rt.state.cycles > cycle_budget) {
+      if (have_checkpoint) not_reached();
+      return SMS_HEADLESS_MOD_BUDGET_SPENT;
+    }
+    if (have_checkpoint && machine->rt.state.cycles / SMS_CYCLES_PER_FRAME > checkpoint) return refused("E_ARGUMENT", "the loaded state is already past the checkpoint");
   }
   if (have_checkpoint) {
     SmsSnapshotBuffer first, second;
@@ -106,28 +117,37 @@ int sms_headless_mod_before_run(SmsMachine *machine, SmsPsg *psg, SmsPad *pad, u
     size_t used = strlen(extra);
     int identical;
     if (frames != SMS_NO_LIMIT && checkpoint > frames) return refused("E_ARGUMENT", "the checkpoint lies beyond --frames");
-    stop = sms_run_until_frame(machine, checkpoint);
+    stop = sms_run_bounded(machine, cycle_budget, checkpoint);
+    if (stop.kind == SMS_STOP_CYCLE_BUDGET) { /* the budget ends before the checkpoint: no evidence, no file; the run reports the budget */
+      not_reached();
+      return SMS_HEADLESS_MOD_RUN;
+    }
     if (stop.kind != SMS_STOP_FRAME) return refused("E_STATE_RESTORE", "the guest stopped before the checkpoint");
     sms_psg_sync(psg, stop.cycles); /* the barrier: the PSG follows the guest clock (the codec requires it, as the viewer does every frame) */
     st = sms_snapshot_capture(&m, &identity, NULL, &first);
     if (st != SMS_SNAPSHOT_OK) return refused("E_STATE_UNAVAILABLE", sms_snapshot_status_text(st));
-    if (save_path != NULL) {
-      FILE *f = fopen(save_path, "wb");
-      int ok = f != NULL && fwrite(first.data, 1, first.size, f) == first.size;
-      if (f != NULL && fclose(f) != 0) ok = 0;
-      if (!ok) { sms_snapshot_buffer_free(&first); return refused("E_STATE_RESTORE", "the state file cannot be written"); }
-    }
     st = sms_snapshot_restore(&m, &identity, first.data, first.size);
     if (st != SMS_SNAPSHOT_OK) { sms_snapshot_buffer_free(&first); return refused("E_STATE_RESTORE", sms_snapshot_status_text(st)); }
     st = sms_snapshot_capture(&m, &identity, NULL, &second);
     if (st != SMS_SNAPSHOT_OK) { sms_snapshot_buffer_free(&first); return refused("E_STATE_RESTORE", sms_snapshot_status_text(st)); }
     identical = first.size == second.size && memcmp(first.data, second.data, first.size) == 0;
+    if (identical && save_path != NULL) { /* only a verified state becomes a file */
+      FILE *f = fopen(save_path, "wb");
+      int ok = f != NULL && fwrite(first.data, 1, first.size, f) == first.size;
+      if (f != NULL && fclose(f) != 0) ok = 0;
+      if (!ok) {
+        if (f != NULL) (void)remove(save_path);
+        sms_snapshot_buffer_free(&first);
+        sms_snapshot_buffer_free(&second);
+        return refused("E_STATE_RESTORE", "the state file cannot be written");
+      }
+    }
     digest_hex(first.data, first.size, sha);
     snprintf(extra + used, sizeof extra - used, ",\"roundtrip\":{\"status\":\"%s\",\"frame\":%llu,\"state_sha256\":\"%s\"}", identical ? "ok" : "differs", (unsigned long long)checkpoint, sha);
     sms_snapshot_buffer_free(&first);
     sms_snapshot_buffer_free(&second);
   }
-  return 0;
+  return SMS_HEADLESS_MOD_RUN;
 }
 
 int sms_headless_mod_finish(const char *artifacts) {
