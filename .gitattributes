@@ -62,3 +62,7 @@ tests/segarecomp_seg085_test.py text eol=lf
 third_party/luau/** -text
 # SEG-147-T007: the asset-replacement example is packaged and compared byte for byte (edit files and asset payloads are LF-only), so Windows autocrlf must not rewrite it.
 platforms/master-system/sdk/examples/asset-replace/** text eol=lf
+# SEG-147-T011 / SEG-145-T004: the Master System mod examples are packaged with pinned digests and their edit/assembly/Luau sources are LF-only.
+platforms/master-system/sdk/examples/gameplay/** text eol=lf
+platforms/master-system/sdk/examples/gameplay-native/** text eol=lf
+platforms/master-system/sdk/examples/sound/** text eol=lf
