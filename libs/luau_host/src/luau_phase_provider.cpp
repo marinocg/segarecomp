@@ -3,6 +3,9 @@
 
 #include "segarecomp/mod.hpp"
 
+#include <segarecomp_mod_genesis.h>
+
+#include <cstddef>
 #include <cstring>
 
 namespace segarecomp::luau {
@@ -48,6 +51,24 @@ int svc_input_set(void *ctx, std::uint32_t port, std::uint32_t buttons) {
   return h->input_set != nullptr ? h->input_set(port, buttons) : SEGA_MOD_E_CAPABILITY;
 }
 
+// SEG-145-T008: the same SegaModAudioApi a native provider reaches through the Genesis feature table; NULL when neither audio capability is granted (capability status, as the VM's own absent binding).
+const SegaModAudioApi *audio_of(void *ctx) {
+  const auto *h = static_cast<const SegaModHost *>(ctx);
+  const auto *f = static_cast<const SegaGenesisFeatures *>(h->platform_features);
+  if (f == nullptr || h->platform_features_size < offsetof(SegaGenesisFeatures, audio) + sizeof f->audio) return nullptr;
+  return f->audio;
+}
+int svc_audio_command(void *ctx, int op, const char *name) {
+  const SegaModAudioApi *a = audio_of(ctx);
+  if (a == nullptr) return SEGA_MOD_E_CAPABILITY;
+  return op == 0 ? a->play_sfx(name) : op == 1 ? a->play_music(name) : a->stop_music();
+}
+int svc_audio_event(void *ctx, const char *mapping, char name_out[33]) {
+  static_assert(SEGA_MOD_AUDIO_NAME_BYTES == 33U);
+  const SegaModAudioApi *a = audio_of(ctx);
+  return a == nullptr ? SEGA_MOD_E_CAPABILITY : a->read_event(mapping, name_out);
+}
+
 void phase_entry(void *state, const SegaModHost *host) {
   auto *impl = static_cast<PhaseProvider::Impl *>(state);
   const Mapping *map = nullptr;
@@ -60,6 +81,8 @@ void phase_entry(void *state, const SegaModHost *host) {
   services.write = svc_write;
   services.input_get = svc_input_get;
   services.input_set = svc_input_set;
+  services.audio_command = svc_audio_command;
+  services.audio_event = svc_audio_event;
   FrameInput in;
   in.number = host->frame;
   in.services = &services;

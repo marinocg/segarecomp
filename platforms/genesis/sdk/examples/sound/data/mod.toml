@@ -1,0 +1,17 @@
+# SEG-145-T003 example: original-hardware sound mods as typed, expected-value-asserted ROM edits of the fixture's own sound data.
+[mod]
+id = "sound-data-example"
+version = "0.1.0"
+name = "Sound data example"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "92c51033a77f6af58de65bff8d6b822c14b5d7b0bdb234f69027267f613fdfee"
+
+[[source]]
+kind = "rom-edit-set"
+path = "edits/main.edits"

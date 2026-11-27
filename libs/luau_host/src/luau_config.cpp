@@ -50,7 +50,7 @@ std::optional<mod::Rejection> live_support(const mod::Package &package) {
 // SEG-138-T009 (ADR 0300): the headless scheduled path (`segarecomp build --luau-package` without a viewer) runs the ONE mod scheduler's phases, so it additionally grants the work-RAM and input services,
 // bounded by the manifest's declared memory ranges for the exact source image. Everything else is refused at build.
 std::vector<std::string> scheduled_capabilities() {
-  return {"host.log", "overlay.rgba", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "input.read", "input.intercept", "state.mod"};
+  return {"host.log", "overlay.rgba", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "input.read", "input.intercept", "state.mod", "audio.command.send", "audio.event.read"};
 }
 
 std::optional<mod::Rejection> scheduled_support(const mod::Package &package) {
@@ -65,10 +65,11 @@ std::optional<mod::Rejection> scheduled_support(const mod::Package &package) {
       return mod::Rejection{"E_LIVE_PAYLOAD", "the payload " + p.path + " (" + p.kind + ") is not used by the scheduled path; remove it or use a package without it"};
   if (m.has_hooks) return mod::Rejection{"E_HOOK_CALLBACK_UNSUPPORTED", "function hook callbacks are native ABI 2 only; a Luau callback for a hook is not supported"};
   if (m.abi_native != 0) return mod::Rejection{"E_LIVE_ABI", "a native ABI 2 provider does not run here"};
+  if (auto r = mod::check_audio_interface(m)) return r;
   const std::vector<std::string> live = scheduled_capabilities();
   for (const std::string &c : m.capabilities)
     if (std::find(live.begin(), live.end(), c) == live.end())
-      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod)"};
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod, audio.command.send, audio.event.read)"};
   return std::nullopt;
 }
 
@@ -85,10 +86,11 @@ std::optional<mod::Rejection> native_scheduled_support(const mod::Package &packa
   for (const mod::Payload &p : m.payloads)   // nothing the program does not use may be silently dropped: the native units and the data that make the effective image
     if (p.kind != "native-c11" && p.kind != "rom-edit-set" && p.kind != "guest-code" && p.kind != "guest-asm" && p.kind != "bps-image")
       return mod::Rejection{"E_LIVE_PAYLOAD", "the payload " + p.path + " (" + p.kind + ") is not used by the scheduled path; remove it or use a package without it"};
+  if (auto r = mod::check_audio_interface(m)) return r;
   const std::vector<std::string> live = native_scheduled_capabilities();
   for (const std::string &c : m.capabilities)
     if (std::find(live.begin(), live.end(), c) == live.end())
-      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, scenery.words, frame.work_ram, memory.read/write.m68k.work_ram, memory.read.m68k.rom, input.read, input.intercept, state.mod, hook.function)"};
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, scenery.words, frame.work_ram, memory.read/write.m68k.work_ram, memory.read.m68k.rom, input.read, input.intercept, state.mod, hook.function, audio.command.send, audio.event.read)"};
   if (m.has_hooks && std::find(m.capabilities.begin(), m.capabilities.end(), "hook.function") == m.capabilities.end())
     return mod::Rejection{"E_LIVE_CAPABILITY", "a package with function hooks must require hook.function"};
   return std::nullopt;

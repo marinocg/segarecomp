@@ -1,0 +1,13 @@
+# SEG-145-T003: guest-native sound edits of the fixture's own driver data. Every line asserts the original bytes first; offsets are the ones ../fixture_rom.py `layout()` names.
+# 1. music: the theme's note data (a track replacement of the same length)
+fixture bytes 0x00002220 8e0f92860d928e0b92800a92 8c12928e0f92820e928e0b92
+# 2. SFX sequence: the blip effect's two notes
+fixture bytes 0x00002238 a505b1a704b4 af08b1ab06b4
+# 3. DAC sample data: the first 12 samples of the drum
+fixture bytes 0x0000223e f0f0f0101010f0f0f0101010 c0c0c0c0c0c0404040404040
+# 4. instrument / voice data: the level of the chime's first operator (YM2612 register 0x40)
+fixture u8 0x00002275 0x20 0x10
+# 5. command mapping table: the blip command now plays one note only (its count byte)
+fixture u8 0x0000220b 0x02 0x01
+# 6. selection behaviour: the game asks for the drum (4) instead of the blip (3) when button B is pressed
+fixture u8 0x000002e3 0x03 0x04

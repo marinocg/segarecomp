@@ -2,6 +2,16 @@
 -- Each member names the capability that must be declared in mod.toml (an undeclared one is rejected by `mod check`) and the phases in which it may be called.
 
 declare sega: {
+  audio: {
+    -- audio.event.read (frame-end,render): Reads which declared event of the event mapping `mapping` the observed location holds now (nil when none matches); a level, not a queue. Read-only; render sees the copy taken after frame-end.
+    event: (mapping: string) -> string?,
+    -- audio.command.send (frame-begin,post-input,frame-end): Sends the music `name` of the package's declared command mapping "music", as sega.audio.play_sfx does for "sfx".
+    play_music: (name: string) -> (),
+    -- audio.command.send (frame-begin,post-input,frame-end): Sends the effect `name` of the package's declared command mapping "sfx": stages the declared value into the declared work-RAM mailbox (committed with the callback). An undeclared mapping or name is a fault.
+    play_sfx: (name: string) -> (),
+    -- audio.command.send (frame-begin,post-input,frame-end): Sends the value named "stop" of the declared command mapping "music" (a fault when the mapping declares none).
+    stop_music: () -> (),
+  },
   frame: {
     -- frame.work_ram (render): Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value).
     value: (name: string) -> number?,

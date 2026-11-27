@@ -462,6 +462,41 @@ std::optional<Refusal> bounds(std::uint64_t frames, std::uint64_t budget, std::u
   return std::nullopt;
 }
 
+// ---- the sound-mod gate (SEG-145-T003, ADR 0323) ----
+// What the unmodified product's own build recorded about the program's sound: `genesis_audio` ("supported" | "native" | "degraded"), the typed Z80 outcome and the implementation kind. Read from the
+// status.json this repository's build wrote; nothing here interprets the guest's driver.
+struct SoundStatus {
+  std::string status, outcome, implementation;
+};
+std::string status_text(const fs::path &out) {
+  std::vector<std::uint8_t> raw;
+  return read_file(out / "status.json", raw, 8U << 20U) ? std::string(raw.begin(), raw.end()) : std::string();
+}
+SoundStatus sound_status(const fs::path &out) {
+  const std::string text = status_text(out);
+  SoundStatus s;
+  s.status = str_field(text, "genesis_audio");
+  s.outcome = str_field(text, "z80_audio_outcome");
+  if (const std::size_t at = text.find("\"audio_implementation\":"); at != std::string::npos) s.implementation = str_field(text, "kind", at);
+  return s;
+}
+// A modded build that failed while producing the Z80 code (the materialization or sound-driver stages): the modified driver cannot be compiled statically. It is rejected, never interpreted.
+bool failed_in_sound_stage(const fs::path &out) {
+  const std::string stage = str_field(status_text(out), "stage");
+  return stage == "z80-materialize" || stage == "sound-driver";
+}
+std::optional<Refusal> judge_sound(const SoundStatus &vanilla, const SoundStatus &modded) {
+  if (vanilla.status != "supported" && vanilla.status != "native")
+    return Refusal{"E_AUDIO_BASELINE", "the Vanilla program's sound is \"" + (vanilla.status.empty() ? std::string("unknown") : vanilla.status) + "\": there is no working original to verify a sound mod against"};
+  if (modded.status != "supported" && modded.status != "native")
+    return Refusal{"E_AUDIO_STATIC_MATERIALIZATION", "the modified sound code or image does not pass the static materialization rules: the modded program's sound is \"" + (modded.status.empty() ? std::string("unknown") : modded.status) +
+                                                         "\"" + (modded.outcome.empty() ? std::string() : " (" + modded.outcome + ")") + "; modified Z80 code is never interpreted"};
+  if (modded.status != vanilla.status || modded.implementation != vanilla.implementation)
+    return Refusal{"E_AUDIO_IMPLEMENTATION_CHANGED", "the modded program selects another sound implementation (" + modded.status + "/" + modded.implementation + ") than Vanilla (" + vanilla.status + "/" + vanilla.implementation +
+                                                         "), so their audio is not comparable"};
+  return std::nullopt;
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------------------------------------ diff-run
@@ -517,9 +552,23 @@ int run_diff(const RunOptions &o) {
   modded_spec.expect_mod = p.luau;
   Observed vanilla, modded;
   if (const auto r = build_program(o, p.original_path, ws.dir / "vanilla", {}, {})) return refuse(*r);
-  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
+  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) {
+    if (o.audio && r->code == "E_BUILD_FAILED" && failed_in_sound_stage(ws.dir / "modded")) return refuse({"E_AUDIO_STATIC_MATERIALIZATION", "the modified sound code or image cannot be compiled: " + r->message});
+    return refuse(*r);
+  }
+  std::string audio_json;
+  if (o.audio) {
+    const SoundStatus a = sound_status(ws.dir / "vanilla"), b = sound_status(ws.dir / "modded");
+    if (const auto r = judge_sound(a, b)) return refuse(*r);
+    audio_json = ",\"audio\":{\"vanilla_status\":\"" + esc(a.status) + "\",\"modded_status\":\"" + esc(b.status) + "\",\"implementation\":\"" + esc(b.implementation) + "\",\"repeat_identical\":true}";
+  }
   if (const auto r = run_program(ws.dir / "vanilla", spec, ws.dir / "vanilla-frames", vanilla)) return refuse({r->code, "vanilla: " + r->message});
   if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-frames", modded)) return refuse({r->code, "modded: " + r->message});
+  if (o.audio) {   // a sound mod is only verified if its audio is reproducible: the same program with the same input again
+    Observed again;
+    if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-again-frames", again)) return refuse({r->code, "modded (repeat): " + r->message});
+    if (again.pcm != modded.pcm) return refuse({"E_AUDIO_NONDETERMINISTIC", "two runs of the modded program with the same input produced different PCM digests"});
+  }
   const Divergence d = compare(vanilla, modded, o.aggregate, o.first);
   std::string codes = "[";
   for (std::size_t i = 0; i < code->size(); ++i) {
@@ -543,7 +592,7 @@ int run_diff(const RunOptions &o) {
             << "\",\"first_frame\":" << o.first << ",\"frames\":" << o.frames << ",\"bounds\":{\"budget\":" << o.budget << ",\"timeout_seconds\":" << o.timeout << ",\"build_timeout_seconds\":" << kBuildTimeoutSeconds
             << ",\"slice_dispatches\":" << kSliceDispatches << "},\"input\":\"" << esc(o.input) << "\",\"aggregate\":" << (o.aggregate ? "true" : "false") << ",\"vanilla\":" << observed_json(vanilla, o.aggregate)
             << ",\"modded\":" << observed_json(modded, o.aggregate) << ",\"diverged_frames\":" << d.diverged_frames << ",\"mod_faulted\":" << (modded.mod.faulted ? "true" : "false") << ",\"final_state_differs\":" << (state_differs ? "true" : "false")
-            << ",\"pcm_differs\":" << (pcm_differs ? "true" : "false") << ",\"first_divergence\":";
+            << ",\"pcm_differs\":" << (pcm_differs ? "true" : "false") << audio_json << ",\"first_divergence\":";
   if (d.any) std::cout << "{\"frame\":" << d.frame << "," << d.detail << "}";
   else std::cout << "null";
   std::cout << ",\"code\":" << codes << "}\n";

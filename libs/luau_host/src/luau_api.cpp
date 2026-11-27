@@ -13,7 +13,7 @@ namespace segarecomp::luau {
 namespace {
 
 // The ONLY list of host names a script can reach. A name is added here, in a new ABI minor if it needs a capability the catalogue does not have (native-sdk-abi-2.md section 7).
-constexpr std::array<ApiEntry, 25> kApi = {{
+constexpr std::array<ApiEntry, 29> kApi = {{
     {"sega.log", "host.log", "function", "message:string", "", "all", "Appends one line to the host log (at most 256 bytes, 16 lines per callback; printable ASCII)."},
     {"sega.frame.value", "frame.work_ram", "function", "name:string", "number?", "render",
      "Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value)."},
@@ -49,6 +49,14 @@ constexpr std::array<ApiEntry, 25> kApi = {{
      "Reads the pad (button bits) of port 1 or 2: the previous frame's final input in frame-begin, the sample (with your staged change) in input, the final input in post-input."},
     {"sega.input.set", "input.intercept", "function", "port:number,buttons:number", "", "input",
      "Replaces the pad (button bits 0-255) the guest will read this frame; only in input; a violation is a fault."},
+    {"sega.audio.play_sfx", "audio.command.send", "function", "name:string", "", "frame-begin,post-input,frame-end",
+     "Sends the effect `name` of the package's declared command mapping \"sfx\": stages the declared value into the declared work-RAM mailbox (committed with the callback). An undeclared mapping or name is a fault."},
+    {"sega.audio.play_music", "audio.command.send", "function", "name:string", "", "frame-begin,post-input,frame-end",
+     "Sends the music `name` of the package's declared command mapping \"music\", as sega.audio.play_sfx does for \"sfx\"."},
+    {"sega.audio.stop_music", "audio.command.send", "function", "", "", "frame-begin,post-input,frame-end",
+     "Sends the value named \"stop\" of the declared command mapping \"music\" (a fault when the mapping declares none)."},
+    {"sega.audio.event", "audio.event.read", "function", "mapping:string", "string?", "frame-end,render",
+     "Reads which declared event of the event mapping `mapping` the observed location holds now (nil when none matches); a level, not a queue. Read-only; render sees the copy taken after frame-end."},
     {"reset", "", "callback", "", "", "reset", "Optional. Called once before the first frame."},
     {"frame_begin", "", "callback", "frame:number", "", "frame-begin", "Optional. Called at the start of each guest frame, before its input sample."},
     {"input", "", "callback", "frame:number", "", "input", "Optional. Called after the pad was sampled for the frame and before the guest can read it."},

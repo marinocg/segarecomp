@@ -17,10 +17,31 @@ namespace {
 struct Checker : Luau::AstVisitor {
   const std::string &file;
   const std::set<std::string> &declared;
+  const mod::Manifest &manifest;
   std::vector<AnalysisIssue> &issues;
   std::set<const Luau::AstExpr *> handled;   // call targets already checked as calls
 
-  Checker(const std::string &f, const std::set<std::string> &d, std::vector<AnalysisIssue> &i) : file(f), declared(d), issues(i) {}
+  Checker(const std::string &f, const std::set<std::string> &d, const mod::Manifest &m, std::vector<AnalysisIssue> &i) : file(f), declared(d), manifest(m), issues(i) {}
+
+  // SEG-145-T008: a literal audio name is checked against the declared mappings (E_AUDIO_TARGET: no such mapping; E_AUDIO_NAME: not one of its values). Computed names are checked at run time by the scheduler.
+  void check_audio(const Luau::AstExprCall *call, const std::string &path) {
+    const bool sfx = path == "sega.audio.play_sfx", music = path == "sega.audio.play_music", stop = path == "sega.audio.stop_music", event = path == "sega.audio.event";
+    if (!sfx && !music && !stop && !event) return;
+    const Luau::AstExprConstantString *literal = !stop && call->args.size == 1 ? call->args.data[0]->as<Luau::AstExprConstantString>() : nullptr;
+    const std::string text = literal != nullptr ? std::string(literal->value.data, literal->value.size) : std::string();
+    if (event && literal == nullptr) return;
+    const std::string id = sfx ? "sfx" : event ? text : "music";
+    const mod::Mapping *mapping = mod::find_audio_mapping(manifest, event ? "event" : "command", id);
+    if (mapping == nullptr) {
+      report(call->location, "E_AUDIO_TARGET", path + ": the manifest declares no " + std::string(event ? "event" : "command") + " mapping \"" + id + "\"");
+      return;
+    }
+    if (event || (!stop && literal == nullptr)) return;
+    const std::string name = stop ? "stop" : text;
+    for (const auto &value : mapping->values)
+      if (value.first == name) return;
+    report(call->location, "E_AUDIO_NAME", path + ": the mapping \"" + id + "\" declares no value \"" + name + "\"");
+  }
 
   void report(const Luau::Location &at, const char *cls, std::string message) {
     AnalysisIssue issue;
@@ -129,6 +150,7 @@ struct Checker : Luau::AstVisitor {
       if (got != want) report(call->args.data[i]->location, "E_LUAU_TYPE", where + " must be a " + want + ", not a " + got);
       else if (want == "number" && (!std::isfinite(number) || number != std::floor(number))) report(call->args.data[i]->location, "E_LUAU_TYPE", where + " must be an integer");
     }
+    check_audio(call, path);
     return true;
   }
 
@@ -177,7 +199,7 @@ std::vector<AnalysisIssue> analyze_mod(const mod::Package &package) {
     const Luau::ParseResult parsed = Luau::Parser::parse(reinterpret_cast<const char *>(it->second.data()), it->second.size(), names, allocator);
     if (!parsed.errors.empty() || parsed.root == nullptr) continue;   // the trusted compile step reports a syntax error
     std::vector<AnalysisIssue> issues;
-    Checker checker(p.path, declared, issues);
+    Checker checker(p.path, declared, package.manifest, issues);
     parsed.root->visit(&checker);
     std::stable_sort(issues.begin(), issues.end(), [](const AnalysisIssue &a, const AnalysisIssue &b) { return a.where.line < b.where.line; });
     all.insert(all.end(), issues.begin(), issues.end());

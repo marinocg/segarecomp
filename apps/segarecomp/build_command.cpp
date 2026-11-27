@@ -171,6 +171,7 @@ struct Options {
   std::string luau_original_sha256, luau_effective_sha256, luau_bytecode_digest, luau_mod_id, luau_capabilities;
   std::string geometry_declaration;  // SEG-139-T004 (ADR 0302): the verified package's geometry claim as the compact text the viewer host reads; "" = none declared
   fs::path luau_artifact_source;     // <output>/luau/luau_artifact.c
+  bool mod_audio = false;            // SEG-145-T008: the artifact declares audio mapping rows (the scheduled-mod seam is compiled with SEGARECOMP_MOD_AUDIO)
   // SEG-125 (ADR 0273): write a versioned build performance report here (empty = profiling off: no collector is enabled and nothing changes).
   fs::path performance_report;
   // resolved by the verification step
@@ -1142,6 +1143,24 @@ std::string audio_implementation_json(const Options &options, const GenesisSound
 // `units` is the generate stage's (alias-less) M68K emission; `m68k_images` the sanitized provenance JSON of its executable images.
 //
 // SEG-028-T005 (ADR 0077, ADR 0049, ADR 0076): after the Z80 fixed point converges, the build-time ADR 0049 alias preparation runs.
+// SEG-145-T008: the declared command/event mappings of the granted audio capabilities, one row per (mapping, value) (kind 1 command, 2 event: GENESIS_MOD_AUDIO_*). Names are validated manifest tokens. A package
+// without such rows writes nothing, so its artifact is unchanged.
+void write_audio_rows(Options &options, std::ostringstream &c, const segarecomp::mod::Manifest &manifest, const std::vector<std::string> &granted) {
+  const auto has = [&](const char *name) { return std::find(granted.begin(), granted.end(), name) != granted.end(); };
+  std::ostringstream rows;
+  std::size_t count = 0;
+  for (const segarecomp::mod::Mapping &mapping : manifest.mappings) {
+    const bool command = mapping.kind == "command" && has("audio.command.send"), event = mapping.kind == "event" && has("audio.event.read");
+    if (!command && !event) continue;
+    for (const auto &value : mapping.values)
+      ++count, rows << "\n  {\"" << mapping.id << "\", \"" << value.first << "\", " << (command ? 1 : 2) << "UL, " << mapping.offset << "UL, " << mapping.width << "UL, " << value.second << "UL},";
+  }
+  options.mod_audio = count != 0;
+  if (count == 0) return;
+  c << "struct segarecomp_mod_audio_row { const char *mapping; const char *name; unsigned long kind, offset, width, value; };\n";
+  c << "const unsigned long segarecomp_mod_audio_count = " << count << "UL;\nconst struct segarecomp_mod_audio_row segarecomp_mod_audio[] = {" << rows.str() << "\n  {0, 0, 0, 0, 0, 0}};\n";
+}
+
 // SEG-137-T007: `luau_artifact.c`, the verified compiled scripts as constants of the played program, bound to the package identity, the bytecode digest and the capabilities the live path grants.
 bool write_luau_artifact(Options &options, const std::vector<std::uint8_t> &stored, const segarecomp::mod::Manifest &manifest, const std::vector<std::string> &granted,
                          const std::vector<segarecomp::mod::MemoryRange> &ranges = {}) {
@@ -1165,6 +1184,7 @@ bool write_luau_artifact(Options &options, const std::vector<std::uint8_t> &stor
     c << "const unsigned long segarecomp_mod_range_count = " << ranges.size() << "UL;\nconst unsigned long segarecomp_mod_ranges[][4] = {";
     for (const auto &r : ranges) c << "\n  {SEGARECOMP_GEN_SPACE_WORK_RAM, " << r.offset << "UL, " << r.length << "UL, " << (r.access == "read" ? 1 : r.access == "write" ? 2 : 3) << "UL},";
     c << "\n  {0, 0, 0, 0}};\n";
+    write_audio_rows(options, c, manifest, granted);
   }
   options.luau_artifact_source = dir / "luau_artifact.c";
   std::ofstream out(options.luau_artifact_source, std::ios::binary | std::ios::trunc);
@@ -1213,6 +1233,7 @@ bool write_native_artifact(Options &options, const segarecomp::mod::Manifest &ma
   c << "struct segarecomp_mod_hook_binding { const char *id; unsigned long hook_id; };\nconst struct segarecomp_mod_hook_binding segarecomp_mod_hooks[] = {";
   for (const auto &binding : options.hook_bindings) c << "\n  {\"" << binding.first << "\", " << binding.second << "UL},";
   c << "\n  {0, 0}};\n";
+  write_audio_rows(options, c, manifest, granted);
   options.luau_artifact_source = options.native_mod_dir / "native_artifact.c";
   std::ofstream out(options.luau_artifact_source, std::ios::binary | std::ios::trunc);
   out << c.str();
@@ -1345,7 +1366,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       if (build.play) continue;   // the viewer foundation already links them
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name, {"-I", (build.root / "libs" / "viewer" / "src").string()});
     }
-    add(final_only, build.viewer / "mod_capture.cpp", "mod-native-host", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_NATIVE=1", "-I", build.runtime.string(), "-I", build.viewer.string()}); if (!extra_define.empty()) f.push_back(extra_define); if (!options.hook_plan_file.empty()) f.push_back("-DSEGARECOMP_MOD_HOOKS=1"); return f; }(), true);
+    add(final_only, build.viewer / "mod_capture.cpp", "mod-native-host", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_NATIVE=1", "-I", build.runtime.string(), "-I", build.viewer.string()}); if (!extra_define.empty()) f.push_back(extra_define); if (!options.hook_plan_file.empty()) f.push_back("-DSEGARECOMP_MOD_HOOKS=1"); if (options.mod_audio) f.push_back("-DSEGARECOMP_MOD_AUDIO=1"); return f; }(), true);
     add(final_only, build.runtime / "mod_scheduler.c", "mod-scheduler", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
     if (!build.play) add(final_only, build.runtime / "genesis_snapshot.c", "genesis-snapshot", {"-DSEGARECOMP_GENESIS_SOUND"});
     add(final_only, options.luau_artifact_source, "mod-native-artifact");
@@ -1383,7 +1404,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       const std::vector<std::string> flags = add_luau_runtime();
       add(final_only, build.root / "libs" / "luau_host" / "src" / "luau_phase_provider.cpp", "luau-phase-provider", flags, true);
       add(final_only, build.root / "libs" / "media" / "src" / "mod_adapter.cpp", "luau-mod-adapter", flags, true);
-      add(final_only, build.viewer / "mod_capture.cpp", "mod-viewer", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_VIEWER=1", "-I", build.runtime.string(), "-I", build.viewer.string(), "-I", (options.runtime_dir / "sdk").string()}); return f; }(), true);
+      add(final_only, build.viewer / "mod_capture.cpp", "mod-viewer", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_VIEWER=1", "-I", build.runtime.string(), "-I", build.viewer.string(), "-I", (options.runtime_dir / "sdk").string()}); if (options.mod_audio) f.push_back("-DSEGARECOMP_MOD_AUDIO=1"); return f; }(), true);
       add(final_only, build.runtime / "mod_scheduler.c", "mod-scheduler", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
       add(final_only, options.luau_artifact_source, "luau-artifact");
       add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::string(options.native_scenery ? (options.native_frame_state ? "13U" : "12U") : (options.native_frame_state ? "9U" : "8U")), "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
@@ -1421,7 +1442,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       add(final_only, build.root / "libs" / "media" / "src" / "mod_adapter.cpp", "luau-mod-adapter", flags, true);   // the capability catalogue the phase adapter consults
       for (const char *name : {"sv_font.c", "sv_font_data.c"})   // the overlay text font (the rasterizer's only viewer dependency)
         add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name, {"-I", (build.root / "libs" / "viewer" / "src").string()});
-      add(final_only, build.viewer / "mod_capture.cpp", "mod-capture", [&] { auto f = flags; f.insert(f.end(), {"-I", build.runtime.string(), "-I", build.viewer.string()}); return f; }(), true);
+      add(final_only, build.viewer / "mod_capture.cpp", "mod-capture", [&] { auto f = flags; f.insert(f.end(), {"-I", build.runtime.string(), "-I", build.viewer.string()}); if (options.mod_audio) f.push_back("-DSEGARECOMP_MOD_AUDIO=1"); return f; }(), true);
       add(final_only, build.runtime / "mod_scheduler.c", "mod-scheduler", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
       add(final_only, build.runtime / "genesis_snapshot.c", "genesis-snapshot", {"-DSEGARECOMP_GENESIS_SOUND"});
       add(final_only, options.luau_artifact_source, "luau-artifact");

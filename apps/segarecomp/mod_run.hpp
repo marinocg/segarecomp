@@ -20,6 +20,7 @@ struct RunOptions {
   std::vector<std::string> ram, code; // "<offset>:<length>" regions
   std::string scenario;               // test: run only this scenario
   bool aggregate = false;             // counts and digests only (no byte values)
+  bool audio = false;                 // diff-run: the sound-mod verification gate (SEG-145-T003, docs/product/genesis-sound-mods.md)
   std::filesystem::path work;         // keep the builds and runs here (default: a private temporary directory, removed)
 };
 

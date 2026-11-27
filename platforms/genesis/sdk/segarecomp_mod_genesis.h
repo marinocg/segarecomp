@@ -166,6 +166,12 @@ typedef struct SegaGenesisFeatures {
   const SegaGenesisFrameView *frame;   /* non-NULL only inside the exact-frame render callback of a provider granted frame.vdp */
   const SegaGenesisVdpHelpers *vdp;    /* non-NULL exactly when frame.vdp was granted */
 #endif
+  /* Appended by SEG-145-T008 (ABI minor 4; declare abi.minor = 4 and required_minor = 4, and read it only when `size` covers it). Non-NULL exactly when audio.command.send or audio.event.read was granted. */
+#if defined(SEGA_MOD_TARGET_ABI_MINOR) && (SEGA_MOD_TARGET_ABI_MINOR < 4)
+  const void *e_abi_minor_4_required_audio;
+#else
+  const SegaModAudioApi *audio;
+#endif
 } SegaGenesisFeatures;
 
 #endif /* SEGARECOMP_MOD_GENESIS_H */

@@ -1,6 +1,6 @@
 # Audio modding architecture and verified capability matrix
 
-Status: accepted contract (SEG-145-T001, ADR [0286](../decisions/0286-audio-modding-architecture.md)). **Audio asset and mapping declarations are implemented** (SEG-145-T002, ADR [0288](../decisions/0288-modding-platform-host-implementation.md)); the runtime audio API, host audio and platform integrations are not. It records what already exists so no task re-implements hardware, and fixes the shared vocabulary.
+Status: accepted contract (SEG-145-T001, ADR [0286](../decisions/0286-audio-modding-architecture.md)). **Audio asset and mapping declarations are implemented** (SEG-145-T002, ADR [0288](../decisions/0288-modding-platform-host-implementation.md)); **the Genesis runtime audio API (section 10) and the Genesis original-hardware sound-mod gate are implemented** (SEG-145-T008, SEG-145-T003, ADR [0323](../decisions/0323-genesis-sound-mod-gate-and-audio-api.md)); host audio and the Master System / Sega CD integrations are not. It records what already exists so no task re-implements hardware, and fixes the shared vocabulary.
 Verified against this tree. Inputs: [gap inventory](modding-platform-gap-inventory.md) section 4, [schema 3](segapatch-schema-3.md), [ABI 2](native-sdk-abi-2.md), [phases](mod-execution-phases.md), [adapters](mod-platform-adapters.md).
 Consumers: SEG-145-T002 (audio asset declarations), SEG-145-T008 (audio API), SEG-145-T009 (host-audio spike), SEG-145-T012/T013, SEG-145-T005 (CD-DA decision).
 
@@ -30,7 +30,7 @@ Classes: **A** already implemented (no task), **B** achievable via existing gues
 | Mixer, PCM artifact, delivery | **A**: [ADR 0075](../decisions/0075-genesis-audio-mixer-pcm-artifact-and-viewer-presentation.md); `tests/genesis_audio_mixer_test.py`, `tests/genesis_audio_artifact_test.py` | **A**: viewer audio (ADR 0070) | **A**: CD-DA, PCM and FM/PSG on one guest-time 44.1 kHz timeline |
 | Save states / rewind | **A** (SEG-131, [ADR 0278](../decisions/0278-genesis-save-states-persistence-and-rewind.md)) | **A** (SEG-132, [ADR 0279](../decisions/0279-master-system-and-sega-cd-save-states-and-rewind.md)) | **A** (SEG-132; bound to disc and BIOS) |
 | Music/SFX/instrument/sample data edits | **B**: ROM data edits (typed edits and BPS, M03 authoring); Z80 driver edits only if statically materializable | **B** once an SMS target exists (SEG-147-T001) | **B** for data-track file/extent edits once the disc model exists (SEG-148-T001/T002) |
-| Triggering sounds from scripts/native code | **C**: declared mapping and `audio.command.send` (section 5; SEG-145-T008) | **C**: same through the adapter (SEG-145-T013) | **C**: same (SEG-145-T013) |
+| Triggering sounds from scripts/native code | **A** (SEG-145-T008): declared mappings and the audio API (section 10; `tests/mod_audio_api_test.py`, `tests/genesis_mod_audio_test.cpp`) | **C**: same through the adapter (SEG-145-T013) | **C**: same (SEG-145-T013) |
 | Platform integration still missing | **D**: none for guest-native; optional host audio (SEG-145-T009/T010) | **D**: SMS patching (SEG-147) | **D**: disc source model and CD-DA replacement (SEG-148-T001/T002, SEG-145-T005/T006) |
 | Unsupported / unverified | arbitrary driver mutation that is not statically provable | **U**: YM2413 (see section 7), universal drivers | **U**: schema 1/2 representation (16 MiB image cap, 32 MiB archive cap, Genesis-only SDK); FM/PSG correctness until SEG-115 |
 
@@ -85,3 +85,18 @@ The `asset-binding` mapping of section 5 carries these additional **additive** f
 The `audio` asset file must be a canonical 44-byte-header RIFF/WAVE PCM s16le file whose rate, channels and frame count equal the declaration. The one product conversion is the deterministic reference **`u8-mono`** (`segarecomp mod convert-audio`):
 frames are averaged across channels with floor division, then `(sample + 32768) >> 8`; the sample rate is unchanged. Genesis and Sega CD adapters provide it; Master System provides none (PSG only), so a `pcm-sample` binding there is `E_CAPABILITY_UNSUPPORTED`.
 Platform authoring adapters that produce a game's own formats remain mod-supplied; the product never interprets those formats.
+
+## 10. The audio API (implemented for Genesis, SEG-145-T008, ADR 0323)
+
+| Call (Luau `sega.audio.*` / C11 `SegaModAudioApi`) | Resolves through | Capability | Phases |
+|---|---|---|---|
+| `play_sfx(name)` | value `name` of the `command` mapping with id `sfx` | `audio.command.send` | `frame-begin`, `post-input`, `hook-entry`, `hook-exit` (C11), `frame-end` |
+| `play_music(name)` | value `name` of the `command` mapping with id `music` | same | same |
+| `stop_music()` | value `stop` of the mapping `music` | same | same |
+| `event(mapping)` / `read_event(mapping, out)` | the first declared name of the `event` mapping whose value the location holds now | `audio.event.read` | `frame-end`, `render` (a copy of the declared locations) |
+
+There is no volume call. A command is a staged write of the declared value into the declared `m68k.work_ram` mailbox (committed with the callback; it enters the replay witness). The SDK knows no sound id, driver or chip.
+
+Refusals before a program exists: `mod check` / `pack` / `build` reject literal names (`E_AUDIO_TARGET`, `E_AUDIO_NAME`), a call without its capability (`E_LUAU_CAPABILITY`) and unknown calls (`E_LUAU_API`); a scheduled program build rejects an audio capability without a servable interface (`E_AUDIO_TARGET`: no `sfx`/`music` command mapping for a required `audio.command.send`, no event mapping for a required `audio.event.read`, a command mapping with another id, a mapping outside `m68k.work_ram`, more than 128 declared values). An optional audio capability without a mapping is not granted.
+Run-time faults (`E_MOD_FAULT cause=`): `capability`, `phase`, `audio-target` (no mapping for the channel), `audio-name` (not a declared value), `range`, `budget`; the faulted callback commits nothing and only that mod is disabled. C11 and Luau use the same scheduler services.
+Command and event mappings are part of the package content digest and the save-state compatibility digest. A guest-affecting mod (`audio.command.send`) needs `state.mod` for save states and rewind.

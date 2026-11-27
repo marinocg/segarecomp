@@ -68,6 +68,12 @@ extern const unsigned long segarecomp_mod_ranges[][4];   // space, offset, lengt
 #ifdef SEGARECOMP_MOD_NATIVE
 extern const unsigned char segarecomp_mod_rom_data[];
 #endif
+#ifdef SEGARECOMP_MOD_AUDIO
+// SEG-145-T008: the package's declared command/event mappings, one row per (mapping, value). Only a program built from a package that declares them defines and compiles these.
+struct segarecomp_mod_audio_row { const char *mapping; const char *name; unsigned long kind, offset, width, value; };
+extern const unsigned long segarecomp_mod_audio_count;
+extern const segarecomp_mod_audio_row segarecomp_mod_audio[];
+#endif
 #if defined(SEGARECOMP_MOD_NATIVE) && defined(SEGARECOMP_MOD_HOOKS)
 // SEG-138-T012 (ADR 0308): the function hooks of the built program: the artifact's bindings (generated site id, the hook id the provider is called with), the hook phases it registers, and the generated site table.
 extern const unsigned long segarecomp_mod_hook_count, segarecomp_mod_hook_phases;
@@ -116,6 +122,7 @@ struct Mod {
   GenesisSnapshotModState snapshot{};
   GenesisModRange ranges[GENESIS_MOD_RANGES_MAX]{};
   GenesisModHookBinding bindings[GENESIS_MOD_HOOKS_MAX]{};   // SEG-138-T012: must outlive the scheduler
+  GenesisModAudioEntry audio[GENESIS_MOD_AUDIO_ENTRIES_MAX]{};
   std::string fault_text;
   bool attached = false;
   bool refused = false;
@@ -472,6 +479,14 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
     c.rom_data_bytes = rom_bytes;
   }
   c.range_count = static_cast<std::uint32_t>(segarecomp_mod_range_count);
+#ifdef SEGARECOMP_MOD_AUDIO
+  for (unsigned long i = 0; i < segarecomp_mod_audio_count && i < GENESIS_MOD_AUDIO_ENTRIES_MAX; ++i) {
+    const segarecomp_mod_audio_row &r = segarecomp_mod_audio[i];
+    g.audio[i] = GenesisModAudioEntry{r.mapping, r.name, static_cast<std::uint32_t>(r.kind), static_cast<std::uint32_t>(r.offset), static_cast<std::uint32_t>(r.width), static_cast<std::uint32_t>(r.value)};
+  }
+  c.audio = g.audio;
+  c.audio_count = static_cast<std::uint32_t>(segarecomp_mod_audio_count);   // a count above the bound is refused by the scheduler, never truncated
+#endif
   c.state_schema = static_cast<std::uint32_t>(segarecomp_mod_state_schema);
   c.log_sink = log_sink;
   identity_bytes(c.identity_sha256);

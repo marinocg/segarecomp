@@ -27,7 +27,7 @@ void check(bool ok, const std::string &what) {
 
 std::vector<std::uint8_t> bytes_of(const std::string &s) { return {s.begin(), s.end()}; }
 
-const std::vector<std::string> kAllCaps = {"host.log", "frame.work_ram", "overlay.rgba", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "input.read", "input.intercept"};
+const std::vector<std::string> kAllCaps = {"host.log", "frame.work_ram", "overlay.rgba", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "input.read", "input.intercept", "audio.command.send", "audio.event.read"};
 
 mod::Package make_package(const std::map<std::string, std::string> &scripts, const std::vector<std::string> &caps = kAllCaps, const std::string &id = "api-test") {
   mod::Manifest m;
