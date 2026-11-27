@@ -104,7 +104,12 @@ jobs:
           job="${{ matrix.job }}"
           labels="^shard-($(seq -s '|' "${job%/*}" "${job#*/}" 36))$"
           echo "ctest label selection: $labels"
-          ctest --test-dir build/dev -L "$labels" -j 4 --output-on-failure --no-tests=error
+          # SEG-152-T012 (ADR 0322): this job's ABI 2 parity suites run first, then everything else of the same selection, ABI 1 compatibility suites (label abi1-compat) included. Both are mandatory:
+          # the two invocations are a partition of the selection, and the second runs even if the first failed. A job may hold no ABI 2 suite, so only the second requires at least one test.
+          status=0
+          ctest --test-dir build/dev -L "$labels" -L '^abi2-parity$' -j 4 --output-on-failure || status=1
+          ctest --test-dir build/dev -L "$labels" -LE '^abi2-parity$' -j 4 --output-on-failure --no-tests=error || status=1
+          exit "$status"
 
   sdl3-viewer:
     # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).
@@ -125,6 +130,9 @@ jobs:
             os: macos-latest
           - name: Linux
             os: ubuntu-24.04
+            part: f32
+          - name: Linux
+            os: ubuntu-24.04
             part: gui
           - name: Linux
             os: ubuntu-24.04
@@ -135,9 +143,6 @@ jobs:
           - name: Linux
             os: ubuntu-24.04
             part: f29
-          - name: Linux
-            os: ubuntu-24.04
-            part: f32
           - name: Windows
             os: windows-latest
     steps:

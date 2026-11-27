@@ -2529,6 +2529,11 @@ set_property(TEST segapatch_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATIO
 add_test(NAME segapatch_native_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segapatch_native_package_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/tools/segapatch.py ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
 set_property(TEST segapatch_native_package_test APPEND PROPERTY LABELS full fast)
 set_property(TEST segapatch_native_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-152-T012 (ADR 0322): the ABI 2 SDK sample (the migration guide's worked example, docs/product/sdk-sample/abi2) compiles as strict C11 on every host (`mod build`: compile check and entry-symbol link probe).
+add_test(NAME sdk_sample_abi2_build_test COMMAND $<TARGET_FILE:segarecomp> mod build ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/abi2 --out ${CMAKE_CURRENT_BINARY_DIR}/sdk_sample_abi2.segapatch
+  --cc ${CMAKE_C_COMPILER} --sdk-dir ${PROJECT_SOURCE_DIR}/platforms)
+set_property(TEST sdk_sample_abi2_build_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sdk_sample_abi2_build_test PROPERTY TIMEOUT 300)
 # SEG-135 (ADR 0288, delivery F02): the modding platform host side through the product CLI (`segarecomp mod ...`), cross-checked by independent Python builders. Synthetic data only.
 add_test(NAME mod_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_package_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/tools/segapatch.py)
 add_test(NAME mod_project_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_project_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
@@ -2608,6 +2613,22 @@ endforeach()
 add_test(NAME segarecomp_native_build_args_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_native_build_args_test.py $<TARGET_FILE:segarecomp>)
 set_property(TEST segarecomp_native_build_args_test APPEND PROPERTY LABELS full fast)
 set_property(TEST segarecomp_native_build_args_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-152-T012 (ADR 0322): CI runs and lists the ABI 2 parity suites ahead of the ABI 1 compatibility suites (docs/architecture/native-sdk-abi-2.md section 6). Both label sets stay mandatory: these labels
+# select order only; the tier and shard labels still decide what runs. `if(TEST)` skips suites that this configuration does not register (SDL3, host).
+foreach(_t sdk_sample_abi2_build_test abi_parity_scenery_tests abi_parity_gate_tests mod_parity_gate_abi2_test mod_exact_frame_abi2_test mod_bitmap_abi2_test mod_view_abi2_test mod_view_transitions_abi2_test
+    genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_bitmap_tests genesis_mod_refusal_tests genesis_mod_refusal_epoch_tests genesis_mod_capability_isolation_tests
+    genesis_mod_scenery_rows_tests genesis_mod_scenery_rows_epoch_tests genesis_mod_scenery_rows_capability_tests genesis_mod_scenery_rows_phase_tests genesis_mod_scenery_rows_phase_ungranted_tests
+    genesis_mod_scenery_origin_tests genesis_mod_scenery_origin_epoch_tests genesis_mod_scenery_origin_capability_tests genesis_mod_scenery_origin_phase_tests genesis_mod_scenery_origin_phase_ungranted_tests)
+  if(TEST ${_t})
+    set_property(TEST ${_t} APPEND PROPERTY LABELS abi2-parity)
+  endif()
+endforeach()
+foreach(_t segapatch_native_package_test genesis_patch_provider_build_test genesis_native_compat_tests genesis_native_compat_viewer_sdl_test)
+  if(TEST ${_t})
+    set_property(TEST ${_t} APPEND PROPERTY LABELS abi1-compat)
+  endif()
+endforeach()
 
 # CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
 # every tier test is partitioned.

@@ -1,5 +1,15 @@
-Segarecomp native patch SDK (Genesis, ABI 1)
-============================================
+Segarecomp native patch SDK (Genesis)
+=====================================
+
+ABI 1 is DEPRECATED, not removed: write new providers against ABI 2 (sdk/native-abi-migration.md, sdk/sample/abi2/).
+Existing ABI 1 packages keep working. Links inside the shipped documents that point elsewhere in the source repository
+resolve only there.
+
+  runtime/platforms/genesis/sdk/segarecomp_mod_genesis.h     the ABI 2 Genesis provider header (with runtime/platforms/sdk/segarecomp_mod.h)
+  sdk/native-abi-migration.md                                ABI 1 to ABI 2, one example per facility; compatibility policy
+  sdk/sample/abi2/                                           a complete SYNTHETIC ABI 2 example project (schema 3)
+
+The rest of this page describes the deprecated ABI 1 material.
 
 This folder ships with the release so a patch author can work from an installed copy.
 

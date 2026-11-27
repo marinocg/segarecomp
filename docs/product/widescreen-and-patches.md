@@ -58,7 +58,9 @@ Details: [patch packages](patch-packages.md#trust).
   A selected Patched variant that is not built is simply not playable; nothing falls back to Vanilla under a Patched label.
 * **Defaults.** A package may declare presentation defaults (for example Level 3 + Raw Extension). They apply only while its Patched variant runs and never write a preference file.
 
-### The public provider SDK (ABI 1)
+### The public provider SDK (ABI 1, deprecated)
+
+New providers use ABI 2; see the [migration guide](native-abi-migration.md). ABI 1 packages keep working.
 
 One header, [`platforms/genesis/sdk/segarecomp_genesis_patch.h`](../../platforms/genesis/sdk/segarecomp_genesis_patch.h) (`<stdint.h>`/`<stddef.h>` only), is installed with every release package. A provider exports
 `segarecomp_patch_provider()` and may serve:
@@ -112,8 +114,8 @@ See [From install to a patched game](../../README.md#install-a-verified-mod-or-p
 
 ## 4. Writing your own provider
 
-1. Read [native-patch-sdk.md](native-patch-sdk.md) and the header; copy [`sdk-sample/provider.c`](sdk-sample/provider.c).
-2. Compile-check it exactly as the build does: `cc -std=c11 -Wall -Wextra -pedantic -I platforms/genesis/sdk -c provider.c`.
-3. Package it with `tools/segapatch.py create ... --native-source provider.c --native-caps ...` and distribute the single file.
+1. Read [native SDK ABI 2](../architecture/native-sdk-abi-2.md) and [mod projects](mod-projects.md); copy the [`sdk-sample/abi2`](sdk-sample/abi2/src/provider.c) project and set your image's SHA-256.
+2. Compile-check and package it: `segarecomp mod build <project> --out <package> --cc cc --sdk-dir platforms`.
+3. Distribute the single file.
 
-Nothing in the recompiler is modified for a new game. The release packages ship the SDK header, the sample and these documents under `sdk/` so a provider can be written from an installed copy.
+Nothing in the recompiler is modified for a new game. An existing ABI 1 provider keeps working; to move it, follow the [migration guide](native-abi-migration.md).

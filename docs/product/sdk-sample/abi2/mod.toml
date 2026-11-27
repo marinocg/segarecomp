@@ -1,0 +1,44 @@
+# The ABI 2 counterpart of the ABI 1 sample ../provider.c: a schema 3 / native-c11 package. It is the worked example of docs/product/native-abi-migration.md; CI compiles it as strict C11 with
+# `segarecomp mod build` (compile check only: it is not linked into a game or run). The revision digest is a PLACEHOLDER of zeros: replace it with the SHA-256 of your own exact original image.
+[mod]
+id = "sample-abi2"
+author = "segarecomp examples"
+version = "1.0.0"
+name = "Sample native provider (ABI 2)"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "original"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[source]]
+kind = "native-c11"
+path = "src/provider.c"
+
+[abi]
+native = 2
+minor = 3
+
+[capabilities]
+required = ["frame.vdp", "frame.work_ram", "memory.read.m68k.work_ram", "overlay.rgba", "scenery.words", "state.mod"]
+
+[state]
+schema = 1
+
+# The only guest memory the provider reads outside the frame view (read only).
+[[memory]]
+revision = "original"
+space = "m68k.work_ram"
+offset = 256
+length = 4
+access = "read"
+
+[geometry]
+aspect_max = "32:9"
+
+[[scene]]
+id = "main"
+components = ["scenery", "hud"]
