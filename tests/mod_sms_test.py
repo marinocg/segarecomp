@@ -322,6 +322,20 @@ for who, asm, syms in [("@symbol", "  ld hl,(@edge)\n", (("edge", "0x00007fff"),
 ok("rom_only: the last byte and the last word", "mod", "check", access("org * 0x300\n  ld a,(@a)\n  ld hl,(@w)\n  ret\n", (("a", "0x00007fff"), ("w", "0x00007ffe")), r32, "rom_only"))
 ok("rom_only: a symbol naming a work RAM variable", "mod", "check", access("org * 0x300\n  ld hl,(@v)\n  ld (@v),hl\n  ld a,(@v)\n  ret\n", (("v", "0x0000c100"),), r32, "rom_only"))
 refused("rom_only: a symbolic read of the unmapped area", "E_GUEST_ADDRESS", "mod", "check", access("org * 0x300\n  ld a,(@v)\n  ret\n", (("v", "0x00009000"),), r32, "rom_only"))
+# an access that starts below address 0 is in no region (it would be encoded as a wrapped 16-bit address): by @symbol or label arithmetic, one or two bytes, read or write
+base = (("base", "0x00000200"),)
+for what, line in [("a word read through @symbol", "  ld hl,(@base-0x201)\n"), ("a byte read through @symbol", "  ld a,(@base-0x201)\n"), ("a word read straddling address 0", "  ld hl,(@base-0x201)\n  ld a,(@base)\n"),
+                   ("a word read through a label", "  ld hl,(e-0x301)\n"), ("a byte read through a label", "  ld a,(e-0x301)\n"), ("a read far below 0 through a label", "  ld hl,(e-0x4000)\n")]:
+    d = access("org * 0x300\ne:\n" + line + "  ret\n", base, r32, "rom_only")
+    refused(f"rom_only: a negative address, {what}", "E_GUEST_ADDRESS", "mod", "check", d)
+    apply_refused(f"rom_only: apply, {what}", "E_GUEST_ADDRESS", d, r32)
+for what, line in [("@symbol", "  ld hl,(@base-0x201)\n"), ("label", "  ld hl,(e-0x301)\n")]:
+    refused(f"sega: a negative address through a {what}", "E_GUEST_BANK_REFERENCE", "mod", "check", access("org * 0x300\ne:\n" + line + "  ret\n", base))
+bytes_of("rom_only: accesses that begin at address 0", access("org * 0x300\ne:\n  ld a,(@base-0x200)\n  ld hl,(@base-0x200)\n  ld a,(e-0x300)\n  ld hl,(e-0x300)\n  ret\n", base, r32, "rom_only"),
+         0x300, bytes([0x3A, 0, 0, 0x2A, 0, 0, 0x3A, 0, 0, 0x2A, 0, 0, 0xC9]), r32)
+bytes_of("sega: accesses that begin at address 0", access("org * 0x300\n  ld hl,(@base-0x200)\n  ret\n", base), 0x300, bytes([0x2A, 0, 0, 0xC9]))
+bytes_of("rom_only: a negative number stays the author's wrapped CPU address", access("org * 0x300\n  ld hl,(-1)\n  ret\n", image=r32, mapper="rom_only"), 0x300, bytes([0x2A, 0xFF, 0xFF, 0xC9]), r32)
+
 # numbers are the author's explicit CPU addresses: unchanged, including words that straddle a window
 bytes_of("numeric accesses are not restricted", access(SLOT1 + "  ld hl,(0x7fff)\n  ld hl,(0x03ff)\n  ld hl,(0xdffe)\n  ld a,(0x9000)\n  ret\n"), 0x1C100, bytes([0x2A, 0xFF, 0x7F, 0x2A, 0xFF, 0x03, 0x2A, 0xFE, 0xDF, 0x3A, 0x00, 0x90, 0xC9]))
 

@@ -297,7 +297,7 @@ void sms_direct_access(const Ctx &c, std::int64_t address, unsigned width) {
   if (c.banked != nullptr) {
     const std::int64_t limit = address < static_cast<std::int64_t>(kSmsFixed) ? static_cast<std::int64_t>(kSmsFixed) : (address / static_cast<std::int64_t>(kSmsBank) + 1) * static_cast<std::int64_t>(kSmsBank);
     if (end > limit) fail("E_GUEST_BANK_REFERENCE", what + "the region whose mapping is established (the fixed first 1 KiB or one 16 KiB window)");
-  } else if (!(end <= static_cast<std::int64_t>(kSmsRomOnly) || (address >= 0xC000 && end <= 0x10000))) {
+  } else if (!((address >= 0 && end <= static_cast<std::int64_t>(kSmsRomOnly)) || (address >= 0xC000 && end <= 0x10000))) {
     fail("E_GUEST_ADDRESS", what + "the 32 KiB cartridge and work RAM");
   }
 }
