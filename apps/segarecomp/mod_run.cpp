@@ -548,6 +548,8 @@ int run_diff(const RunOptions &o) {
   if (o.audio) {   // the run's own sound state first, then reproducibility: the same program with the same input again
     if (const auto r = sound_gate::judge_run(vanilla.sound, true, "vanilla")) return refuse(as_refusal(*r));
     if (const auto r = sound_gate::judge_run(modded.sound, false, "modded")) return refuse(as_refusal(*r));
+    vanilla.pcm = vanilla.sound->pcm_sha256;   // under the gate, the digests compared and reported are the ones of the validated evidence
+    modded.pcm = modded.sound->pcm_sha256;
     if (modded.mod.faulted) return refuse({"E_AUDIO_MOD_FAULT", "the mod faulted during this run, so its sound was not verified: " + modded.mod.fault});
     Observed again;
     if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-again-frames", again)) return refuse({r->code, "modded (repeat): " + r->message});

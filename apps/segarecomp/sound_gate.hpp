@@ -26,7 +26,7 @@ struct RunSound {
   std::string pcm_sha256;    // 64 lower-case hex digits
 };
 
-// nullopt = a required field is missing or malformed.
+// nullopt = the text is not one complete, well-formed document, a key is repeated, or a required member is missing from its containing object or malformed.
 [[nodiscard]] std::optional<BuildSound> parse_build_sound(std::string_view status_json);
 [[nodiscard]] std::optional<RunSound> parse_run_sound(std::string_view summary_json);
 

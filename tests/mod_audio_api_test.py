@@ -182,6 +182,12 @@ for name, (cause, phase_name, body, c_phase, c_call) in FAULTS.items():
         cli.check(summary["faulted"] is True and match and match.group(1) == cause and match.group(2) == phase_name and match.group(3) == "10", f"{name} ({language}): {summary['fault']}, expected cause={cause} phase={phase_name} frame=10")
         cli.check(summary["committed_writes"] == 0 and capture["ram_frames"] == vcap["ram_frames"] and pcm == vpcm, f"{name} ({language}): nothing was committed; guest and audio are exactly Vanilla")
 
+# the gate reads the evidence the CURRENT producers write for scheduled mods too (their status.json carries the extra mod block)
+for language, directory in (("luau", LUAU), ("native", NATIVE)):
+    rc, doc, p = cli.run("mod", "diff-run", directory, "--rom", rom, "--cc", CC, "--sdk-dir", SDK, "--frames", "64", "--budget", "20000000", "--timeout", "120", "--input", PAD, "--audio")
+    cli.check(rc == 0 and doc and doc.get("ok") is True and doc.get("pcm_differs") is True and doc.get("audio", {}).get("repeat_identical") is True and re.fullmatch(r"[0-9a-f]{64}", doc["modded"]["pcm_sha256"]),
+              f"--audio accepts the {language} example: {doc and (doc.get('class'), doc.get('error'))} {p.stderr[-200:]}")
+
 # the sound gate never calls a run with a faulted mod verified
 rc, doc, _ = cli.run("mod", "diff-run", tmp / "project-luau-computed-name", "--rom", rom, "--cc", CC, "--sdk-dir", SDK, "--frames", "32", "--budget", "20000000", "--timeout", "120", "--input", PAD, "--audio")
 cli.check(rc == 1 and doc and doc.get("class") == "E_AUDIO_MOD_FAULT" and "cause=audio-name" in doc.get("error", ""), f"--audio refuses a faulted mod: {doc and (doc.get('class'), doc.get('error'))}")

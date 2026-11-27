@@ -279,6 +279,12 @@ class JsonReader {
       while (pos_ < t_.size() && t_[pos_] >= '0' && t_[pos_] <= '9') { out.number = out.number * 10 + static_cast<std::uint64_t>(t_[pos_++] - '0'); if (++digits > 10 || out.number > lim_.max_number) return false; }
       return true;
     }
+    if (lim_.allow_booleans && (t_.substr(pos_, 4) == "true" || t_.substr(pos_, 5) == "false")) {
+      out.kind = Value::Kind::boolean;
+      out.flag = t_[pos_] == 't';
+      pos_ += out.flag ? 4 : 5;
+      return true;
+    }
     if (t_[pos_] == '[') {
       out.kind = Value::Kind::array;
       ++pos_; skip();

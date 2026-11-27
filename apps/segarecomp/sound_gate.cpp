@@ -1,5 +1,8 @@
-// See sound_gate.hpp. The readers are deliberately narrow: they read the exact flat members this repository writes and accept nothing else.
+// See sound_gate.hpp. The evidence is read with the repository's strict closed-JSON reader (libs/media): the WHOLE document must be one well-formed value, a repeated key anywhere is an error, and every required
+// member is read from the object that must contain it, never by searching the text.
 #include "sound_gate.hpp"
+
+#include "patch_archive.hpp"
 
 #include <algorithm>
 
@@ -7,82 +10,63 @@ namespace segarecomp_cli::sound_gate {
 
 namespace {
 
-constexpr std::size_t npos = std::string_view::npos;
+namespace json = segarecomp::patch::detail;
+using Value = json::Value;
 
-// The text of the flat object that starts at `"<key>":{` up to its first '}' or nested '{' (the members read here all precede any nested object).
-std::optional<std::string_view> object_head(std::string_view json, std::string_view key) {
-  const std::string open = "\"" + std::string(key) + "\":{";
-  const std::size_t at = json.find(open);
-  if (at == npos) return std::nullopt;
-  const std::size_t from = at + open.size() - 1, end = json.find_first_of("{}", from + 1);
-  if (end == npos) return std::nullopt;
-  std::string_view head = json.substr(from, end - from + 1);
-  return head;
+// One of this product's own documents. The bounds are far above what the build and the runtime write; exceeding one is "no evidence".
+std::optional<Value> document(std::string_view text) {
+  json::JsonLimits limits;
+  limits.max_items = 1024;
+  limits.max_members = 256;
+  limits.max_string = 4096;
+  limits.max_depth = 8;
+  limits.max_number = 9999999999ULL;
+  limits.allow_booleans = true;
+  Value root;
+  std::string error;
+  if (text.size() > (std::size_t{8} << 20U) || !json::parse_json(text, limits, root, error) || root.kind != Value::Kind::object) return std::nullopt;
+  return root;
 }
 
-// The position right after `"<key>":` where the key starts a member (after '{' or ',').
-std::optional<std::size_t> value_of(std::string_view json, std::string_view key) {
-  const std::string k = "\"" + std::string(key) + "\":";
-  for (std::size_t at = json.find(k); at != npos; at = json.find(k, at + 1))
-    if (at != 0 && (json[at - 1] == '{' || json[at - 1] == ',')) return at + k.size();
-  return std::nullopt;
+// The member `key` of THIS object, only if it has the expected kind.
+const Value *member(const Value &object, const char *key, Value::Kind kind) {
+  const Value *v = object.find(key);
+  return v != nullptr && v->kind == kind ? v : nullptr;
 }
 
-// A member is terminated by ',' or '}' (or, for the head of an object cut before a nested one, '{').
-bool terminated(std::string_view json, std::size_t at) { return at < json.size() && (json[at] == ',' || json[at] == '}' || json[at] == '{'); }
-
-std::optional<std::uint64_t> number(std::string_view json, std::string_view key) {
-  auto at = value_of(json, key);
-  if (!at) return std::nullopt;
-  std::uint64_t v = 0;
-  std::size_t i = *at;
-  for (; i < json.size() && json[i] >= '0' && json[i] <= '9'; ++i) {
-    if (i - *at >= 18) return std::nullopt;
-    v = v * 10 + static_cast<std::uint64_t>(json[i] - '0');
-  }
-  if (i == *at || !terminated(json, i)) return std::nullopt;
-  return v;
+// A non-empty token string of [a-z0-9_], at most 64 bytes.
+std::optional<std::string> token(const Value &object, const char *key) {
+  const Value *v = member(object, key, Value::Kind::string);
+  if (v == nullptr || v->text.empty() || v->text.size() > 64 ||
+      !std::all_of(v->text.begin(), v->text.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'; }))
+    return std::nullopt;
+  return v->text;
 }
-
-// A non-empty token string of [a-z0-9_].
-std::optional<std::string> token(std::string_view json, std::string_view key) {
-  const auto at = value_of(json, key);
-  if (!at || *at >= json.size() || json[*at] != '"') return std::nullopt;
-  const std::size_t from = *at + 1, end = json.find('"', from);
-  if (end == npos || end == from || end - from > 64 || !terminated(json, end + 1)) return std::nullopt;
-  const std::string_view text = json.substr(from, end - from);
-  if (!std::all_of(text.begin(), text.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'; })) return std::nullopt;
-  return std::string(text);
-}
-
-bool hex64(const std::string &s) { return s.size() == 64 && std::all_of(s.begin(), s.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); }
 
 bool working(const std::string &status) { return status == "supported" || status == "native"; }
 
 }  // namespace
 
-std::optional<BuildSound> parse_build_sound(std::string_view json) {
-  BuildSound s;
-  const auto status = token(json, "genesis_audio");
-  const auto head = object_head(json, "audio_implementation");
-  if (!status || !head) return std::nullopt;
-  const auto kind = token(*head, "kind");
+std::optional<BuildSound> parse_build_sound(std::string_view status_json) {
+  const auto root = document(status_json);
+  if (!root) return std::nullopt;
+  const auto status = token(*root, "genesis_audio");
+  const Value *implementation = member(*root, "audio_implementation", Value::Kind::object);
+  if (!status || implementation == nullptr) return std::nullopt;
+  const auto kind = token(*implementation, "kind");
   if ((*status != "supported" && *status != "native" && *status != "degraded") || !kind || (*kind != "original_z80_aot" && *kind != "native_driver")) return std::nullopt;
-  s.status = *status;
-  s.implementation = *kind;
-  s.outcome = token(json, "z80_audio_outcome").value_or(std::string());
-  return s;
+  return BuildSound{*status, *kind, token(*root, "z80_audio_outcome").value_or(std::string())};
 }
 
-std::optional<RunSound> parse_run_sound(std::string_view json) {
-  while (!json.empty() && (json.back() == '\r' || json.back() == ' ')) json.remove_suffix(1);
-  if (json.size() < 2 || json.front() != '{' || json.substr(json.size() - 2) != "}}") return std::nullopt;   // a complete line, not a cut one
-  const auto audio = object_head(json, "audio"), native = object_head(json, "native");
-  if (!audio || !native || audio->back() != '}' || native->back() != '}') return std::nullopt;
-  const auto sound_fault = number(json.substr(0, json.find("\"audio\":{")), "sound_fault"), mixer_fault = number(*audio, "fault");
-  const auto native_fault = token(*native, "fault"), pcm = token(*audio, "sha256");
-  if (!sound_fault || !mixer_fault || !native_fault || !pcm || !hex64(*pcm)) return std::nullopt;
-  return RunSound{*sound_fault, *mixer_fault, *native_fault, *pcm};
+std::optional<RunSound> parse_run_sound(std::string_view summary_json) {
+  const auto root = document(summary_json);
+  if (!root) return std::nullopt;
+  const Value *sound_fault = member(*root, "sound_fault", Value::Kind::number), *audio = member(*root, "audio", Value::Kind::object), *native = member(*root, "native", Value::Kind::object);
+  if (sound_fault == nullptr || audio == nullptr || native == nullptr) return std::nullopt;
+  const Value *mixer_fault = member(*audio, "fault", Value::Kind::number), *pcm = member(*audio, "sha256", Value::Kind::string);
+  const auto native_fault = token(*native, "fault");
+  if (mixer_fault == nullptr || pcm == nullptr || !json::is_hex64(pcm->text) || !native_fault) return std::nullopt;
+  return RunSound{sound_fault->number, mixer_fault->number, *native_fault, pcm->text};
 }
 
 std::optional<Refusal> judge_builds(const std::optional<BuildSound> &vanilla, const std::optional<BuildSound> &modded) {
