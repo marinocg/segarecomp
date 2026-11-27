@@ -181,6 +181,10 @@ struct Observed {
   std::vector<std::string> digests, ram_frames;
   std::vector<Region> regions;
   ModResult mod;
+  // The run's own sound state (SOUND_SUMMARY), read by the sound gate: the build's status cannot see a path only this run's input reaches.
+  bool sound_reported = false;
+  std::uint64_t sound_fault = 0, mixer_fault = 0;
+  std::string native_fault;
 };
 
 struct Workspace {
@@ -290,8 +294,15 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
   if (!spec.expect_mod && obs.mod.present) return Refusal{"E_RUN_FAILED", "a program built without a mod reported one"};
   if (spec.want_pcm) {
     if (const auto s = line_with(text, "SOUND_SUMMARY")) {
-      const std::size_t audio = s->find("\"audio\":{");
+      const std::size_t audio = s->find("\"audio\":{"), native = s->find("\"native\":{");
       if (audio != std::string::npos) obs.pcm = str_field(*s, "sha256", audio);
+      const std::size_t mixer = audio == std::string::npos ? std::string::npos : s->find("\"fault\":", audio);
+      if (s->find("\"sound_fault\":") != std::string::npos && mixer != std::string::npos && native != std::string::npos && mixer < native) {
+        obs.sound_reported = true;
+        obs.sound_fault = num_field(*s, "sound_fault");
+        obs.mixer_fault = std::strtoull(s->c_str() + mixer + 8, nullptr, 10);
+        obs.native_fault = str_field(*s, "fault", native);
+      }
     }
   }
   if (obs.outcome != "window_complete" && obs.outcome != "incomplete_guest_stop" && obs.outcome != "incomplete_guest_complete")
@@ -497,6 +508,20 @@ std::optional<Refusal> judge_sound(const SoundStatus &vanilla, const SoundStatus
   return std::nullopt;
 }
 
+// The same verdict for what ONE compared run actually did. The build's observation takes no pad input and no mod command, so a driver that breaks only on a path this run reaches (an effect, a sample, a
+// command) is `supported` at build time and isolated at run time. Fails closed when the run reports no sound state.
+std::optional<Refusal> judge_run(const Observed &o, bool vanilla, const char *which) {
+  constexpr std::uint64_t kFirstCodeFault = 56, kLastCodeFault = 60;   // unknown image, code mismatch, no owner, mutable code, unresolved fetch mapping (runtime.h GenesisDiagnosticCategory)
+  if (!o.sound_reported) return Refusal{"E_RUN_FAILED", std::string(which) + ": the program reported no sound state"};
+  const bool native = !o.native_fault.empty() && o.native_fault != "none";
+  if (o.sound_fault == 0 && o.mixer_fault == 0 && !native) return std::nullopt;
+  const std::string detail = "sound_fault=" + std::to_string(o.sound_fault) + " mixer_fault=" + std::to_string(o.mixer_fault) + " native_fault=" + (native ? o.native_fault : std::string("none"));
+  if (vanilla) return Refusal{"E_AUDIO_BASELINE", std::string(which) + ": the original program's sound faults during this run (" + detail + "): there is no working original to verify a sound mod against"};
+  if (o.sound_fault >= kFirstCodeFault && o.sound_fault <= kLastCodeFault)
+    return Refusal{"E_AUDIO_STATIC_MATERIALIZATION", std::string(which) + ": the modified sound code does not pass the static materialization rules: the sound CPU was isolated during this run (" + detail + "); modified Z80 code is never interpreted"};
+  return Refusal{"E_AUDIO_RUNTIME_FAULT", std::string(which) + ": the modded program's sound faulted during this run (" + detail + ")"};
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------------------------------------ diff-run
@@ -553,7 +578,7 @@ int run_diff(const RunOptions &o) {
   Observed vanilla, modded;
   if (const auto r = build_program(o, p.original_path, ws.dir / "vanilla", {}, {})) return refuse(*r);
   if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) {
-    if (o.audio && r->code == "E_BUILD_FAILED" && failed_in_sound_stage(ws.dir / "modded")) return refuse({"E_AUDIO_STATIC_MATERIALIZATION", "the modified sound code or image cannot be compiled: " + r->message});
+    if (o.audio && r->code == "E_BUILD_FAILED" && failed_in_sound_stage(ws.dir / "modded")) return refuse({"E_AUDIO_STATIC_MATERIALIZATION", "the modded program's sound code could not be produced statically (see the build log): " + r->message});
     return refuse(*r);
   }
   std::string audio_json;
@@ -564,9 +589,13 @@ int run_diff(const RunOptions &o) {
   }
   if (const auto r = run_program(ws.dir / "vanilla", spec, ws.dir / "vanilla-frames", vanilla)) return refuse({r->code, "vanilla: " + r->message});
   if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-frames", modded)) return refuse({r->code, "modded: " + r->message});
-  if (o.audio) {   // a sound mod is only verified if its audio is reproducible: the same program with the same input again
+  if (o.audio) {   // the run's own sound state first, then reproducibility: the same program with the same input again
+    if (const auto r = judge_run(vanilla, true, "vanilla")) return refuse(*r);
+    if (const auto r = judge_run(modded, false, "modded")) return refuse(*r);
+    if (modded.mod.faulted) return refuse({"E_AUDIO_MOD_FAULT", "the mod faulted during this run, so its sound was not verified: " + modded.mod.fault});
     Observed again;
     if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-again-frames", again)) return refuse({r->code, "modded (repeat): " + r->message});
+    if (const auto r = judge_run(again, false, "modded (repeat)")) return refuse(*r);
     if (again.pcm != modded.pcm) return refuse({"E_AUDIO_NONDETERMINISTIC", "two runs of the modded program with the same input produced different PCM digests"});
   }
   const Divergence d = compare(vanilla, modded, o.aggregate, o.first);

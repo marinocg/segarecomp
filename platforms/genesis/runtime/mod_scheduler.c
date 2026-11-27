@@ -258,6 +258,8 @@ static int service_audio_event(const char *mapping, char name_out[SEGA_MOD_AUDIO
   if ((AUDIO_EVENT_PHASES & PHASE_BIT(s->phase)) == 0U) return violation(s, SEGA_MOD_E_PHASE);
   if (mapping == NULL || name_out == NULL) return violation(s, SEGA_MOD_E_RANGE);
   render = s->phase == SEGA_MOD_PHASE_RENDER;
+  /* An exact-frame render observes the producer's previous-onset copy, which the host hands over only under frame.work_ram: without that grant there is nothing to observe, and answering "no event" would lie. */
+  if (render && s->exact_frame && !granted(s, SEGA_MOD_CAP_FRAME_WORK_RAM)) return violation(s, SEGA_MOD_E_CAPABILITY);
   for (i = 0; i < s->audio_count; ++i) {
     const GenesisModAudioRow *row = &s->audio[i];
     uint32_t value = 0U;

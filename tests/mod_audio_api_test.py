@@ -182,5 +182,17 @@ for name, (cause, phase_name, body, c_phase, c_call) in FAULTS.items():
         cli.check(summary["faulted"] is True and match and match.group(1) == cause and match.group(2) == phase_name and match.group(3) == "10", f"{name} ({language}): {summary['fault']}, expected cause={cause} phase={phase_name} frame=10")
         cli.check(summary["committed_writes"] == 0 and capture["ram_frames"] == vcap["ram_frames"] and pcm == vpcm, f"{name} ({language}): nothing was committed; guest and audio are exactly Vanilla")
 
+# the sound gate never calls a run with a faulted mod verified
+rc, doc, _ = cli.run("mod", "diff-run", tmp / "project-luau-computed-name", "--rom", rom, "--cc", CC, "--sdk-dir", SDK, "--frames", "32", "--budget", "20000000", "--timeout", "120", "--input", PAD, "--audio")
+cli.check(rc == 1 and doc and doc.get("class") == "E_AUDIO_MOD_FAULT" and "cause=audio-name" in doc.get("error", ""), f"--audio refuses a faulted mod: {doc and (doc.get('class'), doc.get('error'))}")
+
+# mappings decide which guest bytes are written and observed: they are part of the content digest
+digests = []
+for mutate in (None, lambda t: t.replace("offset = 32", "offset = 36"), lambda t: t.replace('name = "chime"\nvalue = 5\n\n[[audio.mapping]]\nid = "music"', 'name = "chime"\nvalue = 6\n\n[[audio.mapping]]\nid = "music"')):
+    rc, doc, _ = cli.run("mod", "check", project(LUAU, "digest", toml=mutate))
+    cli.check(rc == 0 and doc, f"the digest variant checks: {doc}")
+    digests.append(doc and doc.get("content_digest"))
+cli.check(len(set(digests)) == 3 and None not in digests, f"a moved mailbox and another value each change the content digest: {digests}")
+
 shutil.rmtree(tmp, ignore_errors=True)
 cli.done("mod_audio_api_test")

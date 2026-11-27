@@ -198,6 +198,31 @@ cli.check(p.returncode == 0 and status.get("genesis_audio") == "degraded" and st
 rc, doc, _ = gate(breaking)
 cli.check(rc == 1 and doc and doc.get("class") == "E_AUDIO_STATIC_MATERIALIZATION" and "structural_code_mismatch" in doc.get("error", ""), f"the gate rejects the driver edit with the documented class: {doc and (doc.get('class'), doc.get('error'))}")
 
+# the same break on a path only the compared run reaches: the DAC routine (played only after button B) writes a run-time value over compiled code. The build's own observation takes no input, so it reports
+# `supported`; the gate must judge what the compared run did.
+original_source = fixture.DRIVER_SOURCE
+base_image, base_labels, _ = fixture.driver()
+late_source = original_source.replace("dac:    ld e,0x2B\n        ld d,0x80\n        call ymwrite", "dac:    ld e,0x2B\n        ld d,0x80\n        call tramp")
+late_source += "tramp:  ld a,(0x1F20)\n        add a,0x3C\n        ld (%d),a\n        jp %d\n" % (base_labels["patch"], base_labels["patch"])
+fixture.DRIVER_SOURCE = late_source
+late_image, late_labels, _ = fixture.driver()
+fixture.DRIVER_SOURCE = original_source
+cli.check(late_source != original_source and len(late_image) == len(base_image) and late_labels["patch"] == base_labels["patch"], "the late-path driver change keeps the image layout")
+late_edits, i = select_drum, 0
+while i < len(base_image):
+    j = i
+    while j < len(base_image) and base_image[j] != late_image[j]:
+        j += 1
+    if j > i:
+        offset = fixture.DRIVER_ROM_BASE + i
+        late_edits += f"fixture bytes 0x{offset:08x} {rom_bytes[offset:offset + j - i].hex()} {late_image[i:j].hex()}\n"
+    i = j + 1
+late = package("late-break", late_edits)
+p, _, status = programs.build("late-break", apply(late))
+cli.check(p.returncode == 0 and status.get("genesis_audio") == "supported", f"the build's input-free observation cannot see the late break: {status.get('genesis_audio')}")
+rc, doc, _ = gate(late)
+cli.check(rc == 1 and doc and doc.get("class") == "E_AUDIO_STATIC_MATERIALIZATION" and "sound_fault=57" in doc.get("error", ""), f"the gate rejects a sound CPU isolated during the compared run: {doc and (doc.get('class'), doc.get('error'), doc.get('audio'))}")
+
 # a baseline whose own sound is broken cannot verify anything
 on_broken = package("on-broken", f"fixture bytes 0x{L['theme'][0]:08x} {rom_bytes[L['theme'][0]:L['theme'][0] + 3].hex()} {fixture.note(0, 0x12C, 2).hex()}\n", source=broken_image.read_bytes())
 rc, doc, _ = gate(on_broken, image=broken_image)

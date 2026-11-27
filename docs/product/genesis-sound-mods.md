@@ -15,7 +15,7 @@ The runnable examples use a project-authored synthetic ROM with its own tiny Z80
 |---|---|
 | replace a track's or an effect's data, instrument/voice data, DAC samples, a command mapping table | typed, expected-value-asserted [ROM edits](mod-projects.md#rom-edits-and-symbols) (`rom-edit-set`), or the same change as a `bps-image` |
 | change which sound the game selects | a typed edit of the selecting instruction, or [injected guest code](mod-projects.md#guest-code-injection-header-repair-and-bps-adr-0292-adr-0293) (`guest-asm` in declared free space) |
-| modify the Z80 driver code or its image | the same edits. The modified driver must pass the existing static materialization rules ([ADR 0073](../decisions/0073-genesis-build-time-z80-materialization-and-ram-backed-code.md), [0134](../decisions/0134-genesis-z80-structural-code-variants-no-go.md), [0135](../decisions/0135-static-first-z80-mutation-proof-feasibility.md)). It is compiled ahead of time or rejected; it is **never** interpreted and no Z80 code is decoded at run time |
+| modify the Z80 driver code or its image | the same edits. The modified driver must pass the existing static materialization rules ([ADR 0073](../decisions/0073-genesis-build-time-z80-materialization-and-ram-backed-code.md), [0134](../decisions/0134-genesis-z80-structural-code-variants-no-go.md), [0135](../decisions/0135-static-first-z80-mutation-proof-feasibility.md)). It is compiled ahead of time or its sound CPU is isolated (which the gate rejects); it is **never** interpreted and no Z80 code is decoded at run time |
 
 Every edit asserts the original bytes first: a mismatch is `E_EDIT_EXPECTED_MISMATCH` and nothing is written.
 You have to find your own sites: the product ships no game's offsets, sound ids or formats.
@@ -29,15 +29,18 @@ segarecomp mod diff-run <project|package> --rom <original> --cc <compiler> --sdk
 
 It builds Vanilla and Modded programs with the unmodified product, runs both headless with the same input and compares frames, state and the canonical PCM digest (`pcm_sha256`: 44,100 Hz stereo s16, [ADR 0075](../decisions/0075-genesis-audio-mixer-pcm-artifact-and-viewer-presentation.md); it covers the run from reset to the end of the window). `pcm_differs` says whether your change was audible in the window you chose: choose `--first` and `--input` so that your sound plays there.
 `--audio` adds the sound gate and an `audio` block to the report. The modded program is run twice.
+The gate judges two things: what the build observed (a bounded run with **no pad input** and no mod command) and what **the compared runs** did (their own sound-fault state). A path neither of them executes is **not verified**: give `--input`, `--first` and `--frames` that make every sound you changed actually play, and run the command once per such scenario.
 
 | Refusal | Meaning |
 |---|---|
-| `E_AUDIO_STATIC_MATERIALIZATION` | the modified sound code or image cannot be compiled statically: the modded program's sound is `degraded` (for example `structural_code_mismatch`), or its build failed while producing the Z80 code |
-| `E_AUDIO_BASELINE` | the original program's sound is not working in this product, so there is nothing to verify a sound mod against |
+| `E_AUDIO_STATIC_MATERIALIZATION` | the modified sound code or image cannot be compiled statically: the modded program's sound is `degraded` (for example `structural_code_mismatch`), its build failed while producing the Z80 code (see the build log), or its sound CPU was isolated by a code fault during a compared run |
+| `E_AUDIO_RUNTIME_FAULT` | the modded program's sound faulted during a compared run for another reason (an unsupported access, the mixer, a native replacement) |
+| `E_AUDIO_MOD_FAULT` | the mod itself faulted during the run, so its sound was not verified |
+| `E_AUDIO_BASELINE` | the original program's sound is not working in this product (at build time or during the compared run), so there is nothing to verify a sound mod against |
 | `E_AUDIO_IMPLEMENTATION_CHANGED` | the modded program selects another sound implementation than the original (their PCM is not comparable) |
 | `E_AUDIO_NONDETERMINISTIC` | two identical runs of the modded program produced different PCM |
 
-**An ordinary build does not refuse a driver it cannot compile**: it keeps the game running with the sound CPU isolated and reports `genesis_audio: degraded`. Run the gate before you publish a sound mod.
+**An ordinary build does not refuse a driver it cannot compile**: it keeps the game running with the sound CPU isolated. It reports `genesis_audio: degraded` only when its own observation reaches the fault; a fault on a later path shows only while that path runs. Run the gate, with scenarios that play your sounds, before you publish a sound mod.
 
 ### Checking against your own commercial image (local only)
 
@@ -85,7 +88,7 @@ Declare `audio.command.send` for commands (and `audio.event.read` for events), `
 | `sega.audio.stop_music()` | `audio->stop_music()` | writes the value named `stop` of mapping `music` |
 | `sega.audio.event(mapping)` (`string?`) | `audio->read_event(mapping, out)` (`""` = none) | the first declared name whose value the location holds now |
 
-* Commands run in `frame-begin`, `post-input` and `frame-end` (C11 hooks also `hook-entry`/`hook-exit`); events in `frame-end` and `render`.
+* Commands run in `frame-begin`, `post-input` and `frame-end` (C11 hooks also `hook-entry`/`hook-exit`); events in `frame-end` and `render` (an exact-frame C11 provider's `render` observes the previous-onset copy and needs `frame.work_ram` as well; before that copy exists it sees no event).
 * A command is an ordinary staged write: it is committed when the callback returns without a fault, takes no guest time and is part of replay and save states. It only works if the game reads that mailbox. The mailbox holds one value, so two commands to the same channel in one frame leave the last one.
 * If the game has no work-RAM command mailbox, add one first with a guest-code mod. Without a verified mapping there is **no** capability: the build is refused (`E_AUDIO_TARGET`) or an optional capability is not granted. There is no volume call.
 * A wrong name or a call in a wrong phase faults only that mod (`E_MOD_FAULT cause=audio-name|audio-target|phase|capability|range|budget`); nothing of that callback is committed and the game continues unmodified. `mod check` catches literal names before that.

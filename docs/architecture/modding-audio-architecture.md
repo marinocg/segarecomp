@@ -93,7 +93,7 @@ Platform authoring adapters that produce a game's own formats remain mod-supplie
 | `play_sfx(name)` | value `name` of the `command` mapping with id `sfx` | `audio.command.send` | `frame-begin`, `post-input`, `hook-entry`, `hook-exit` (C11), `frame-end` |
 | `play_music(name)` | value `name` of the `command` mapping with id `music` | same | same |
 | `stop_music()` | value `stop` of the mapping `music` | same | same |
-| `event(mapping)` / `read_event(mapping, out)` | the first declared name of the `event` mapping whose value the location holds now | `audio.event.read` | `frame-end`, `render` (a copy of the declared locations) |
+| `event(mapping)` / `read_event(mapping, out)` | the first declared name of the `event` mapping whose value the location holds now | `audio.event.read` | `frame-end`, `render` (a copy of the declared locations; an exact-frame `render` observes the previous-onset copy and also needs `frame.work_ram`) |
 
 There is no volume call. A command is a staged write of the declared value into the declared `m68k.work_ram` mailbox (committed with the callback; it enters the replay witness). The SDK knows no sound id, driver or chip.
 

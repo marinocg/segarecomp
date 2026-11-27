@@ -45,7 +45,16 @@ std::vector<GenesisModAudioEntry> event_rows() {
   return {all.begin() + 4, all.end()};
 }
 
+int g_hook_result = 0;
+int hook_provider(void *, const SegaModHost *host, uint32_t) {
+  const auto *features = static_cast<const SegaGenesisFeatures *>(host->platform_features);
+  if (features->audio != nullptr) (void)features->audio->play_sfx(host->phase == SEGA_MOD_PHASE_HOOK_ENTRY ? "blip" : "drum");
+  return host->phase == SEGA_MOD_PHASE_HOOK_ENTRY ? g_hook_result : 0;
+}
+
 struct Rig {
+  const GenesisModHookBinding *hooks = nullptr;
+  const SegaGenesisVdpHelpers *helpers = nullptr;
   std::unique_ptr<GenesisRuntime> rt = std::make_unique<GenesisRuntime>();
   std::unique_ptr<GenesisModScheduler> sched = std::make_unique<GenesisModScheduler>();
   SegaModProvider provider{};
@@ -77,6 +86,13 @@ struct Rig {
     c.optional[0] = optional;
     c.audio = rows.empty() ? nullptr : rows.data();
     c.audio_count = static_cast<uint32_t>(rows.size());
+    if (hooks != nullptr) {
+      provider.hook = hook_provider;
+      c.hooks = hooks;
+      c.hook_count = 1U;
+      c.required[0] |= cap(SEGA_MOD_CAP_HOOK_FUNCTION);
+    }
+    c.vdp_helpers = helpers;
     const char *why = "";
     const bool ok = genesis_mod_scheduler_attach(sched.get(), rt.get(), &c, &why) == 0;
     rejection = why;
@@ -222,12 +238,94 @@ void events_and_render_copy() {
   }
 }
 
+// Commands at function hooks (C11 only): committed from hook-entry and hook-exit; discarded with a DECLINED replacement.
+void hook_commands() {
+  const auto run_hook = [](uint32_t mode, int provider_result, uint8_t &after_entry, uint8_t &after_exit, bool &faulted) {
+    GenesisHookSiteInfo site{};
+    site.id = "h";
+    site.entry = 0x200U;
+    site.mode = mode;
+    const GenesisModHookBinding binding = {"h", 1U};
+    Rig r;
+    r.hooks = &binding;
+    const bool attached = r.attach(kSend, 0U, command_rows(), bit(SEGA_MOD_PHASE_HOOK_ENTRY) | bit(SEGA_MOD_PHASE_HOOK_EXIT));
+    check(attached, "a hooked audio mod attaches: " + r.rejection);
+    if (!attached) return;
+    g_hook_result = provider_result;
+    r.frames(1); /* starts the scheduler */
+    (void)r.rt->function_hooks->enter(r.rt->function_hooks->ctx, r.rt.get(), &site, 0xFFFE00U);
+    after_entry = r.rt->work_ram[kSfx];
+    r.rt->work_ram[kSfx] = 0U;
+    r.rt->function_hooks->leave(r.rt->function_hooks->ctx, r.rt.get(), &site, 0xFFFE00U);
+    after_exit = r.rt->work_ram[kSfx];
+    faulted = r.sched->fault.faulted != 0U;
+  };
+  uint8_t entry = 0xEE, exit_value = 0xEE;
+  bool faulted = true;
+  run_hook(GENESIS_HOOK_MODE_BEFORE | GENESIS_HOOK_MODE_AFTER, 0, entry, exit_value, faulted);
+  check(!faulted && entry == 3U && exit_value == 4U, "commands commit from hook-entry and hook-exit");
+  run_hook(GENESIS_HOOK_MODE_REPLACE, 0, entry, exit_value, faulted);
+  check(!faulted && entry == 0U, "a declined replacement discards its command");
+}
+
+// Exact-frame render: events come from the producer's previous-onset copy, and only under frame.work_ram.
+void exact_frame_events() {
+  for (const bool with_ram : {true, false}) {
+    Rig r;
+    SegaGenesisVdpHelpers helpers{};
+    helpers.size = sizeof helpers;
+    r.helpers = &helpers;
+    const uint64_t caps = kRead | cap(SEGA_MOD_CAP_FRAME_VDP) | (with_ram ? cap(SEGA_MOD_CAP_FRAME_WORK_RAM) : 0U);
+    const bool attached = r.attach(caps, 0U, event_rows(), bit(SEGA_MOD_PHASE_RENDER));
+    check(attached, "an exact-frame audio provider attaches: " + r.rejection);
+    std::string seen = "(none)";
+    int status = -1;
+    r.body = [&](const SegaModHost *, const SegaModAudioApi *audio) {
+      char name[SEGA_MOD_AUDIO_NAME_BYTES];
+      status = audio->read_event("accepted", name);
+      seen = name;
+    };
+    r.frames(1);
+    std::vector<uint8_t> ram(65536U, 0U), vram(65536U, 0U);
+    ram[kLast] = 3U;
+    GenesisModExactFrame f{};
+    f.work_ram = with_ram ? ram.data() : nullptr;
+    f.vram = vram.data();
+    f.width = 320U;
+    f.height = 224U;
+    (void)genesis_mod_scheduler_present(r.sched.get(), &f);
+    if (with_ram) check(status == SEGA_MOD_OK && seen == "blip", "the event of the frame's own copy: " + seen);
+    else check(status == SEGA_MOD_E_CAPABILITY && r.sched->fault.faulted != 0U, "without frame.work_ram an exact-frame render read is a capability fault, never a silent \"no event\"");
+  }
+}
+
+// The declared interface is part of the save-state compatibility digest.
+void state_compatibility() {
+  const auto digest = [](const std::vector<GenesisModAudioEntry> &rows) {
+    Rig r;
+    const bool attached = r.attach(kSend, 0U, rows);
+    check(attached, "attaches: " + r.rejection);
+    GenesisSnapshotModState state{};
+    genesis_mod_snapshot_state(r.sched.get(), &state);
+    return std::string(reinterpret_cast<const char *>(state.compat), sizeof state.compat);
+  };
+  std::vector<GenesisModAudioEntry> moved = command_rows(), revalued = command_rows();
+  moved[0].offset += 8U;
+  moved[1].offset += 8U;
+  revalued[0].value = 9U;
+  check(digest(command_rows()) == digest(command_rows()), "the same interface, the same digest");
+  check(digest(command_rows()) != digest(moved) && digest(command_rows()) != digest(revalued), "a moved mailbox or another value is another compatibility digest");
+}
+
 }  // namespace
 
 int main() {
   attach_validation();
   commands_and_causes();
   events_and_render_copy();
+  hook_commands();
+  exact_frame_events();
+  state_compatibility();
   if (failures != 0) {
     std::printf("genesis_mod_audio_tests: %d failure(s)\n", failures);
     return 1;
