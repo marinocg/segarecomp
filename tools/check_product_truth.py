@@ -75,6 +75,7 @@ STATUS_DOCS = (
     "docs/product/launcher-library.md",
     "docs/product/patch-packages.md",
     "docs/product/native-patch-sdk.md",
+    "docs/product/native-abi-migration.md",
     "docs/product/widescreen-and-patches.md",
     "docs/product/release-readiness.md",
     "packaging/README.md",

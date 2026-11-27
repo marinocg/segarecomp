@@ -101,7 +101,7 @@ Everything in this section is merged after v0.7.0 and ships with the next releas
 The four Genesis frames are real frames from generated-native programs (Enhanced Widescreen, 16:9, Raw Extension, first scenes shown); the two Sega CD frames are the original 4:3 picture (generic Sega CD widescreen is always Partial and no game-specific patch exists). Details and attribution in the [showcase notes](docs/assets/showcase/README.md). The patch packages are
 not bundled with any release, results depend on the exact game, revision and package, and native-code patches must come from trusted sources. Game artwork belongs to its owners.
 
-More: [widescreen and patches overview](docs/product/widescreen-and-patches.md), [patch packages](docs/product/patch-packages.md), [native patch SDK](docs/product/native-patch-sdk.md).
+More: [widescreen and patches overview](docs/product/widescreen-and-patches.md), [patch packages](docs/product/patch-packages.md), [native ABI migration guide](docs/product/native-abi-migration.md) (ABI 1 is deprecated; new providers use ABI 2), [ABI 1 native patch SDK](docs/product/native-patch-sdk.md).
 
 ## Save states and rewind **(main only; Genesis, Master System, Sega CD)**
 

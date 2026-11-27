@@ -144,6 +144,8 @@ ABI 1 providers are read-only (ids 2, 3, 5, 6 only) and unaffected.
 
 ## 6. Coexistence with ABI 1 (compatibility matrix)
 
+ABI 1 is deprecated, not removed ([ADR 0322](../decisions/0322-abi-1-deprecation-and-removal-gate.md), [migration guide](../product/native-abi-migration.md)); everything in this section stays in force.
+
 A package declares exactly one ABI: schema 2 packages are ABI 1; schema 3 `native-c11` packages are ABI 2 (`abi.native` = 2; a schema 3 package declaring 1 is `E_FIELD_VALUE`).
 
 | ABI 1 provider case on a host that supports ABI 1 and 2 | Result |
@@ -157,7 +159,7 @@ A package declares exactly one ABI: schema 2 packages are ABI 1; schema 3 `nativ
 | Save state / rewind with an ABI 1 provider | unchanged: ABI 1 is read-only, states restore identically with or without it (Genesis contract section 3.5); the capability probe still reads `GENESIS_NATIVE_COMPAT_ABI` |
 | Save state with an ABI 2 provider | allowed only if the program has `state.mod` support or the provider is not guest-affecting; otherwise disabled with `E_STATE_UNAVAILABLE` |
 
-ABI 1 compatibility is a **testable statement**: every schema 2 fixture of `tests/segapatch_native_package_test.py` and the provider build of `tests/genesis_patch_provider_build_test.py` MUST still pass unchanged.
+ABI 1 compatibility is a **testable statement**: every schema 2 fixture of `tests/segapatch_native_package_test.py` and the provider build of `tests/genesis_patch_provider_build_test.py` MUST still pass unchanged. They carry the CTest label `abi1-compat`; CI runs the `abi2-parity` suites ahead of them (ADR 0322), and both sets are mandatory.
 
 ## 7. Luau binding gate (one capability model)
 

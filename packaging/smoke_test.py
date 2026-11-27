@@ -265,7 +265,7 @@ def smoke_sdk(package_root, compiler, env, tmp):
     packaged sample provider compiles as strict C11 against the packaged header with the BUNDLED compiler (no host compiler).
     This proves the shipped SDK compiles on this host; it does not build a patched game (that test runs on Linux CI only)."""
     header = package_root / "runtime" / "platforms" / "genesis" / "sdk" / "segarecomp_genesis_patch.h"
-    shipped = [header] + [package_root / "sdk" / name for name in ("README.txt", "native-patch-sdk.md", "patch-packages.md", "sample/provider.c")]
+    shipped = [header] + [package_root / "sdk" / name for name in ("README.txt", "native-patch-sdk.md", "patch-packages.md", "native-abi-migration.md", "sample/provider.c", "sample/abi2/mod.toml", "sample/abi2/src/provider.c")]
     for path in shipped:
         require(path.is_file() and path.stat().st_size > 0, f"the package must ship the SDK file {path.relative_to(package_root)}")
     docs = (package_root / "sdk" / "patch-packages.md").read_text(encoding="utf-8")

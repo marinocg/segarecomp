@@ -7,6 +7,10 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Native mods: ABI 1 is deprecated, not removed (ADR 0322)
+
+* New native providers use ABI 2 / schema 3; a [migration guide](docs/product/native-abi-migration.md) and an ABI 2 sample are provided. Existing ABI 1 packages and the schema 2 reader keep working unchanged. Removal is not scheduled.
+
 ### Native mods: per-row scenery origin delta (ABI 2 minor 3, ADR 0320)
 
 * A native Genesis mod can now state, per screen row and plane, a whole-cell world origin delta (`scenery_row_origin`, `abi.minor = 3`), so widescreen scenery whose per-line scroll aliases a wrapped 512 px plane is answered exactly like the original provider. Providers that do not call it, and every existing mod, are unchanged.

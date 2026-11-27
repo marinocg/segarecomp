@@ -4,6 +4,9 @@
 /*
  * Segarecomp Genesis native patch SDK, ABI version 1 (ADR 0267).
  *
+ * DEPRECATED (not removed; ADR 0322): write new providers against ABI 2 (segarecomp_mod_genesis.h, schema 3 `native-c11` packages). Migration guide: native-abi-migration.md (docs/product/ in the
+ * source repository, sdk/ in a release package). Existing ABI 1 packages keep building and running unchanged. This notice is a comment only: it adds no compiler attribute or warning.
+ *
  * A `.segapatch` package may carry ONE portable C11 source file (`provider.c`) that implements a native compatibility provider for one game. This header is the entire
  * public interface of that source: it needs nothing but <stdint.h> and <stddef.h>, and it is the only segarecomp header the build puts on the provider's include path.
  * The segarecomp product contains no game-specific provider; the package owns all of it (game identity, RAM offsets, level formats, camera interpretation, HUD layout).

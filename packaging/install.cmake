@@ -31,8 +31,9 @@ install(DIRECTORY ${_src}/platforms/sdk/ DESTINATION ${_rt}/platforms/sdk FILES_
 install(DIRECTORY ${_src}/platforms/genesis/sdk/ DESTINATION ${_rt}/platforms/genesis/sdk FILES_MATCHING PATTERN "*.h")   # the public native patch SDK (ADR 0267): the only headers a package provider is compiled against
 # SEG-129: the SDK a native-patch author needs, installed beside the header: the two format documents, a complete synthetic sample provider and a short guide.
 # Documentation and a synthetic sample only; no game-specific provider or package is ever staged.
-install(FILES ${_src}/docs/product/native-patch-sdk.md ${_src}/docs/product/patch-packages.md DESTINATION ${_res}/sdk)
+install(FILES ${_src}/docs/product/native-patch-sdk.md ${_src}/docs/product/patch-packages.md ${_src}/docs/product/native-abi-migration.md DESTINATION ${_res}/sdk)
 install(FILES ${_src}/docs/product/sdk-sample/provider.c DESTINATION ${_res}/sdk/sample)
+install(DIRECTORY ${_src}/docs/product/sdk-sample/abi2/ DESTINATION ${_res}/sdk/sample/abi2)
 install(FILES ${_src}/packaging/SDK-README.txt DESTINATION ${_res}/sdk RENAME README.txt)
 install(DIRECTORY ${_src}/platforms/genesis/compat/ DESTINATION ${_rt}/platforms/genesis/compat FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY ${_src}/platforms/genesis/machine/include/ DESTINATION ${_rt}/platforms/genesis/machine/include FILES_MATCHING PATTERN "*.h")

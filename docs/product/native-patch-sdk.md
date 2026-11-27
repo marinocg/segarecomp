@@ -1,5 +1,7 @@
 # Native patch SDK (Genesis, ABI 1)
 
+> **ABI 1 is deprecated, not removed** ([ADR 0322](../decisions/0322-abi-1-deprecation-and-removal-gate.md)). Write new providers against [ABI 2](../architecture/native-sdk-abi-2.md) using the [migration guide](native-abi-migration.md) and the [ABI 2 sample](sdk-sample/abi2/src/provider.c). Existing ABI 1 packages keep loading and running unchanged; this page remains their reference.
+
 Segarecomp provides a **generic** native-patch interface; a patch package owns every game-specific detail. A new game's widescreen provider can be written, packaged, distributed, imported, approved and built **without
 modifying or recompiling segarecomp**: the launcher compiles the package's `provider.c` with the bundled C11 toolchain into a separate generated-native Patched program. The product contains no game-specific provider, registry or
 capability table.
