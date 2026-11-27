@@ -39,13 +39,13 @@ ASM = (EXAMPLE / "asm/main.asm").read_text()
 def project(name, edits, asm=None):
     d = tmp / name
     shutil.copytree(EXAMPLE, d, ignore=shutil.ignore_patterns("fixture_rom.py", "README.md", "__pycache__"))
-    (d / "edits/main.edits").write_text("\n".join(edits) + "\n")
+    write(d / "edits/main.edits", ("\n".join(edits) + "\n").encode("ascii"))   # bytes: edit, manifest and assembly files are LF-only on every host
     toml = (d / "mod.toml").read_text()
     if asm is None:   # a data-only change: no injected code
-        (d / "mod.toml").write_text(toml.split("# Driver:")[0])
+        write(d / "mod.toml", toml.split("# Driver:")[0].encode("utf-8"))
         shutil.rmtree(d / "asm")
     else:
-        (d / "asm/main.asm").write_text(asm)
+        write(d / "asm/main.asm", asm.encode("ascii"))
     return d
 
 

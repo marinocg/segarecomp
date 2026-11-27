@@ -114,6 +114,18 @@ cli.check(len(t.get("scenarios", [])) == 2 and all(s["passed"] for s in t["scena
 refused("diff-run is Genesis only", "E_DIFF_PLATFORM", "mod", "diff-run", packed, "--rom", rom, "--cc", CC, "--sdk-dir", SDK, "--frames", "2", "--budget", "100", "--timeout", "5")
 
 
+initialised = tmp / "initialised"
+ok("mod init", "mod", "init", initialised, "--platform", "master-system", "--id", "my-sms-mod", "--template", "luau", "--rom-sha256", FIXTURE_SHA)
+ok("the fresh template checks", "mod", "check", initialised)
+ok("... builds", "mod", "build", initialised, "--out", tmp / "initialised-built.segapatch")
+ok("... and packs", "mod", "pack", initialised, "--out", tmp / "initialised.segapatch")
+wrong_tests = project("wrong-expectation")
+toml_path = wrong_tests / "tests.toml"
+write(toml_path, toml_path.read_text().replace('expect_ram_frames = ["00000000000001"', 'expect_ram_frames = ["ff000000000001"', 1).encode("utf-8"))
+rc, t, _p = cli.run("mod", "test", wrong_tests, "--rom", rom, "--cc", CC, "--sdk-dir", SDK, "--scenario", "run-while-button-2-held")
+cli.check(rc == 1 and t and t.get("class") == "E_TEST_FAILED" and t["scenarios"][0]["first_divergence"].get("frame") == 0, f"a failing Master System expectation names its 0-based machine frame: {t and t.get('scenarios', [{}])[0].get('first_divergence')}")
+
+
 # ---------------------------------------------------------------- the programs
 def build_program(name, package=None, ident=None, native=False, image=rom, extra=()):
     out = tmp / ("p-" + name)

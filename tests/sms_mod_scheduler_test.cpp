@@ -97,6 +97,8 @@ struct Rig {
     snapshot = {machine.get(), vdp.get(), renderer.get(), psg.get(), &pad, 0, nullptr};
   }
   void start() {
+    sms_renderer_init(renderer.get(), vdp.get(), nullptr, 0);   // as the viewer's reset does (sms_viewer_rig_reset)
+    sms_renderer_attach(renderer.get());
     sms_machine_reset(machine.get());
     vdp->reg[0] = 0x06;   // Mode 4: the scripted CPU programs nothing
     vdp->reg[1] = 0x80;
@@ -286,6 +288,20 @@ void fault_at_three(Mod &, const SegaModHost *h) {
   if (h->phase == SEGA_MOD_PHASE_FRAME_END && h->frame == 3) h->write(SEGA_SMS_SPACE_Z80_WORK_RAM, 0x100, 1, 1);
 }
 
+void test_reset_restarts_the_witness() {
+  Rig r;
+  check(r.attach(kStateful).empty(), "attach");
+  std::uint8_t fresh[32], again[32];
+  r.run(6);
+  sms_mod_write_log_digest(r.sched.get(), fresh);
+  r.run(9);
+  r.mod.counter = 0;   // what the contract asks of a mod: initialise its own state in `reset`
+  r.start();
+  r.run(6);
+  sms_mod_write_log_digest(r.sched.get(), again);
+  check(std::memcmp(fresh, again, 32) == 0, "after a machine reset the witness equals a fresh session's: a recording since the reset replays");
+}
+
 void test_disabled_and_unavailable() {
   {
     Rig r;
@@ -308,6 +324,11 @@ void test_disabled_and_unavailable() {
     r.mod.fail_load = true;   // what a Luau VM that faulted answers: its fault is sticky
     check(r.restore(before_fault) == SMS_SNAPSHOT_MOD_REJECTED && r.capture() == inert && std::string(r.sched->fault.text) == "E_MOD_FAULT cause=range mod=test phase=frame-end frame=3",
           "a disabled mod that refuses a restore keeps its first diagnostic: machine and mod state unchanged");
+    r.start();
+    sms_psg_sync(r.psg.get(), 0);
+    const std::vector<std::uint8_t> at_reset = r.capture();
+    check(!at_reset.empty() && r.restore(at_reset) == SMS_SNAPSHOT_OK && r.capture() == at_reset && r.sched->disabled == 1,
+          "a state taken after a reset, before the first frame, restores (the fault stays)");
   }
   {
     Rig r;
@@ -343,6 +364,7 @@ int main() {
   test_phases_input_and_reset();
   test_cart_ram_and_negotiation();
   test_state_and_rewind();
+  test_reset_restarts_the_witness();
   test_disabled_and_unavailable();
   test_render_is_transactional();
   if (failures != 0) {

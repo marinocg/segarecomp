@@ -212,7 +212,7 @@ class ModMatrixRulesTest(unittest.TestCase):
 
     def test_supported_without_test_evidence_fails(self):
         def edit(m):
-            row = matrix_row(m, "master_system", "luau-scripting")
+            row = matrix_row(m, "sega_cd", "luau-scripting")
             row["level"] = "supported-with-limitations"
         self.assertRejected(edit, "requires cited test evidence")
 

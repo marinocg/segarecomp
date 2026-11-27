@@ -346,6 +346,10 @@ static void hook_reset(void *context, SmsMachine *machine) {
   (void)machine;
   s->started = 0U;
   s->presentation_valid = 0U;
+  /* the replay witness describes the run since the last reset, as the viewer's input recording does */
+  sms_sha256_init(&s->write_stream);
+  s->write_total = 0U;
+  s->callbacks_run = 0U;
   memset(s->final_pad, 0, sizeof s->final_pad);
   memset(s->previous_final, 0, sizeof s->previous_final);
   memset(s->sampled, 0, sizeof s->sampled);
@@ -573,7 +577,7 @@ static void *state_stage(void *context, const uint8_t *body, uint32_t length) {
     if (st->sampled[i] > 0x3FU || st->final_pad[i] > 0x3FU || st->previous_final[i] > 0x3FU || st->guest[i] > 0x3FU) goto bad;
   if (st->intercepting != 0U && (st->disabled != 0U || st->started == 0U || (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_INPUT)) == 0U)) goto bad;
   if (st->intercepting == 0U && (st->guest[0] != 0U || st->guest[1] != 0U)) goto bad;
-  if (st->started == 0U && (st->callbacks_run != 0U || st->faulted != 0U)) goto bad;
+  if (st->started == 0U && st->callbacks_run != 0U) goto bad; /* before the first frame after a reset nothing has run (a fault from before the reset stays) */
   if (st->faulted != 0U) {
     st->fault.faulted = 1U;
     st->fault.phase = in_u32(&in);

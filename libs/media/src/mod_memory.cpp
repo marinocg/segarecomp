@@ -8,8 +8,8 @@ namespace segarecomp::mod {
 
 namespace {
 constexpr std::uint64_t kGenesisWorkRamBytes = 65536;
-constexpr std::uint64_t kRomBudgetBytes = 4096;
-constexpr std::uint64_t kSmsWorkRamBytes = 8192, kSmsCartRamBytes = 32768;   // ADR 0321: sum of one revision's m68k.rom read ranges
+constexpr std::uint64_t kRomBudgetBytes = 4096;   // ADR 0321: sum of one revision's m68k.rom read ranges
+constexpr std::uint64_t kSmsWorkRamBytes = 8192, kSmsCartRamBytes = 32768;
 
 bool has_cap(const Manifest &m, const std::string &name) {
   return std::find(m.capabilities.begin(), m.capabilities.end(), name) != m.capabilities.end() || std::find(m.capabilities_optional.begin(), m.capabilities_optional.end(), name) != m.capabilities_optional.end();

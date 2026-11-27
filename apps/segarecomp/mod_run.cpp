@@ -843,6 +843,7 @@ int run_test(const RunOptions &o) {
                      : p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {}))
     return refuse(*r);
 
+  const std::uint64_t first_frame = sms ? 0 : 1;   // how a diagnostic numbers expectation entry 0: Genesis frame ordinals are 1-based, Master System machine frames 0-based
   bool all = true;
   std::string results = "[";
   bool first = true;
@@ -856,12 +857,12 @@ int run_test(const RunOptions &o) {
     } else {
       if (obs.mod.present && obs.mod.faulted) failure = "\"field\":\"mod_fault\",\"fault\":\"" + esc(obs.mod.fault) + "\"";
       for (std::size_t i = 0; failure.empty() && i < s.expect_frames.size(); ++i)
-        if (i >= obs.digests.size() || obs.digests[i] != s.expect_frames[i]) failure = "\"field\":\"frame\",\"frame\":" + std::to_string(i + 1) + ",\"expected\":\"" + s.expect_frames[i] + "\",\"actual\":\"" + (i < obs.digests.size() ? obs.digests[i] : std::string()) + "\"";
+        if (i >= obs.digests.size() || obs.digests[i] != s.expect_frames[i]) failure = "\"field\":\"frame\",\"frame\":" + std::to_string(i + first_frame) + ",\"expected\":\"" + s.expect_frames[i] + "\",\"actual\":\"" + (i < obs.digests.size() ? obs.digests[i] : std::string()) + "\"";
       for (std::size_t i = 0; failure.empty() && i < s.expect_ram_frames.size(); ++i)
         if (i >= obs.ram_frames.size() || obs.ram_frames[i] != s.expect_ram_frames[i])
-          failure = "\"field\":\"ram\",\"frame\":" + std::to_string(i + 1) + ",\"expected\":\"" + s.expect_ram_frames[i] + "\",\"actual\":\"" + (i < obs.ram_frames.size() ? obs.ram_frames[i] : std::string()) + "\"";
+          failure = "\"field\":\"ram\",\"frame\":" + std::to_string(i + first_frame) + ",\"expected\":\"" + s.expect_ram_frames[i] + "\",\"actual\":\"" + (i < obs.ram_frames.size() ? obs.ram_frames[i] : std::string()) + "\"";
       if (failure.empty() && !s.expect_frame.empty() && (obs.digests.empty() || obs.digests.back() != s.expect_frame))
-        failure = "\"field\":\"final_frame\",\"frame\":" + std::to_string(s.frames) + ",\"expected\":\"" + s.expect_frame + "\",\"actual\":\"" + obs.digests.back() + "\"";
+        failure = "\"field\":\"final_frame\",\"frame\":" + std::to_string(s.frames - 1 + first_frame) + ",\"expected\":\"" + s.expect_frame + "\",\"actual\":\"" + (obs.digests.empty() ? std::string() : obs.digests.back()) + "\"";
       if (failure.empty() && !s.expect_state.empty() && obs.final_state != s.expect_state)
         failure = "\"field\":\"state\",\"expected\":\"" + s.expect_state + "\",\"actual\":\"" + obs.final_state + "\"";
       if (failure.empty() && !s.expect_pcm.empty() && obs.pcm != s.expect_pcm) failure = "\"field\":\"pcm\",\"expected\":\"" + s.expect_pcm + "\",\"actual\":\"" + obs.pcm + "\"";

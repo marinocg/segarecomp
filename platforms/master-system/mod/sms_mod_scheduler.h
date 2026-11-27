@@ -118,7 +118,7 @@ void sms_mod_scheduler_detach(SmsModScheduler *s);
 
 /* The presentation committed by the last successful `render`, or NULL (not rendered, faulted, restored, reset): composing NULL is the Vanilla picture. */
 const SmsModPresentation *sms_mod_scheduler_presentation(const SmsModScheduler *s);
-/* SHA-256 over every committed guest write of the session (frame, phase, space, offset, width, value): the replay witness. */
+/* SHA-256 over every committed guest write since the last machine reset (frame, phase, space, offset, width, value): the replay witness. */
 void sms_mod_write_log_digest(const SmsModScheduler *s, uint8_t out[32]);
 /* A host adapter reports a failure of the callback in flight that the services did not see (a script error, a budget fault). `cause` is a static string. */
 void sms_mod_fault_current(const char *cause);

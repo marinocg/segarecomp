@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-#define SMS_MOD_OBSERVE_FRAMES 64U   /* per-frame observations kept (frames 1..64) */
+#define SMS_MOD_OBSERVE_FRAMES 64U   /* per-frame observations kept (frames 0..63) */
 #define SMS_MOD_OBSERVE_REGIONS 8U
 #define SMS_MOD_OBSERVE_BYTES 1024U  /* all regions together */
 

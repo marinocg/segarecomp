@@ -43,8 +43,17 @@ and picture offset). `overlay.rgba` covers the HUD (64 rect/text requests) and a
 The `SMSSTAT` container gains an optional eighth section `MODSTATE` (identity, state schema, a compatibility digest of ABI major, granted capabilities, phases, provider version and ranges, and the codec's
 body). Without a mod the container is byte for byte what it was (seven sections). A seam (`sms_mod_state.h`) keeps the snapshot module free of the scheduler. Restore stages and validates everything, then
 runs the mod's own `load` (the only fallible step) **before** any guest state is replaced. Statuses: mismatch (`E_STATE_MOD_MISMATCH` class: another mod, schema, configuration, or a mod on one side only),
-rejected (damaged body or refusing mod; machine unchanged), unavailable (a guest-affecting mod without `state.mod` never produces a state). A Vanilla and a modded program normally refuse each other
-earlier, because the variant identity already differs. Rewind uses the same codec. A machine reset runs `reset` again and keeps a fault's disabled flag; the mod must initialize its own state in `reset`.
+rejected (damaged body or refusing mod; the guest is unchanged), unavailable (a guest-affecting mod without `state.mod` never produces a state). A Vanilla and a modded program normally refuse each other
+earlier, because the variant identity already differs. Rewind uses the same codec.
+
+**Restore after a mod's own failure** (inherited from ADR 0299, and the one place Luau and C11 differ). A Luau VM fault is sticky. After a **Luau** mod has faulted, loading or rewinding to a state from
+before the fault is refused (the mod cannot take its data back) and it stays disabled; a **C11** mod disabled by a scheduler-detected fault accepts that state and is enabled again. Likewise, a healthy Luau
+mod whose `load()` itself fails latches its VM, so besides refusing the restore the scheduler disables it with cause `state`. The guest is unchanged by every refusal. The Luau trust policy's "VM is rebuilt on
+restore" is not implemented on either platform.
+
+**Machine reset.** It runs `reset` again, restarts the replay witness (so it describes the run since the reset, like the viewer's input recording) and keeps a fault's disabled flag. The Luau VM and a native
+provider's memory are not recreated: a mod must initialize its own state in `reset`. A recording made after a reset reproduces the run in a fresh process only for a mod that does so and had not faulted
+before the reset.
 
 ## 5. Build route and tooling
 

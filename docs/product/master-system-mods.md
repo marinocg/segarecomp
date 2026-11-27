@@ -55,7 +55,9 @@ Add `--sdl3-include` and `--sdl3-lib` for the played program. A headless program
   authored art; `overlay.rgba`), `sega.present.color(cram_value, 0xRRGGBB)` and `sega.present.scroll(dx, dy)` (`present.transform`). `sega.frame.sms_vdp(region, index)` reads a copy of VRAM, CRAM, the
   registers or the sprite table (`frame.sms_vdp`). To change the game's real palette or scrolling, change guest data (typed edits) or its variables (declared RAM writes).
 * **State** (`state.mod`, `[state] schema = 1`): `save()` / `load(value)` (C11: `save_state` / `load_state`). A mod that changes guest behavior without it disables save states. Initialize your state in
-  `reset`: a machine reset runs it again.
+  `reset`: a machine reset runs it again without recreating the script's globals, and a recording made after a reset replays only for a mod that initializes everything there and had not faulted before.
+* **After a fault**, a Luau mod cannot be revived: loading or rewinding to an earlier state is refused. A C11 mod disabled by a rule violation accepts the earlier state and runs again. A Luau `load()` that
+  fails also disables the mod.
 * **Faults** (an undeclared range, a write outside the legal phases, a bad request, an exhausted budget) discard that callback's effects, disable only the mod and print one `E_MOD_FAULT cause=... phase=...
   frame=...` line. Luau and C11 report the same cause.
 
