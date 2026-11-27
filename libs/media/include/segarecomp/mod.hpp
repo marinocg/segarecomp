@@ -338,6 +338,7 @@ struct GuestBlock {
 struct GuestListing {
   std::string revision;
   std::vector<GuestBlock> blocks;
+  std::vector<Range> free_ranges;         // image offsets of the revision's declared free ranges: padding, never existing cartridge code
 };
 using GuestAdmitter = std::optional<Rejection> (*)(const GuestListing &);
 // Assembles the Master System `guest-asm` payload for EVERY declared revision and admits each listing. Nothing for another platform or a package without guest code. (Pure; `mod check|pack|build`.)

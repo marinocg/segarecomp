@@ -39,23 +39,28 @@ bool plain_form(const z80::FormDescriptor &form) {
 
 // The cartridge offset a control target executes while `from` runs: the running block's own window holds its own bank; a fixed-area block (and every `rom_only` block) executes at its image offsets.
 std::uint64_t image_offset_of(const mod::GuestBlock &from, std::uint16_t target) {
+  if (target < 0x400U) return target;   // the fixed first 1 KiB of bank 0, also when the running block's window is window 0
   if (!from.fixed && target / 0x4000U == from.address / 0x4000U) return from.image_offset / 0x4000U * 0x4000U + target % 0x4000U;
   return target;
 }
 
-// A control transfer into injected bytes must reach the START of an admitted instruction, at the address that instruction was assembled for. A target outside every injected block is existing cartridge
-// code: the assembler only lets a verified @symbol name it.
-bool lands_inside(const mod::GuestListing &listing, const mod::GuestBlock &from, std::uint16_t target) {
+// Why a control transfer from `from` to `target` is not admitted, or null. Into injected bytes it must reach the START of an admitted instruction, at the address that instruction was assembled for; the
+// rest of a declared free range is padding and work RAM is mutable, so neither is a target. Anything else is existing cartridge code: the assembler only lets a verified @symbol name it.
+const char *target_fault(const mod::GuestListing &listing, const mod::GuestBlock &from, std::uint16_t target) {
+  constexpr const char *not_start = "the control target is not the start of an admitted instruction";
+  if (target >= 0xC000U) return "the control target is not cartridge code";
   const std::uint64_t offset = image_offset_of(from, target);
   for (const mod::GuestBlock &to : listing.blocks) {
     if (offset < to.image_offset || offset >= to.image_offset + to.bytes.size()) continue;
     const std::uint64_t position = offset - to.image_offset;
-    if (to.address + position != target) return true;
+    if (to.address + position != target) return not_start;
     for (const mod::GuestItem &item : to.items)
-      if (item.code && item.position == position) return false;
-    return true;
+      if (item.code && item.position == position) return nullptr;
+    return not_start;
   }
-  return false;
+  for (const mod::Range &free : listing.free_ranges)
+    if (offset >= free.start && offset < free.end) return "the control target lies in free-range padding";
+  return nullptr;
 }
 
 }  // namespace
@@ -96,7 +101,8 @@ std::optional<mod::Rejection> admit_z80_guest(const mod::GuestListing &listing) 
       } else if (!plain_form(form)) {
         return refuse(block, item.position, "the form \"" + z80::form_name(c.instruction.form) + "\" has no admitted effect");
       }
-      if (flow.target && lands_inside(listing, block, *flow.target)) return refuse(block, item.position, "the control target is not the start of an admitted instruction");
+      if (flow.target)
+        if (const char *fault = target_fault(listing, block, *flow.target)) return refuse(block, item.position, fault);
       if (flow.falls_through) { continues_at = item.position + item.length; previous = item.position; }
     }
     if (continues_at) return refuse(block, previous, "execution runs off the end of the block (end every path with ret, jp or jr)");

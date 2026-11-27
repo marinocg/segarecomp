@@ -39,23 +39,22 @@ def encode_palette(text, region):
 
 def encode_tiles(text, region):
     """`tile <number>` followed by 8 rows of 8 hexadecimal colour indices -> the 32-byte 4bpp planar pattern."""
-    out, rows, number = {}, [], None
-    for line in lines_of(text) + ["tile end"]:
+    blocks = []   # (tile number, rows)
+    for line in lines_of(text):
         if line.startswith("tile "):
-            if number is not None:
-                if len(rows) != 8:
-                    raise AssetError(f"tiles: tile {number} has {len(rows)} rows, not 8")
-                out[number] = bytes(sum(((rows[y][x] >> plane) & 1) << (7 - x) for x in range(8)) for y in range(8) for plane in range(4))
-            name, rows = line[5:], []
-            if name == "end":
-                break
-            if not name.isdigit() or int(name) >= region["entries"] or int(name) in out:
+            name = line[5:]
+            if not name.isdigit() or int(name) >= region["entries"] or any(int(name) == number for number, _ in blocks):
                 raise AssetError(f"tiles: tile number {name!r} is out of range or repeated")
-            number = int(name)
-        elif number is None or not re.fullmatch(r"[0-9a-f]{8}", line):
+            blocks.append((int(name), []))
+        elif not blocks or not re.fullmatch(r"[0-9a-f]{8}", line):
             raise AssetError(f"tiles: a row is 8 lower-case hexadecimal digits after a `tile` line: {line!r}")
         else:
-            rows.append([int(c, 16) for c in line])
+            blocks[-1][1].append([int(c, 16) for c in line])
+    out = {}
+    for number, rows in blocks:
+        if len(rows) != 8:
+            raise AssetError(f"tiles: tile {number} has {len(rows)} rows, not 8")
+        out[number] = bytes(sum(((rows[y][x] >> plane) & 1) << (7 - x) for x in range(8)) for y in range(8) for plane in range(4))
     return out
 
 

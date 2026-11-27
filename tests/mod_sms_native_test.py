@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "tools"))
 import sms_fixture_rom as builder  # noqa: E402
-from mod_test_support import Cli, sha, temp, write  # noqa: E402
+from mod_test_support import Cli, base_manifest, build as build_package, payload, sha, temp, write  # noqa: E402
 
 exe, compiler, root = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3]).resolve()
 cli = Cli(exe)
@@ -136,4 +136,17 @@ for name, rom, extra, diagnostic in [("mapper-conflict", vanilla, data + ("--map
                                      ("wrong-identity", vanilla, ("--data-package", package, "--data-identity", "0" * 64), "DATA_IDENTITY_CHANGED")]:
     r, out, status = build(name, rom, *extra)
     assert r.returncode == 1 and status.get("diagnostic") == diagnostic and not (out / "generated").exists(), (name, r.returncode, status)
+# a hand-made package whose routine the Z80 owner does not admit (the CLI would not pack it) builds nothing either
+raw = b"free * 0x1c100 0x100 0xff\norg * 0x1c100 at 0x8100\n  jp (hl)\n"
+entry = payload("guest-asm", "asm/main.asm", raw, cpu="z80")
+manifest = base_manifest("master-system", [(entry, ("asm/main.asm", raw))], head={"license": "CC0-1.0"})
+manifest["source"]["revisions"][0]["sha256"] = sha(image)
+forged = write(tmp / "forged.segapatch", build_package(manifest, [(entry, ("asm/main.asm", raw))]))
+rc, doc, p = cli.run("mod", "inspect", "--json", forged)
+assert rc == 1 and doc["class"] == "E_GUEST_NOT_ADMITTED", (rc, doc)
+rc, doc, p = cli.run("mod", "apply", forged, "--rom", vanilla, "--out", tmp / "forged.sms")
+assert rc == 1 and doc["class"] == "E_GUEST_NOT_ADMITTED" and not (tmp / "forged.sms").exists(), (rc, doc)
+identity = sha(json.dumps(manifest, separators=(",", ":")).encode("ascii"))
+r, out, status = build("unadmitted", vanilla, "--data-package", forged, "--data-identity", identity)
+assert r.returncode == 1 and status.get("diagnostic") == "E_GUEST_NOT_ADMITTED" and not (out / "generated").exists() and not (out / "input").exists(), (r.returncode, status)
 print("mod_sms_native_test: ok")

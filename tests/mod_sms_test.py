@@ -220,6 +220,39 @@ for what, asm in [("an indirect jump", "  jp (hl)\n"), ("code that runs off the 
 reject("a control target in the middle of an injected instruction", "E_GUEST_NOT_ADMITTED", B + "  jp @mid\ns:\n  ld bc,0x1234\n  ret\n".replace("@mid", "@helper+0xf4"))
 reject("an @symbol into a block assembled for another window", "E_GUEST_NOT_ADMITTED", B + "  call @helper+0x170\n  ret\norg * 0x1c180 at 0x4180\n  ret\n")
 accept("an @symbol onto an injected instruction of the same window", B + "  call @helper+0x170\n  ret\norg * 0x1c180 at 0x8180\n  ret\n")
+# a bank other than 0 seen through window 0: below 0x400 the fixed bank 0 is mapped, whatever the window holds
+W0 = "org * 0x1d000 at 0x1000\n"
+low = (("low7", "0x0001c010"),)
+for what, line in [("a call to a symbol the window cannot show", "  call @low7\n  ret\n"), ("a data pointer to a symbol the window cannot show", "  ld hl,@low7\n  ret\n")]:
+    refused(what, "E_GUEST_BANK_REFERENCE", "mod", "check", project("free * 0x1d000 0x100 0xff\n" + W0 + line, symbols=low))
+FIXED_TRAP = "org * 0x300\n  ld bc,0x7676\n  ret\ndata\n  db 0x76,0x76\n"
+for at_ in ("0x1000", "0x5000", "0x9000"):
+    for what, name, address in [("into the middle of a fixed instruction", "mid", "0x00000301"), ("into fixed data", "dat", "0x00000304")]:
+        refused(f"a jump {what} from window {at_}", "E_GUEST_NOT_ADMITTED", "mod", "check",
+                project("free * 0x300 0x40 0xff\nfree * 0x1d000 0x100 0xff\norg * 0x1d000 at " + at_ + f"\n  jp @{name}\n" + FIXED_TRAP, symbols=((name, address),)))
+    accept_call = project("free * 0x300 0x40 0xff\nfree * 0x1d000 0x100 0xff\norg * 0x1d000 at " + at_ + "\n  call @f\n  ret\n" + FIXED_TRAP, symbols=(("f", "0x00000300"),))
+    ok(f"a legal fixed call from window {at_}", "mod", "check", accept_call)
+# a control target must be an instruction: a label with nothing after it would send execution into whatever follows the block
+for what, asm in [("jp", "  jp end\nend:\n"), ("call", "  call end\n  ret\nend:\n"), ("call cc", "  call z,end\n  ret\nend:\n"), ("jr", "  jr nz,end\n  ret\nend:\n"),
+                  ("djnz", "  djnz end\n  ret\nend:\n"), ("after a conditional return", "  ret z\n  jr x\nx:\n"), ("a label on padding", "  jp p\np:\n  even\n  ret\n"),
+                  ("a trailing label of another block", "  jp tail\norg * 0x1c180 at 0x8180\n  ret\ntail:\n")]:
+    reject(f"a control target without an instruction ({what})", "E_GUEST_BRANCH_TARGET", B + asm)
+refused("a trailing label on rom_only", "E_GUEST_BRANCH_TARGET", "mod", "check", project("free * 0x300 0x40 0xff\norg * 0x300\n  jp end\nend:\n", image=r32, mapper="rom_only"))
+reject("an @symbol into free fill", "E_GUEST_NOT_ADMITTED", B + "  jp @helper+0x1e0\n")
+reject("an @symbol just past the block", "E_GUEST_NOT_ADMITTED", B + "  jp @helper+0xf3\n")
+refused("a rom_only control transfer into work RAM", "E_GUEST_NOT_ADMITTED", "mod", "check", project("free * 0x300 0x40 0xff\norg * 0x300\n  jp @ram\n", image=r32, mapper="rom_only", symbols=(("ram", "0x0000c100"),)))
+# label arithmetic obeys the window rule too
+for what, line in [("past the window into work RAM", "  ld hl,e+0x4000\n"), ("below the window", "  ld a,(e-0x4000)\n"), ("from a banked label into the fixed area", "  ld hl,e-0x7e00\n")]:
+    reject(f"label arithmetic {what}", "E_GUEST_BANK_REFERENCE", B + "e:\n" + line + "  ret\n")
+accept("label arithmetic inside the window", B + "e:\n  ld hl,e+0x20\n  ret\n")
+# a package (not only a project directory) is admitted by every reader, `inspect` and the build included
+raw_asm = ("free * 0x1c100 0x100 0xff\n" + B + "  jp (hl)\n").encode()
+man = base_manifest("master-system", [(payload("guest-asm", "asm/main.asm", raw_asm, cpu="z80"), ("asm/main.asm", raw_asm))], head={"license": "CC0-1.0"})
+man["source"]["revisions"][0]["sha256"] = sha(BANKED)
+handmade = write(tmp / "handmade.segapatch", build(man, [(man["payloads"][0], ("asm/main.asm", raw_asm))]))
+refused("inspect admits a package", "E_GUEST_NOT_ADMITTED", "mod", "inspect", "--json", handmade)
+refused("install admits a package", "E_GUEST_NOT_ADMITTED", "mod", "install", handmade, "--rom", write(tmp / "h.bin", BANKED), "--library", tmp / "lib-h")
+
 d = guest(B + "  jp (hl)\n")
 refused("pack refuses what is not admitted", "E_GUEST_NOT_ADMITTED", "mod", "pack", d, "--out", tmp / "never.segapatch")
 cli.check(not (tmp / "never.segapatch").exists(), "nothing is written")

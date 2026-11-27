@@ -668,6 +668,7 @@ int segarecomp_mod_command(int argc, char **argv) {
     }
     const mod::Package p = mod::read_package_file(target);
     if (!p.ok) return refuse(p.rejection);
+    if (const auto r = mod::check_guest_admission(p.manifest, p.files, kAdmit)) return refuse(*r);
     std::cout << "{\"ok\":true," << package_json(p.manifest, p.identity, p.content_digest) << ",\"adapter\":" << adapter_json(*mod::find_adapter(p.manifest.platform)) << "}\n";
     return 0;
   }

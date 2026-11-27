@@ -2004,7 +2004,11 @@ int run_build(Options options) {
       if (!options.platform.empty() && options.platform != package.manifest.platform)
         return fail(options, log, original_sha, "analyze", 1, "The mod package targets another platform than --platform names.", "DATA_PLATFORM_MISMATCH");
       const auto effective = segarecomp::mod::effective_image(package, original, &sms::admit_z80_guest);
-      if (!effective.ok) return fail(options, log, original_sha, "analyze", 1, "The image is not the one the package declares: " + effective.rejection.message, "DATA_IMAGE_MISMATCH");
+      if (!effective.ok) {   // Master System keeps the stable class of an admission, mapper or header refusal; another image stays DATA_IMAGE_MISMATCH
+        const bool own_class = sms_data && effective.rejection.code != "E_IMAGE_MISMATCH";
+        return fail(options, log, original_sha, "analyze", 1, (own_class ? "The mod package cannot be applied: " : "The image is not the one the package declares: ") + effective.rejection.message,
+                    own_class ? effective.rejection.code : std::string("DATA_IMAGE_MISMATCH"));
+      }
       const fs::path input = options.output / "input";
       std::error_code input_ec;
       fs::create_directories(input, input_ec);

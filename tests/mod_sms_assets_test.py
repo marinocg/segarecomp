@@ -100,7 +100,7 @@ def copy_project(name):
 for n, (asset, content, says) in enumerate([
         ("palette.txt", "0 0 0 4\n", "levels 0..3"), ("palette.txt", "16 0 0 0\n", "out of range"), ("palette.txt", "1 0 0 0\n1 1 1 1\n", "repeated"),
         ("tiles.txt", "tile 40\n" + "00000000\n" * 8, "out of range"), ("tiles.txt", "tile 1\n" + "00000000\n" * 7, "not 8"), ("tiles.txt", "tile 1\n" + "0000000g\n" * 8, "hexadecimal"),
-        ("tiles.txt", "00000000\n", "after a `tile` line"), ("room.txt", ("40 " * 7 + "40\n") * 4, "0..39"), ("room.txt", ("1 " * 7 + "1\n") * 5, "4 rows"),
+        ("tiles.txt", "00000000\n", "after a `tile` line"), ("tiles.txt", "tile 1\n" + "00000000\n" * 8 + "tile end\ntile 99\nGARBAGE\n", "out of range or repeated"), ("room.txt", ("40 " * 7 + "40\n") * 4, "0..39"), ("room.txt", ("1 " * 7 + "1\n") * 5, "4 rows"),
         ("text.txt", "ABCDEFGHIJKLMNOPQ\n", "at most 16"), ("text.txt", "lower case\n", "at most 16"), ("text.txt", "A\nB\n", "one line")]):
     d = copy_project(f"bad{n}")
     (d / "edits" / "main.edits").write_text("untouched\n")

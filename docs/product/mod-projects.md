@@ -125,9 +125,9 @@ entry:
   ret
 ```
 
-A label or `@symbol` may name only the fixed first 1 KiB or, from a banked block, the same bank through the same window (`E_GUEST_BANK_REFERENCE`). The Z80 decoder then admits the routine (`E_GUEST_NOT_ADMITTED`): no `jp (hl)`, no path that runs off a block or into data or padding, and no branch into the middle of an injected instruction. Making the game call the routine (for example with a typed edit of a `call` operand) and keeping its bank mapped there is the author's job.
+A label or `@symbol` may name only the fixed first 1 KiB or, from a banked block, the same bank through the same window (`E_GUEST_BANK_REFERENCE`). A label used as a branch target must be followed by an instruction (`E_GUEST_BRANCH_TARGET`). The Z80 decoder then admits the routine (`E_GUEST_NOT_ADMITTED`): no `jp (hl)`, no instruction path that falls off a block or into data or padding, and no named branch into the middle of an injected instruction, into the rest of a free range or into RAM. This does not follow the stack or register-indirect stores: `push hl` / `ret` and a store through `hl` are not bounded. Making the game call the routine (for example with a typed edit of a `call` operand) and keeping its bank mapped there is the author's job.
 
-A data-only Master System package builds into a distinct program with its own cartridge identity (its save states never load in Vanilla):
+A data-only Master System package builds into a distinct program with its own cartridge identity (a save state binds to that identity and the mod variant, so Vanilla refuses it):
 
 ```sh
 segarecomp build --rom <original> --output <dir> --cc <compiler> --runtime-dir <platforms-dir>/master-system --data-package <package.segapatch> --data-identity <package_identity>

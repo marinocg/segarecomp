@@ -204,6 +204,7 @@ struct Ctx {
   std::size_t line = 0;
   const Block *banked = nullptr;                                    // set on the Master System `sega` mapper only
   const std::map<std::string, const Block *> *label_blocks = nullptr;
+  const std::set<std::string> *code_labels = nullptr;               // set on master-system: labels bound to an instruction
 };
 
 struct Ev {
@@ -243,6 +244,8 @@ Ev eval(const Ctx &c, std::string_view expr) {
         if (sms_fixed(*c.banked) || offset / kSmsBank != c.banked->offset / kSmsBank)
           fail("E_GUEST_BANK_REFERENCE", at(c.line) + "the @symbol \"" + name + "\" lies in bank " + std::to_string(offset / kSmsBank) + ", which is not guaranteed mapped while this block runs");
         r.value = static_cast<std::int64_t>(c.banked->address / kSmsBank * kSmsBank + offset % kSmsBank);
+        if (static_cast<std::uint64_t>(r.value) < kSmsFixed)   // window 0: below 0x400 the fixed bank 0 is mapped, whatever the window holds
+          fail("E_GUEST_BANK_REFERENCE", at(c.line) + "the @symbol \"" + name + "\" would lie below 0x400 in this block's window, where only the fixed first 1 KiB is mapped");
       }
     }
     return r;
@@ -253,12 +256,15 @@ Ev eval(const Ctx &c, std::string_view expr) {
     if (c.final) fail("E_GUEST_LABEL_UNKNOWN", at(c.line) + "the label \"" + std::string(base) + "\" is not defined for the revision \"" + c.rev + "\"");
     return r;   // pass 1: sizes never depend on label values
   }
+  r.value = it->second + addend;
   if (c.banked != nullptr && c.final) {
     const Block &to = *c.label_blocks->at(std::string(base));
     if (!sms_reaches(*c.banked, to))
       fail("E_GUEST_BANK_REFERENCE", at(c.line) + "the label \"" + std::string(base) + "\" lies in bank " + std::to_string(to.offset / kSmsBank) + ", which is not guaranteed mapped while this block runs");
+    const bool inside = sms_fixed(to) ? r.value >= 0 && r.value < static_cast<std::int64_t>(kSmsFixed)   // label arithmetic stays where the label's own mapping holds
+                                      : r.value >= static_cast<std::int64_t>(kSmsFixed) && static_cast<std::uint64_t>(r.value) / kSmsBank == to.address / kSmsBank;
+    if (!inside) fail("E_GUEST_BANK_REFERENCE", at(c.line) + "the offset from the label \"" + std::string(base) + "\" leaves the window the label is mapped in");
   }
-  r.value = it->second + addend;
   return r;
 }
 
@@ -270,6 +276,8 @@ Ev target_of(const Ctx &c, std::string_view expr) {   // a control-transfer dest
   if (base[0] != '@') {
     if (op != std::string_view::npos) fail("E_GUEST_BRANCH_TARGET", at(c.line) + "a branch target is a bare label; offsets are only allowed on @symbols");
     if (c.data_labels.count(std::string(base)) != 0) fail("E_GUEST_BRANCH_TARGET", at(c.line) + "the branch target is a data label; data is never executed");
+    if (c.final && c.code_labels != nullptr && c.code_labels->count(std::string(base)) == 0)
+      fail("E_GUEST_BRANCH_TARGET", at(c.line) + "the branch target label is not followed by an instruction of its block");
   } else if (op != std::string_view::npos && (e.value < 0 || e.value > 0xFFFFFF)) {
     fail("E_GUEST_BRANCH_TARGET", at(c.line) + "the @symbol offset leaves the image");
   }
@@ -740,6 +748,8 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
   std::map<std::string, std::int64_t> labels;
   std::set<std::string> data_labels;
   std::map<std::string, const Block *> label_blocks;
+  std::set<std::string> code_labels;
+  const bool sms = m.platform == "master-system";
   const bool banked = sms_banked(m, rev);
   for (int pass = 0; pass < 2; ++pass) {
     const bool final = pass == 1;
@@ -752,14 +762,16 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
       ob.fixed = !banked || sms_fixed(*b);
       ob.line = b->line;
       bool data_mode = false;
+      std::vector<std::string> waiting;   // labels at the current position, not yet bound to what follows them
       std::string last_op;
       std::size_t last_args = 0;
       for (const Stmt &s : b->stmts) {
         const auto pc = static_cast<std::int64_t>(b->address + ob.bytes.size());
-        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line, banked ? b : nullptr, &label_blocks};
+        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line, banked ? b : nullptr, &label_blocks, sms ? &code_labels : nullptr};
         if (!s.label.empty()) {
           if (!final && !labels.emplace(s.label, pc).second) fail("E_GUEST_LABEL_DUPLICATE", at(s.line) + "the label \"" + s.label + "\" is defined twice for the revision \"" + rev.label + "\"");
           if (!final) label_blocks.emplace(s.label, b);
+          if (!final) waiting.push_back(s.label);
           if (!final && data_mode) data_labels.insert(s.label);
         }
         if (s.op.empty()) continue;
@@ -777,7 +789,7 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
         }
         if (s.op == "even") {
           if (!s.args.empty() || !s.size.empty()) fail("E_GUEST_SYNTAX", at(s.line) + "even takes no operands");
-          if ((pc & 1) != 0) ob.bytes.push_back(0);
+          if ((pc & 1) != 0) { ob.bytes.push_back(0); waiting.clear(); }
           continue;
         }
         Insn meta;
@@ -795,6 +807,8 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
           last_op = s.op;
           last_args = s.args.size();
         }
+        if (meta.code) code_labels.insert(waiting.begin(), waiting.end());
+        waiting.clear();
         meta.len = bytes.size();
         ob.bytes.insert(ob.bytes.end(), bytes.begin(), bytes.end());
         if (final) ob.insns.push_back(std::move(meta));
@@ -912,6 +926,7 @@ bool ssf_mapper(std::span<const std::uint8_t> image) { return image.size() >= 0x
 GuestListing listing_of(const Assembled &a, const std::string &revision) {
   GuestListing out;
   out.revision = revision;
+  for (const Free &f : a.frees) out.free_ranges.push_back({f.start, f.start + f.length});
   for (const OutBlock &b : a.blocks) {
     GuestBlock g;
     g.image_offset = b.offset;
