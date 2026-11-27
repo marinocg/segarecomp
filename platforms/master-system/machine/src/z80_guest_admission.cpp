@@ -45,10 +45,11 @@ std::uint64_t image_offset_of(const mod::GuestBlock &from, std::uint16_t target)
 }
 
 // Why a control transfer from `from` to `target` is not admitted, or null. Into injected bytes it must reach the START of an admitted instruction, at the address that instruction was assembled for; the
-// rest of a declared free range is padding and work RAM is mutable, so neither is a target. Anything else is existing cartridge code: the assembler only lets a verified @symbol name it.
+// rest of a declared free range is padding, and an address the declared mapper can never fill with cartridge code (work RAM, beyond a rom_only cartridge) is impossible, so neither is a target. Anything
+// else is existing cartridge code, whose content the author asserts: the assembler only lets a verified @symbol name it.
 const char *target_fault(const mod::GuestListing &listing, const mod::GuestBlock &from, std::uint16_t target) {
   constexpr const char *not_start = "the control target is not the start of an admitted instruction";
-  if (target >= 0xC000U) return "the control target is not cartridge code";
+  if (target >= listing.code_limit) return "the control target lies outside the declared cartridge";
   const std::uint64_t offset = image_offset_of(from, target);
   for (const mod::GuestBlock &to : listing.blocks) {
     if (offset < to.image_offset || offset >= to.image_offset + to.bytes.size()) continue;

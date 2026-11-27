@@ -267,4 +267,95 @@ outs = [apply(inj, BANKED, f"det{i}.bin")[2] for i in range(3)]
 cli.check(outs[0] is not None and outs[0] == outs[1] == outs[2], "three applications produce identical bytes")
 cli.check(outs[0] is not None and outs[0][0x1C100:0x1C109] == bytes([0x3E, 1, 0x32, 0x00, 0xC0, 0xCD, 0x10, 0x80, 0xC9]), "the @symbol is translated into the slot 2 window")
 
+# ------------------------------------------------------------------ a statically known control target outside the declared cartridge is impossible, not merely author-asserted
+R = "free * 0x300 0x40 0xff\norg * 0x300\n"
+
+
+def rom_only(asm, address, name="outside"):
+    return project(R + asm, image=r32, mapper="rom_only", symbols=((name, address),))
+
+
+for what, asm, address in [("jp to the first address beyond the cartridge", "  jp @outside\n", "0x00008000"), ("call to it", "  call @outside\n  ret\n", "0x00008000"),
+                           ("conditional call beyond", "  call z,@outside\n  ret\n", "0x00009000"), ("jp beyond", "  jp @outside\n", "0x00009000"),
+                           ("symbol arithmetic that leaves the cartridge", "  jp @outside+0x10\n", "0x00007ff0"), ("symbol arithmetic far beyond", "  call @outside+0x8000\n  ret\n", "0x00000200")]:
+    d = rom_only(asm, address)
+    refused("rom_only " + what, "E_GUEST_NOT_ADMITTED", "mod", "check", d, says="outside the declared cartridge")
+    apply_refused("apply: rom_only " + what, "E_GUEST_NOT_ADMITTED", d, r32)
+    never = tmp / "never-outside.segapatch"
+    refused("pack: rom_only " + what, "E_GUEST_NOT_ADMITTED", "mod", "pack", d, "--out", never)
+    cli.check(not never.exists(), "no package is written")
+ok("the last cartridge byte is existing code the author asserts", "mod", "check", rom_only("  jp @outside\n", "0x00007fff"))
+rc, doc, out = apply(rom_only("  jp @outside+0x10\n", "0x00000200"), r32)
+cli.check(rc == 0 and out[0x300:0x303] == bytes([0xC3, 0x10, 0x02]), f"a valid verified target inside the cartridge: {doc}")
+refused("a rom_only block beyond the cartridge", "E_GUEST_ADDRESS", "mod", "check", project("free * 0x7ffe 0x10 0xff\norg * 0x7ffe\n  nop\n  nop\n  ret\n", image=r32, mapper="rom_only"))
+
+# ------------------------------------------------------------------ a symbolic direct memory access stays wholly inside the region whose mapping is established (its operand width included)
+IMG128 = rom(0x20000, {})
+
+
+def access(asm, symbols=(), image=IMG128, mapper="sega"):
+    return project("free * 0x300 0x40 0xff\nfree * 0x1c100 0x100 0xff\n" + asm if mapper == "sega" else "free * 0x300 0x40 0xff\n" + asm, image=image, mapper=mapper, symbols=symbols)
+
+
+def bytes_of(what, d, at_offset, want, image=IMG128):
+    rc, doc, out = apply(d, image)
+    cli.check(rc == 0 and out is not None and out[at_offset:at_offset + len(want)] == want, f"{what}: {doc} {out and out[at_offset:at_offset + len(want)].hex()}")
+
+
+SLOT1 = "org * 0x1c100 at 0x4100\n"
+last = (("last", "0x0001ffff"),)
+before = (("before", "0x0001fffe"),)
+bytes_of("a byte read at the last address of the window", access(SLOT1 + "  ld a,(@last)\n  ret\n", last), 0x1C100, bytes([0x3A, 0xFF, 0x7F, 0xC9]))
+bytes_of("a word read that ends at the last address of the window", access(SLOT1 + "  ld hl,(@before)\n  ret\n", before), 0x1C100, bytes([0x2A, 0xFE, 0x7F, 0xC9]))
+refused("a word read across the window boundary (@symbol)", "E_GUEST_BANK_REFERENCE", "mod", "check", access(SLOT1 + "  ld hl,(@last)\n  ret\n", last), says="crosses")
+apply_refused("apply: a word read across the window boundary", "E_GUEST_BANK_REFERENCE", access(SLOT1 + "  ld hl,(@last)\n  ret\n", last), IMG128)
+refused("a word read across the window boundary (label)", "E_GUEST_BANK_REFERENCE", "mod", "check", access(SLOT1 + "e:\n  ld hl,(e+0x3eff)\n  ret\n"), says="crosses")
+ok("a word read that ends at the window boundary (label)", "mod", "check", access(SLOT1 + "e:\n  ld hl,(e+0x3efe)\n  ret\n"))
+edge, below = (("edge", "0x000003ff"),), (("below", "0x000003fe"),)
+for who, org in [("fixed code", "org * 0x300\n"), ("banked code", SLOT1)]:
+    ok(f"a byte read at the end of the fixed 1 KiB from {who}", "mod", "check", access(org + "  ld a,(@edge)\n  ret\n", edge))
+    ok(f"a word read inside the fixed 1 KiB from {who}", "mod", "check", access(org + "  ld hl,(@below)\n  ret\n", below))
+    refused(f"a word read across the fixed 1 KiB boundary from {who}", "E_GUEST_BANK_REFERENCE", "mod", "check", access(org + "  ld hl,(@edge)\n  ret\n", edge), says="crosses")
+refused("a word read across the fixed boundary (label)", "E_GUEST_BANK_REFERENCE", "mod", "check", access("org * 0x300\ne:\n  ld hl,(e+0xff)\n  ret\n"), says="crosses")
+for who, asm, syms in [("@symbol", "  ld hl,(@edge)\n", (("edge", "0x00007fff"),)), ("label", "  ld hl,(e+0x7cff)\n", ())]:
+    refused(f"rom_only: a word read across the end of the cartridge ({who})", "E_GUEST_ADDRESS", "mod", "check", access("org * 0x300\ne:\n" + asm + "  ret\n", syms, r32, "rom_only"), says="crosses")
+ok("rom_only: the last byte and the last word", "mod", "check", access("org * 0x300\n  ld a,(@a)\n  ld hl,(@w)\n  ret\n", (("a", "0x00007fff"), ("w", "0x00007ffe")), r32, "rom_only"))
+ok("rom_only: a symbol naming a work RAM variable", "mod", "check", access("org * 0x300\n  ld hl,(@v)\n  ld (@v),hl\n  ld a,(@v)\n  ret\n", (("v", "0x0000c100"),), r32, "rom_only"))
+refused("rom_only: a symbolic read of the unmapped area", "E_GUEST_ADDRESS", "mod", "check", access("org * 0x300\n  ld a,(@v)\n  ret\n", (("v", "0x00009000"),), r32, "rom_only"))
+# numbers are the author's explicit CPU addresses: unchanged, including words that straddle a window
+bytes_of("numeric accesses are not restricted", access(SLOT1 + "  ld hl,(0x7fff)\n  ld hl,(0x03ff)\n  ld hl,(0xdffe)\n  ld a,(0x9000)\n  ret\n"), 0x1C100, bytes([0x2A, 0xFF, 0x7F, 0x2A, 0xFF, 0x03, 0x2A, 0xFE, 0xDF, 0x3A, 0x00, 0x90, 0xC9]))
+
+# ------------------------------------------------------------------ T001 acceptance: a BPS-derived image must fit the declared mapper too
+import zlib  # noqa: E402
+
+
+def grow_bps(source, size):
+    """A BPS (independent of the product writer) that copies `source` and appends literal zeros up to `size`."""
+    def number(n):
+        out = bytearray()
+        while True:
+            low, n = n & 0x7F, n >> 7
+            if n == 0:
+                return bytes(out) + bytes([0x80 | low])
+            out.append(low)
+            n -= 1
+    target = source + bytes(size - len(source))
+    body = b"BPS1" + number(len(source)) + number(len(target)) + number(0) + number((len(source) - 1) << 2 | 0) + number((size - len(source) - 1) << 2 | 1) + bytes(size - len(source))
+    body += struct.pack("<II", zlib.crc32(source), zlib.crc32(target))
+    return body + struct.pack("<I", zlib.crc32(body)), target
+
+
+for size, mapper, accepted in [(0x10000, "rom_only", False), (0xC000, "sega", False), (0x10000, "sega", True)]:
+    patch_bytes, target = grow_bps(r32, size)
+    entry = payload("bps-image", "game.bps", patch_bytes, target_sha256=sha(target))
+    man = base_manifest("master-system", [(entry, ("game.bps", patch_bytes))], head={"license": "CC0-1.0"})
+    man["source"]["revisions"][0].update(sha256=sha(r32), mapper=mapper)
+    pkg_path = write(tmp / f"bps-{mapper}-{size}.segapatch", build(man, [(entry, ("game.bps", patch_bytes))]))
+    args = ("mod", "install", pkg_path, "--rom", write(tmp / "bps-src.bin", r32), "--library", tmp / f"lib-bps-{mapper}-{size}")
+    if accepted:
+        got = ok(f"a BPS target that fits {mapper}", *args)
+        cli.check(got.get("effective_image") == sha(target), f"the BPS target is the effective image: {got}")
+    else:
+        refused(f"a BPS target of {size} bytes under {mapper}", "E_MAPPER_UNSUPPORTED", *args)
+
 cli.done("mod_sms_test")

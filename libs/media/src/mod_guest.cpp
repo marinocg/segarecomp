@@ -182,7 +182,7 @@ Source parse_source(std::span<const std::uint8_t> text, const Manifest &m) {
 }
 
 // ------------------------------------------------------------------ Master System bank windows (SEG-147-T002, ADR 0324)
-constexpr std::uint64_t kSmsBank = 0x4000, kSmsFixed = 0x400, kSmsCodeLimit = 0xC000, kSmsMaxImage = 0x80000;
+constexpr std::uint64_t kSmsBank = 0x4000, kSmsFixed = 0x400, kSmsRomOnly = 0x8000, kSmsCodeLimit = 0xC000, kSmsMaxImage = 0x80000;
 
 bool sms_banked(const Manifest &m, const Revision &r) { return m.platform == "master-system" && r.mapper == "sega"; }
 bool sms_fixed(const Block &b) { return b.offset < kSmsFixed; }
@@ -286,6 +286,20 @@ Ev target_of(const Ctx &c, std::string_view expr) {   // a control-transfer dest
 
 void range(const Ctx &c, std::int64_t v, std::int64_t lo, std::int64_t hi, const char *what) {
   if (c.final && (v < lo || v > hi)) fail("E_GUEST_VALUE_RANGE", at(c.line) + what + " is out of range");
+}
+
+// A DIRECT memory access through a label or @symbol stays, with its whole operand width, inside the region whose mapping the reference rules established for its first byte. On the `sega` mapper that is
+// the fixed first 1 KiB or the 16 KiB window; on `rom_only` it is the cartridge or work RAM (a symbol may name a variable). A numeric address is the author's explicit CPU address and is not judged here.
+void sms_direct_access(const Ctx &c, std::int64_t address, unsigned width) {
+  if (!c.final || c.code_labels == nullptr) return;   // code_labels is set on master-system only
+  const std::int64_t end = address + static_cast<std::int64_t>(width);   // exclusive
+  const std::string what = at(c.line) + "the " + std::to_string(width) + "-byte access at 0x" + hex(static_cast<std::uint64_t>(address)) + " crosses or leaves ";
+  if (c.banked != nullptr) {
+    const std::int64_t limit = address < static_cast<std::int64_t>(kSmsFixed) ? static_cast<std::int64_t>(kSmsFixed) : (address / static_cast<std::int64_t>(kSmsBank) + 1) * static_cast<std::int64_t>(kSmsBank);
+    if (end > limit) fail("E_GUEST_BANK_REFERENCE", what + "the region whose mapping is established (the fixed first 1 KiB or one 16 KiB window)");
+  } else if (!(end <= static_cast<std::int64_t>(kSmsRomOnly) || (address >= 0xC000 && end <= 0x10000))) {
+    fail("E_GUEST_ADDRESS", what + "the 32 KiB cartridge and work RAM");
+  }
 }
 
 struct Insn {
@@ -593,6 +607,7 @@ std::vector<std::uint8_t> z80_encode(const Ctx &c, const Stmt &s, Insn &meta) {
   const auto imm8 = [&](const std::string &t) { const Ev v = eval(c, t); range(c, v.value, -128, 255, "an 8-bit value"); o.push_back(static_cast<std::uint8_t>(v.value)); };
   const auto imm16 = [&](const std::string &t) { const Ev v = eval(c, t); range(c, v.value, -32768, 65535, "a 16-bit value"); o.push_back(static_cast<std::uint8_t>(v.value)); o.push_back(static_cast<std::uint8_t>(static_cast<std::uint32_t>(v.value) >> 8U)); };
   const auto mem_addr = [&](const std::string &t) { const Ev v = eval(c, t.substr(1, t.size() - 2)); range(c, v.value, 0, 65535, "an address"); return v.value; };
+  const auto direct = [&](const std::string &t, unsigned width) { if (const Ev v = eval(c, t.substr(1, t.size() - 2)); v.symbolic) sms_direct_access(c, v.value, width); };
   const struct { std::string_view name; std::uint8_t b0, b1; } kFixed[] = {{"nop", 0x00, 0}, {"halt", 0x76, 0}, {"di", 0xF3, 0}, {"ei", 0xFB, 0}, {"scf", 0x37, 0}, {"ccf", 0x3F, 0}, {"cpl", 0x2F, 0},
                                                                          {"rlca", 0x07, 0}, {"rrca", 0x0F, 0}, {"reti", 0xED, 0x4D}, {"retn", 0xED, 0x45}};
   for (const auto &f : kFixed) if (op == f.name) { need(0); o.push_back(f.b0); if (f.b1 != 0) o.push_back(f.b1); return o; }
@@ -636,10 +651,10 @@ std::vector<std::uint8_t> z80_encode(const Ctx &c, const Stmt &s, Insn &meta) {
     if (d == "a" && r == "(de)") { o.push_back(0x1A); return o; }
     if (d == "(bc)" && r == "a") { o.push_back(0x02); return o; }
     if (d == "(de)" && r == "a") { o.push_back(0x12); return o; }
-    if (d == "a" && is_mem(r)) { o.push_back(0x3A); imm16(r.substr(1, r.size() - 2)); return o; }
-    if (is_mem(d) && r == "a") { meta.writes.push_back({static_cast<std::uint64_t>(mem_addr(d)), 1}); o.push_back(0x32); imm16(d.substr(1, d.size() - 2)); return o; }
-    if (d == "hl" && is_mem(r)) { o.push_back(0x2A); imm16(r.substr(1, r.size() - 2)); return o; }
-    if (is_mem(d) && r == "hl") { meta.writes.push_back({static_cast<std::uint64_t>(mem_addr(d)), 2}); o.push_back(0x22); imm16(d.substr(1, d.size() - 2)); return o; }
+    if (d == "a" && is_mem(r)) { direct(r, 1); o.push_back(0x3A); imm16(r.substr(1, r.size() - 2)); return o; }
+    if (is_mem(d) && r == "a") { direct(d, 1); meta.writes.push_back({static_cast<std::uint64_t>(mem_addr(d)), 1}); o.push_back(0x32); imm16(d.substr(1, d.size() - 2)); return o; }
+    if (d == "hl" && is_mem(r)) { direct(r, 2); o.push_back(0x2A); imm16(r.substr(1, r.size() - 2)); return o; }
+    if (is_mem(d) && r == "hl") { direct(d, 2); meta.writes.push_back({static_cast<std::uint64_t>(mem_addr(d)), 2}); o.push_back(0x22); imm16(d.substr(1, d.size() - 2)); return o; }
     fail("E_GUEST_OPERAND", at(c.line) + "unsupported ld operands");
   }
   if (op == "inc" || op == "dec") {
@@ -879,7 +894,7 @@ void check_placement(const Manifest &m, Cpu cpu, const Revision &rev, const Asse
       if ((b.offset & 1) != 0) fail("E_GUEST_ALIGN", at(b.line) + "an M68K block starts at an even offset");
       if (end > 0x400000) fail("E_MAPPER_UNSUPPORTED", at(b.line) + "the block lies beyond the 4 MiB cartridge window; bank-switched mappers are not supported");
     } else if (m.platform == "master-system" && rev.mapper == "rom_only") {
-      if (b.address != b.offset || end > kSmsCodeLimit) fail("E_GUEST_ADDRESS", at(b.line) + "Z80 code on a rom_only Master System image is placed at its offset below 0xC000");
+      if (b.address != b.offset || end > kSmsRomOnly) fail("E_GUEST_ADDRESS", at(b.line) + "Z80 code on a rom_only Master System image is placed at its offset inside the 32 KiB cartridge (below 0x8000)");
     } else if (sms_banked(m, rev)) {   // the `sega` mapper: one 16 KiB bank per block, executed through a declared window; the first 1 KiB is invariant
       const std::string where = " (" + image_location(m.platform, b.offset) + ")";
       if (end > kSmsMaxImage) fail("E_MAPPER_UNSUPPORTED", at(b.line) + "the block lies beyond the largest supported Sega-mapper cartridge" + where);
@@ -923,9 +938,10 @@ void set_be32(std::vector<std::uint8_t> &b, std::size_t at_, std::uint32_t v) { 
 bool ssf_mapper(std::span<const std::uint8_t> image) { return image.size() >= 0x108 && std::equal(image.begin() + 0x100, image.begin() + 0x108, "SEGA SSF"); }
 
 // ------------------------------------------------------------------ the CPU owner's admission
-GuestListing listing_of(const Assembled &a, const std::string &revision) {
+GuestListing listing_of(const Assembled &a, const Revision &revision) {
   GuestListing out;
-  out.revision = revision;
+  out.revision = revision.label;
+  out.code_limit = static_cast<std::uint32_t>(revision.mapper == "rom_only" ? kSmsRomOnly : kSmsCodeLimit);
   for (const Free &f : a.frees) out.free_ranges.push_back({f.start, f.start + f.length});
   for (const OutBlock &b : a.blocks) {
     GuestBlock g;
@@ -940,7 +956,7 @@ GuestListing listing_of(const Assembled &a, const std::string &revision) {
   return out;
 }
 
-void admit_listing(const Manifest &m, const Assembled &a, const std::string &revision, GuestAdmitter admit) {
+void admit_listing(const Manifest &m, const Assembled &a, const Revision &revision, GuestAdmitter admit) {
   if (m.platform != "master-system") return;
   if (admit == nullptr) fail("E_GUEST_ADMISSION_UNAVAILABLE", "Master System guest code needs the Z80 admission of the SMS owner, which this caller does not provide");
   if (const auto r = admit(listing_of(a, revision))) fail(r->code, r->message);
@@ -1005,7 +1021,7 @@ std::optional<Rejection> check_guest_admission(const Manifest &m, const std::map
         edits = er.ranges;
       }
       check_placement(m, cpu, rev, a, edits);
-      admit_listing(m, a, rev.label, admit);
+      admit_listing(m, a, rev, admit);
     }
     return std::nullopt;
   } catch (const Fail &f) {
@@ -1082,7 +1098,7 @@ TargetImage build_target_image(const Manifest &m, const std::map<std::string, st
         edits = er.ranges;
       }
       check_placement(m, cpu, *rev, a, edits);
-      admit_listing(m, a, rev->label, admit);
+      admit_listing(m, a, *rev, admit);
       if (m.platform == "genesis" && (ssf_mapper(original) || original.size() > 0x400000)) fail("E_MAPPER_UNSUPPORTED", "the image uses a bank-switched cartridge mapper, which guest injection does not support");
       for (const Free &f : a.frees) {
         if (f.start + f.length > original.size()) fail("E_GUEST_RANGE", at(f.line) + "the free range lies beyond the end of the image");

@@ -22,7 +22,7 @@
 
 ## T002: injection and admission
 
-6. **Placement on `sega`** (`rom_only` is unchanged: offset = address below `0xC000`). A block lies inside one 16 KiB bank and does not cross the fixed 1 KiB boundary (`E_GUEST_BANK_BOUNDARY`). A block below `0x400` runs at
+6. **Placement on `sega`** (`rom_only`: offset = address, inside the 32 KiB cartridge, below `0x8000`). A block lies inside one 16 KiB bank and does not cross the fixed 1 KiB boundary (`E_GUEST_BANK_BOUNDARY`). A block below `0x400` runs at
    its offset. Any other block runs at an address of a mapper window below `0xC000`, at or above `0x400`, with the same position inside the bank (`at`; required above image offset `0xBFFF`; else `E_GUEST_ADDRESS`);
    beyond 512 KiB is `E_MAPPER_UNSUPPORTED`.
 7. **References resolve only where the mapping is guaranteed**: to the fixed first 1 KiB, or, from a banked block, to the same bank through the same window, at or above `0x400` (below it window 0 shows the
@@ -30,13 +30,18 @@
    image offset and is translated into the caller's window; work RAM addresses are written as numbers. Direct absolute stores to the mapper registers are refused (they lie outside the writable RAM window),
    and no cross-bank reference form exists; stores through registers can still reach them (Limits). On Master System a label used as a control target must be followed by an instruction of its block
    (`E_GUEST_BRANCH_TARGET`).
+   **Direct accesses** through a label or `@symbol` (`ld a,(x)`, `ld (x),a`, `ld hl,(x)`, `ld (x),hl`) must lie wholly, operand width included, inside one such region: the fixed first 1 KiB or the 16 KiB window
+   of the first byte (`E_GUEST_BANK_REFERENCE`); on `rom_only`, the 32 KiB cartridge or work RAM `0xC000-0xFFFF`, where a symbol may name a variable (`E_GUEST_ADDRESS`). Numeric addresses are the author's explicit
+   CPU addresses and are not judged by this rule; register-indirect accesses are not tracked.
 8. **The CPU owner admits the bytes.** `libs/media` may not depend on a CPU library, so it emits a neutral `GuestListing` (bytes and instruction boundaries) and takes a `GuestAdmitter` from the caller; the SMS owner
    provides `admit_z80_guest` (machine library, over the Z80 library's decoder and effect projection). A Master System `guest-asm` payload **without** an admitter is refused (`E_GUEST_ADMISSION_UNAVAILABLE`), so a
    caller that forgets it cannot skip the check. `mod check|pack|build|inspect|apply|bps|verify-bps|install|variant` and the build route pass it. `E_GUEST_NOT_ADMITTED` when: the decoder does not read exactly one
    instruction at an assembled boundary; a successor is not statically known (`jp (hl)`); a form has neither a projected effect nor a place in the short list of straight-line forms the projection omits
    (`push`, `pop`, `inc/dec (hl)`, `add hl,rr`, `ex de,hl`, `rlca`, `rrca`, `cpl`, `scf`, `ccf`; plus `call cc`, whose target is immediate); execution can fall through into anything but the next admitted
    instruction (including `even` padding and the end of the block); a control target lands in injected bytes other than the start of an instruction at its assembled address (below `0x400` always the fixed
-   bank 0), in the rest of a declared free range, or at or above `0xC000`. Other targets are existing cartridge code, nameable only through a verified `@symbol`; its content is the author's assertion.
+   bank 0), in the rest of a declared free range, or outside the declared cartridge (at or above `0x8000` on `rom_only`, `0xC000` on `sega`; on `sega` a translated target is in the fixed area or the running
+   block's own bank, which exists because the block lies inside the image). Other targets are existing cartridge code, nameable only through a verified `@symbol`; its content is the author's assertion and is
+   not analysed.
 9. The admitted image goes through the unchanged generated-native SMS Z80 producer. Nothing decodes, patches or interprets at run time. Genesis M68K and Genesis Z80 paths are unchanged.
 
 **Limits.** Admission covers the control transfers an instruction itself names. Stores through registers (`ld (hl),a`, stack operations) are not bounded statically (as in ADR 0293), so a routine can reach

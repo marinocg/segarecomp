@@ -108,6 +108,18 @@ for n, (asset, content, says) in enumerate([
     r = adapter(d, rom)
     assert r.returncode == 1 and says in r.stderr and (d / "edits" / "main.edits").read_text() == "untouched\n", (asset, says, r.returncode, r.stderr)
 
+# one source per format: a second declaration is refused, never silently preferred over the first
+d = copy_project("duplicate-format")
+write(d / "assets" / "text2.txt", "SECOND\n")
+write(d / "mod.toml", (d / "mod.toml").read_text() + '\n[[source]]\nkind = "asset"\npath = "assets/text2.txt"\nasset_class = "data"\nformat = "demo-text"\n')
+before = (d / "edits" / "main.edits").read_bytes()
+r = adapter(d, rom)
+assert r.returncode == 1 and "demo-text" in r.stderr and "more than one" in r.stderr and (d / "edits" / "main.edits").read_bytes() == before, (r.returncode, r.stderr)
+d = copy_project("regenerated")   # the valid example regenerates exactly the committed bytes
+(d / "edits" / "main.edits").unlink()
+r = adapter(d, rom)
+assert r.returncode == 0 and (d / "edits" / "main.edits").read_bytes() == (example / "edits" / "main.edits").read_bytes().replace(b"\r\n", b"\n"), r.stderr
+
 d = copy_project("stale")
 write(d / "assets" / "text.txt", "CHANGED\n")
 r = adapter(d, rom, "--check")

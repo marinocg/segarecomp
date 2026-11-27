@@ -136,6 +136,19 @@ for name, rom, extra, diagnostic in [("mapper-conflict", vanilla, data + ("--map
                                      ("wrong-identity", vanilla, ("--data-package", package, "--data-identity", "0" * 64), "DATA_IDENTITY_CHANGED")]:
     r, out, status = build(name, rom, *extra)
     assert r.returncode == 1 and status.get("diagnostic") == diagnostic and not (out / "generated").exists(), (name, r.returncode, status)
+# a statically impossible rom_only target builds nothing: no generated C, no executable, no derived image
+raw = b"free * 0x300 0x40 0xff\norg * 0x300\n  jp @outside\n"
+entry = payload("guest-asm", "asm/main.asm", raw, cpu="z80")
+small = builder.build_rom(0x8000, {0: 0x76}, {})
+small_rom = write(tmp / "small.sms", small)
+outside = base_manifest("master-system", [(entry, ("asm/main.asm", raw))], head={"license": "CC0-1.0"})
+outside["source"]["revisions"][0].update(sha256=sha(small), mapper="rom_only")
+outside["symbols"] = [{"name": "outside", "revision": "rev-a", "address": 0x9000, "provenance": "verified"}]
+ordered = {k: outside[k] for k in ("format", "schema_version", "id", "version", "name", "platform", "license", "source", "symbols", "payloads")}
+outside_pkg = write(tmp / "outside.segapatch", build_package(ordered, [(entry, ("asm/main.asm", raw))]))
+r, out, status = build("outside", small_rom, "--data-package", outside_pkg, "--data-identity", sha(json.dumps(ordered, separators=(",", ":")).encode("ascii")))
+assert r.returncode == 1 and status.get("diagnostic") == "E_GUEST_NOT_ADMITTED" and not any((out / n).exists() for n in ("generated", "input", "game", "game.exe")), (r.returncode, status)
+
 # a hand-made package whose routine the Z80 owner does not admit (the CLI would not pack it) builds nothing either
 raw = b"free * 0x1c100 0x100 0xff\norg * 0x1c100 at 0x8100\n  jp (hl)\n"
 entry = payload("guest-asm", "asm/main.asm", raw, cpu="z80")

@@ -339,6 +339,7 @@ struct GuestListing {
   std::string revision;
   std::vector<GuestBlock> blocks;
   std::vector<Range> free_ranges;         // image offsets of the revision's declared free ranges: padding, never existing cartridge code
+  std::uint32_t code_limit = 0;           // the first CPU address that can never be cartridge code under the declared mapper (rom_only 0x8000, sega 0xC000); 0 admits no control target
 };
 using GuestAdmitter = std::optional<Rejection> (*)(const GuestListing &);
 // Assembles the Master System `guest-asm` payload for EVERY declared revision and admits each listing. Nothing for another platform or a package without guest code. (Pure; `mod check|pack|build`.)

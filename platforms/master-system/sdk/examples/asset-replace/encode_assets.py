@@ -84,7 +84,12 @@ def edits_for(project, rom):
     revision = next((r["label"] for r in mod["target"]["revision"] if r["sha256"] == digest), None)
     if revision is None:
         raise AssetError("the image is not a revision this mod declares")
-    declared = {s["format"]: s["path"] for s in mod["source"] if s["kind"] == "asset" and s.get("asset_class") == "data"}
+    declared = {}
+    for source in mod["source"]:
+        if source["kind"] == "asset" and source.get("asset_class") == "data":
+            if source["format"] in declared:   # this adapter's format has one region per asset format; never let a later declaration silently win
+                raise AssetError(f"more than one asset declares the format {source['format']!r}; this adapter takes one source per format")
+            declared[source["format"]] = source["path"]
     unknown = sorted(set(declared) - {r["format"] for r in fmt["regions"]})
     if unknown:
         raise AssetError(f"no encoder for the declared asset format(s) {unknown}")
