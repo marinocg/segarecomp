@@ -46,7 +46,7 @@ runs the mod's own `load` (the only fallible step) **before** any guest state is
 rejected (damaged body or refusing mod; the guest is unchanged), unavailable (a guest-affecting mod without `state.mod` never produces a state). A Vanilla and a modded program normally refuse each other
 earlier, because the variant identity already differs. Rewind uses the same codec.
 
-**Restore after a mod's own failure** (inherited from ADR 0299, and the one place Luau and C11 differ). A Luau VM fault is sticky. After a **Luau** mod has faulted, loading or rewinding to a state from
+**Restore after a mod's own failure** (inherited from ADR 0299, and the one place Luau and C11 differ). This applies to a mod with `state.mod` (one without it has no blob to load: its restore is accepted, while a faulted Luau VM itself stays faulted). A Luau VM fault is sticky. After such a **Luau** mod has faulted, loading or rewinding to a state from
 before the fault is refused (the mod cannot take its data back) and it stays disabled; a **C11** mod disabled by a scheduler-detected fault accepts that state and is enabled again. Likewise, a healthy Luau
 mod whose `load()` itself fails latches its VM, so besides refusing the restore the scheduler disables it with cause `state`. The guest is unchanged by every refusal. The Luau trust policy's "VM is rebuilt on
 restore" is not implemented on either platform.
