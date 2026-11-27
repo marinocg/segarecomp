@@ -198,10 +198,14 @@ struct Package {
 // Validates the archive, the manifest and every payload against schema 3. Reserved kinds/sources are parsed and rejected.
 [[nodiscard]] Package read_package(std::span<const std::uint8_t> zip);
 [[nodiscard]] Package read_package_file(const std::filesystem::path &path);
-// SEG-145-T008: the audio API serves a program only through mappings the package declared and the runtime can serve. For a manifest that declares audio.command.send / audio.event.read: the adapter check of every
-// mapping, command mappings named "sfx" or "music" in m68k.work_ram, event mappings in m68k.work_ram, at least one usable mapping for each REQUIRED audio capability, and at most 128 (mapping, value) rows.
-// Classes: E_AUDIO_TARGET (and the adapter's own). A manifest without audio capabilities is never refused. (Pure.)
+// SEG-145-T008: the audio API serves a program only through mappings the package declared and the runtime can serve. A mapping is SERVABLE when it lies in m68k.work_ram and is an event mapping, or a command mapping
+// named "sfx" or "music". For a manifest that declares audio.command.send / audio.event.read this checks the adapter rules of every mapping and the 128 (mapping, value) row limit of the servable ones; a REQUIRED
+// audio capability additionally refuses an unservable mapping of its kind and needs at least one servable one. An OPTIONAL audio capability is never refused here: unservable mappings are ignored and, without a
+// servable one, the capability is not granted (audio_capability_servable). Classes: E_AUDIO_TARGET (and the adapter's own). A manifest without audio capabilities is never refused. (Pure.)
 [[nodiscard]] std::optional<Rejection> check_audio_interface(const Manifest &manifest);
+[[nodiscard]] bool audio_mapping_servable(const Mapping &mapping);
+// False only for audio.command.send / audio.event.read without a servable mapping of its kind; true for every other capability name. The ONE rule the grant resolvers use (luau_config.cpp).
+[[nodiscard]] bool audio_capability_servable(const Manifest &manifest, std::string_view capability);
 inline constexpr std::size_t kMaxAudioRows = 128;   // GENESIS_MOD_AUDIO_ENTRIES_MAX
 // The command mapping `id` ("sfx"/"music") or event mapping `id` of the manifest, or null. `kind` is "command" | "event".
 [[nodiscard]] const Mapping *find_audio_mapping(const Manifest &manifest, std::string_view kind, std::string_view id);

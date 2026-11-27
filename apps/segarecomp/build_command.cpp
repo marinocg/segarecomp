@@ -1151,7 +1151,7 @@ void write_audio_rows(Options &options, std::ostringstream &c, const segarecomp:
   std::size_t count = 0;
   for (const segarecomp::mod::Mapping &mapping : manifest.mappings) {
     const bool command = mapping.kind == "command" && has("audio.command.send"), event = mapping.kind == "event" && has("audio.event.read");
-    if (!command && !event) continue;
+    if ((!command && !event) || !segarecomp::mod::audio_mapping_servable(mapping)) continue;   // a row carries no space: an unservable mapping must never reach the runtime
     for (const auto &value : mapping.values)
       ++count, rows << "\n  {\"" << mapping.id << "\", \"" << value.first << "\", " << (command ? 1 : 2) << "UL, " << mapping.offset << "UL, " << mapping.width << "UL, " << value.second << "UL},";
   }

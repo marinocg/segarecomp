@@ -73,6 +73,18 @@ std::optional<mod::Rejection> scheduled_support(const mod::Package &package) {
   return std::nullopt;
 }
 
+namespace {
+// The scheduled grant set: what the package declared and the platform supports, restricted to what this execution path serves. An audio capability without a servable mapping is not granted (a REQUIRED one was
+// already refused by check_audio_interface), so the artifact, the build status, the VM bindings, the native capability bits, the scheduler grant and MOD_LOADED all come from this one list (ADR 0323).
+HostConfig restricted_config(const mod::Manifest &manifest, const std::vector<std::string> &served) {
+  HostConfig h = host_config_for(manifest);
+  h.capabilities.erase(std::remove_if(h.capabilities.begin(), h.capabilities.end(),
+                                      [&](const std::string &c) { return std::find(served.begin(), served.end(), c) == served.end() || !mod::audio_capability_servable(manifest, c); }),
+                       h.capabilities.end());
+  return h;
+}
+}  // namespace
+
 std::vector<std::string> native_scheduled_capabilities();
 
 std::optional<mod::Rejection> native_scheduled_support(const mod::Package &package) {
@@ -107,19 +119,9 @@ std::vector<std::string> native_scheduled_capabilities() {
   return caps;
 }
 
-HostConfig native_scheduled_host_config(const mod::Manifest &manifest) {
-  HostConfig h = host_config_for(manifest);
-  const std::vector<std::string> live = native_scheduled_capabilities();
-  h.capabilities.erase(std::remove_if(h.capabilities.begin(), h.capabilities.end(), [&](const std::string &c) { return std::find(live.begin(), live.end(), c) == live.end(); }), h.capabilities.end());
-  return h;
-}
+HostConfig native_scheduled_host_config(const mod::Manifest &manifest) { return restricted_config(manifest, native_scheduled_capabilities()); }
 
-HostConfig scheduled_host_config(const mod::Manifest &manifest) {
-  HostConfig h = host_config_for(manifest);
-  const std::vector<std::string> live = scheduled_capabilities();
-  h.capabilities.erase(std::remove_if(h.capabilities.begin(), h.capabilities.end(), [&](const std::string &c) { return std::find(live.begin(), live.end(), c) == live.end(); }), h.capabilities.end());
-  return h;
-}
+HostConfig scheduled_host_config(const mod::Manifest &manifest) { return restricted_config(manifest, scheduled_capabilities()); }
 
 HostConfig live_host_config(const mod::Manifest &manifest) {
   HostConfig h = host_config_for(manifest);

@@ -892,23 +892,34 @@ const Mapping *find_audio_mapping(const Manifest &m, std::string_view kind, std:
   return nullptr;
 }
 
+bool audio_mapping_servable(const Mapping &mp) {
+  return mp.space == "m68k.work_ram" && (mp.kind == "event" || (mp.kind == "command" && (mp.id == "sfx" || mp.id == "music")));
+}
+
+bool audio_capability_servable(const Manifest &m, std::string_view capability) {
+  const std::string_view kind = capability == "audio.command.send" ? "command" : capability == "audio.event.read" ? "event" : "";
+  return kind.empty() || std::any_of(m.mappings.begin(), m.mappings.end(), [&](const Mapping &mp) { return mp.kind == kind && audio_mapping_servable(mp); });
+}
+
 std::optional<Rejection> check_audio_interface(const Manifest &m) {
   const auto declares = [](const std::vector<std::string> &list, std::string_view name) { return std::find(list.begin(), list.end(), name) != list.end(); };
   const bool send_required = declares(m.capabilities, "audio.command.send"), read_required = declares(m.capabilities, "audio.event.read");
   const bool send = send_required || declares(m.capabilities_optional, "audio.command.send"), read = read_required || declares(m.capabilities_optional, "audio.event.read");
   if (!send && !read) return std::nullopt;
   if (auto r = check_adapter(m)) return r;
-  std::size_t commands = 0, events = 0, rows = 0;
+  std::size_t rows = 0;
   for (const Mapping &mp : m.mappings) {
     if (mp.kind != "command" && mp.kind != "event") continue;
-    if (mp.space != "m68k.work_ram") return Rejection{"E_AUDIO_TARGET", "the audio API serves mappings in m68k.work_ram only (mapping \"" + mp.id + "\" names " + mp.space + ")"};
-    if (mp.kind == "command" && mp.id != "sfx" && mp.id != "music") return Rejection{"E_AUDIO_TARGET", "a command mapping of the audio API has the id \"sfx\" or \"music\", not \"" + mp.id + "\""};
-    (mp.kind == "command" ? commands : events) += 1;
-    rows += mp.values.size();
+    if (audio_mapping_servable(mp)) {
+      rows += mp.values.size();
+    } else if (mp.kind == "command" ? send_required : read_required) {   // an unservable mapping of an OPTIONAL capability is ignored, never emitted
+      if (mp.space != "m68k.work_ram") return Rejection{"E_AUDIO_TARGET", "the audio API serves mappings in m68k.work_ram only (mapping \"" + mp.id + "\" names " + mp.space + ")"};
+      return Rejection{"E_AUDIO_TARGET", "a command mapping of the audio API has the id \"sfx\" or \"music\", not \"" + mp.id + "\""};
+    }
   }
   if (rows > kMaxAudioRows) return Rejection{"E_AUDIO_TARGET", "the audio mappings declare more than 128 values in total"};
-  if (send_required && commands == 0) return Rejection{"E_AUDIO_TARGET", "audio.command.send is required but no command mapping \"sfx\" or \"music\" is declared: there is no verified audio interface"};
-  if (read_required && events == 0) return Rejection{"E_AUDIO_TARGET", "audio.event.read is required but no event mapping is declared: there is no verified audio interface"};
+  if (send_required && !audio_capability_servable(m, "audio.command.send")) return Rejection{"E_AUDIO_TARGET", "audio.command.send is required but no command mapping \"sfx\" or \"music\" is declared: there is no verified audio interface"};
+  if (read_required && !audio_capability_servable(m, "audio.event.read")) return Rejection{"E_AUDIO_TARGET", "audio.event.read is required but no event mapping is declared: there is no verified audio interface"};
   return std::nullopt;
 }
 
