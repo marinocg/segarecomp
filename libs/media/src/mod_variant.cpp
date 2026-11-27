@@ -73,11 +73,18 @@ std::vector<VariantComponent> parse_components(std::string_view text) {
   return out;
 }
 
-EffectiveImage effective_image(const Package &package, std::span<const std::uint8_t> original) {
+EffectiveImage effective_image(const Package &package, std::span<const std::uint8_t> original, GuestAdmitter admit) {
   EffectiveImage e;
   e.original_sha256 = sha256_hex(original);
   const bool declared = std::any_of(package.manifest.revisions.begin(), package.manifest.revisions.end(), [&](const Revision &r) { return r.sha256 == e.original_sha256; });
   if (!declared) { e.rejection = {"E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions"}; return e; }
+  const auto cartridge = [&](std::size_t size) -> std::optional<Rejection> {   // SEG-147-T001: the declared mapper must fit the original and every image derived from it
+    if (package.manifest.platform != "master-system") return std::nullopt;
+    for (const Revision &r : package.manifest.revisions)
+      if (r.sha256 == e.original_sha256) return check_sms_cartridge(r.mapper, size);
+    return std::nullopt;
+  };
+  if (const auto r = cartridge(original.size())) { e.rejection = *r; return e; }
   e.effective_sha256 = e.original_sha256;
   e.image.assign(original.begin(), original.end());
   if (std::count_if(package.manifest.payloads.begin(), package.manifest.payloads.end(), [](const Payload &p) { return p.kind == "rom-edit-set"; }) > 1) {   // the reader refuses this; never apply a subset
@@ -85,7 +92,7 @@ EffectiveImage effective_image(const Package &package, std::span<const std::uint
     return e;
   }
   if (has_target_edits(package.manifest)) {   // typed edits, injected guest code and header repair (SEG-136, ADR 0293): the verified target image, by digest
-    const TargetImage t = build_target_image(package.manifest, package.files, original);
+    const TargetImage t = build_target_image(package.manifest, package.files, original, admit);
     if (!t.ok) { e.rejection = t.rejection; return e; }
     e.effective_sha256 = sha256_hex(t.image);
     e.image = t.image;
@@ -96,6 +103,7 @@ EffectiveImage effective_image(const Package &package, std::span<const std::uint
     if (it == package.files.end()) { e.rejection = {"E_IMAGE_MISMATCH", "the bps-image payload is missing"}; return e; }
     const patch::BpsResult r = patch::apply_bps(it->second, original);
     if (!r.ok || sha256_hex(r.output) != p.target_sha256) { e.rejection = {"E_IMAGE_MISMATCH", "the bps-image payload does not produce its declared target"}; return e; }
+    if (const auto bad = cartridge(r.output.size())) { e.rejection = *bad; e.image.clear(); return e; }
     e.effective_sha256 = p.target_sha256;
     e.image = r.output;
   }

@@ -1,0 +1,39 @@
+{
+  "comment": "The invented data format of the synthetic asset-demo cartridge (fixture_rom.py).",
+  "charset": " ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  "regions": [
+    {
+      "name": "palette",
+      "format": "demo-palette",
+      "offset": "0x1000",
+      "size": 16,
+      "entries": 16,
+      "original_sha256": "cf8aaebcf020ad957f2730acbe50fedfd6ac4bba6a7f170741630cbe687cfa1d"
+    },
+    {
+      "name": "tiles",
+      "format": "demo-tiles",
+      "offset": "0x1100",
+      "size": 1280,
+      "entries": 40,
+      "original_sha256": "67e0505d1154332c493aa2d0498ebb781e797a7f96eaf58a22abe92165a773d1"
+    },
+    {
+      "name": "room",
+      "format": "demo-room",
+      "offset": "0x1800",
+      "size": 32,
+      "rows": 4,
+      "columns": 8,
+      "original_sha256": "47f255b666a18fc16bfd67fa30e0f1c487129489a681a8c8d51f3d25f40c7a4f"
+    },
+    {
+      "name": "text",
+      "format": "demo-text",
+      "offset": "0x1900",
+      "size": 16,
+      "length": 16,
+      "original_sha256": "46a323b9ccb475543d9f01a2fcfc24e307c766fd78b07d34bb8fe2ad43d44099"
+    }
+  ]
+}

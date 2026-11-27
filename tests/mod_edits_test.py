@@ -115,8 +115,10 @@ sms = (f"rev-a u16 0x20 {u(struct.unpack('<H', IMG_A[0x20:0x22])[0], 2)} 0x1234\
        f"rev-a u32 0x30 {u(struct.unpack('<I', IMG_A[0x30:0x34])[0], 4)} 0xcafef00d\n"
        f"rev-a u16be 0x38 {u(struct.unpack('>H', IMG_A[0x38:0x3A])[0], 2)} 0xbeef\n")
 d = project(sms, platform="master-system")
-rc, doc, out = apply(d, IMG_A_PATH, "sms.bin")
-w2 = bytearray(IMG_A)
+IMG_S = IMG_A + bytes(0x8000 - len(IMG_A))   # a Master System cartridge fits its declared mapper (SEG-147-T001): 32 KiB
+(d / "mod.toml").write_text((d / "mod.toml").read_text().replace(SHA_A, sha(IMG_S)))
+rc, doc, out = apply(d, write(tmp / "a32.bin", IMG_S), "sms.bin")
+w2 = bytearray(IMG_S)
 w2[0x20:0x22] = struct.pack("<H", 0x1234); w2[0x30:0x34] = struct.pack("<I", 0xCAFEF00D); w2[0x38:0x3A] = struct.pack(">H", 0xBEEF)
 cli.check(rc == 0 and out.read_bytes() == bytes(w2), f"master-system default is little-endian: {doc}")
 # the same text means different bytes on the two platforms (and so a wrong default asserts wrongly)

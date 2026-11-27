@@ -6,6 +6,7 @@
 #include "process_run.hpp"
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/luau_host.hpp"
+#include "segarecomp/machine/master_system/z80_guest_admission.hpp"
 #include "segarecomp/mod.hpp"
 #include "segarecomp/patch.hpp"
 #include "segarecomp/sha256.hpp"
@@ -35,6 +36,9 @@ std::string esc(const std::string &s) {
   }
   return o;
 }
+
+// SEG-147-T002 (ADR 0324): Master System guest code enters an image only through the Z80 owner's static admission.
+constexpr mod::GuestAdmitter kAdmit = &segarecomp::machine::master_system::admit_z80_guest;
 
 int refuse(const mod::Rejection &r) {
   std::cout << "{\"ok\":false,\"class\":\"" << esc(r.code) << "\",\"error\":\"" << esc(r.message) << "\"}\n";
@@ -269,7 +273,7 @@ int install(const fs::path &package_path, const fs::path &rom, const fs::path &l
   if (!p.ok) return refuse(p.rejection);
   std::vector<std::uint8_t> image, raw;
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
-  const mod::EffectiveImage e = mod::effective_image(p, image);
+  const mod::EffectiveImage e = mod::effective_image(p, image, kAdmit);
   if (!e.ok) return refuse(e.rejection);
   if (!approve.empty() && approve != p.identity) return refuse({"E_APPROVAL_MISMATCH", "the approval names another package identity"});
   if (!read_all(package_path, mod::kMaxArchiveBytes, raw)) return refuse({"E_ARCHIVE_ENTRY", "the package cannot be read"});
@@ -312,7 +316,7 @@ std::optional<mod::Rejection> load_package(const fs::path &target, mod::Package 
     p = mod::read_package_file(target);
     if (!p.ok) return p.rejection;
   }
-  return std::nullopt;
+  return mod::check_guest_admission(p.manifest, p.files, kAdmit);
 }
 
 std::string warnings_json(const std::vector<std::string> &w) {
@@ -332,7 +336,7 @@ int apply_edits(const fs::path &target, const fs::path &rom, const fs::path &out
   const std::string original = sha256_hex(image);
   if (std::none_of(p.manifest.revisions.begin(), p.manifest.revisions.end(), [&](const mod::Revision &r) { return r.sha256 == original; })) return refuse({"E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions"});
   if (!mod::has_target_edits(p.manifest)) return refuse({"E_FIELD_MISSING", "the package has no rom-edit-set or guest-asm payload"});
-  const mod::TargetImage t = mod::build_target_image(p.manifest, p.files, image);
+  const mod::TargetImage t = mod::build_target_image(p.manifest, p.files, image, kAdmit);
   if (!t.ok) return refuse(t.rejection);
   if (!write_atomic(out, t.image)) return refuse({"E_ARCHIVE_ENTRY", "the edited image cannot be written"});
   std::cout << "{\"ok\":true,\"revision\":\"" << esc(t.revision) << "\",\"edits_applied\":" << t.edits_applied << ",\"blocks_injected\":" << t.blocks_injected << ",\"injected_bytes\":" << t.injected_bytes
@@ -349,7 +353,7 @@ int build_bps_file(const fs::path &target, const fs::path &rom, const fs::path &
   std::vector<std::uint8_t> image;
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
   if (!mod::has_target_edits(p.manifest)) return refuse({"E_FIELD_MISSING", "the package has no rom-edit-set or guest-asm payload"});
-  const mod::TargetBps b = mod::build_target_bps(p.manifest, p.files, image);
+  const mod::TargetBps b = mod::build_target_bps(p.manifest, p.files, image, kAdmit);
   if (!b.ok) return refuse(b.rejection);
   if (!write_atomic(out, b.patch)) return refuse({"E_ARCHIVE_ENTRY", "the BPS cannot be written"});
   std::cout << "{\"ok\":true,\"revision\":\"" << esc(b.revision) << "\",\"source_sha256\":\"" << b.source_sha256 << "\",\"target_sha256\":\"" << b.target_sha256 << "\",\"bps_sha256\":\"" << b.patch_sha256
@@ -364,7 +368,7 @@ int verify_bps_file(const fs::path &target, const fs::path &rom, const fs::path 
   std::vector<std::uint8_t> image, patch_bytes;
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
   if (!read_all(bps, patch::kMaxPatchBytes, patch_bytes)) return refuse({"E_IMAGE_MISMATCH", "the BPS cannot be read"});
-  const mod::TargetImage t = mod::build_target_image(p.manifest, p.files, image);
+  const mod::TargetImage t = mod::build_target_image(p.manifest, p.files, image, kAdmit);
   if (!t.ok) return refuse(t.rejection);
   const patch::BpsResult applied = patch::apply_bps(patch_bytes, image);
   if (!applied.ok) return refuse({"E_BPS_INVALID", applied.error});
@@ -413,7 +417,7 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
   if (native && slurp(library / "mods" / (identity + ".approved")) != identity + "\n") return refuse({"E_NOT_APPROVED", "a package with native code needs the approval of its exact identity"});
   std::vector<std::uint8_t> image;
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
-  const mod::EffectiveImage e = mod::effective_image(p, image);
+  const mod::EffectiveImage e = mod::effective_image(p, image, kAdmit);
   if (!e.ok) return refuse(e.rejection);
   std::vector<std::uint8_t> installed_bytes;
   if (!read_all(installed, mod::kMaxArchiveBytes, installed_bytes)) return refuse({"E_ARCHIVE_ENTRY", "the installed package cannot be read"});
@@ -518,7 +522,7 @@ int run_session(const fs::path &target, const fs::path &rom, std::uint64_t frame
   if (const auto r = load_package(target, p)) return refuse(*r);
   std::vector<std::uint8_t> image;
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the image cannot be read"});
-  const mod::EffectiveImage e = mod::effective_image(p, image);
+  const mod::EffectiveImage e = mod::effective_image(p, image, kAdmit);
   if (!e.ok) return refuse(e.rejection);
   if (mod::trust_class(p.manifest) != "luau") return refuse({"E_TRUST_CLASS", "a fixture session runs Luau-only packages"});
   const std::vector<luau::AnalysisIssue> issues = luau::analyze_mod(p);
@@ -654,10 +658,13 @@ int segarecomp_mod_command(int argc, char **argv) {
       if (!c.project.ok) return refuse(c.rejection);
       const mod::Package &p = c.reread;
       if (!p.ok) return refuse(c.rejection);
-      std::cout << "{\"ok\":true,\"checked\":" << (c.ok ? "true" : "false") << ",";
-      if (!c.ok) std::cout << "\"class\":\"" << esc(c.rejection.code) << "\",\"error\":\"" << esc(c.rejection.message) << "\",";
+      std::optional<mod::Rejection> bad;
+      if (!c.ok) bad = c.rejection;
+      else bad = mod::check_guest_admission(p.manifest, p.files, kAdmit);
+      std::cout << "{\"ok\":true,\"checked\":" << (bad ? "false" : "true") << ",";
+      if (bad) std::cout << "\"class\":\"" << esc(bad->code) << "\",\"error\":\"" << esc(bad->message) << "\",";
       std::cout << package_json(p.manifest, p.identity, p.content_digest) << ",\"adapter\":" << adapter_json(*mod::find_adapter(p.manifest.platform)) << "}\n";
-      return c.ok ? 0 : 1;
+      return bad ? 1 : 0;
     }
     const mod::Package p = mod::read_package_file(target);
     if (!p.ok) return refuse(p.rejection);
@@ -730,6 +737,7 @@ int segarecomp_mod_command(int argc, char **argv) {
     const mod::Checked c = mod::check_project(target);
     if (!c.ok) return refuse(c.rejection);
     const mod::Manifest &m = c.reread.manifest;
+    if (const auto r = mod::check_guest_admission(m, c.reread.files, kAdmit)) return refuse(*r);
     if (c.package.size() > mod::kMaxArchiveBytes) return refuse({"E_ARCHIVE_SIZE", "the package would exceed the archive limit"});
     bool native = false;
     for (const mod::Payload &p : m.payloads) native = native || p.kind == "native-c11";
@@ -743,7 +751,7 @@ int segarecomp_mod_command(int argc, char **argv) {
       for (const fs::path &r : roms) {
         std::vector<std::uint8_t> image;
         if (!read_all(r, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "a --rom image cannot be read"});
-        const mod::TargetBps b = mod::build_target_bps(m, c.reread.files, image);
+        const mod::TargetBps b = mod::build_target_bps(m, c.reread.files, image, kAdmit);
         if (!b.ok) return refuse(b.rejection);
         verified += std::string(verified.size() > 1 ? "," : "") + "{\"revision\":\"" + esc(b.revision) + "\",\"source_sha256\":\"" + b.source_sha256 + "\",\"target_sha256\":\"" + b.target_sha256 +
                     "\",\"bps_sha256\":\"" + b.patch_sha256 + "\",\"warnings\":" + warnings_json(b.target.warnings) + "}";

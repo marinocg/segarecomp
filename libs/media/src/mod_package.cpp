@@ -508,8 +508,9 @@ Manifest parse_manifest(const Value &root) {
 
   if (root.find("header_repair") != nullptr) {   // ADR 0293: explicit header-repair declaration
     m.header_repair = str(root, "header_repair");
-    if (m.header_repair != "genesis-checksum" && m.header_repair != "none") fail("E_FIELD_VALUE", "header_repair must be genesis-checksum or none");
-    if (m.header_repair == "genesis-checksum" && m.platform != "genesis") fail("E_HEADER_UNSUPPORTED", "header repair exists only for the Genesis header");
+    if (m.header_repair != "genesis-checksum" && m.header_repair != "sms-checksum" && m.header_repair != "none") fail("E_FIELD_VALUE", "header_repair must be genesis-checksum, sms-checksum or none");
+    if (m.header_repair == "genesis-checksum" && m.platform != "genesis") fail("E_HEADER_UNSUPPORTED", "genesis-checksum exists only for the Genesis header");
+    if (m.header_repair == "sms-checksum" && m.platform != "master-system") fail("E_HEADER_UNSUPPORTED", "sms-checksum exists only for the Master System header");
   }
 
   if (auto r = check_memory(m)) fail(r->code, r->message);   // ADR 0300: space, bounds, revision, capability backing and canonical order

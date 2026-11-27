@@ -51,7 +51,7 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | `[capabilities]` | `required`, `optional` (names from `mod inspect --json`) |
 | `[abi]` | `native = 2` (required with native sources) |
 | `[state]`, `[limits]`, `[presentation]` | `schema`; `luau_memory_bytes`, `luau_budget_units`; `widescreen`, `side_style` |
-| `[build]` | `header_repair` = `genesis-checksum` \| `none` (ADR 0293; absent = repair only a verifying original that the build changed) |
+| `[build]` | `header_repair` = `genesis-checksum` (Genesis) \| `sms-checksum` (Master System) \| `none` (ADR 0293, 0324; absent = repair only a verifying original that the build changed) |
 | `[geometry]`, `[[scene]]` | `aspect_max` (and optional `aspect_min`, default `"4:3"`): the aspect range the package claims, `N:M` inside 4:3 to 32:9; one `[[scene]]` per named scene with `id` (token) and `components` (`actors`, `hud`, `scenery`). A scene needs `aspect_max`. A claim the viewer checks per frame, never a grant; part of the package identity (ADR 0302). `scenes = []` alone stays accepted and claims nothing |
 | `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`, `guest-asm`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
 | `[[memory]]` | `revision` (a declared label; absent = every revision), `space` (`m68k.work_ram`), `offset`, `length` (decimal), `access` (`read`, `write` or `read-write`, backed by the matching `memory.*` capability). The ONLY guest memory a scheduled mod may touch; part of the package identity ([gameplay example](gameplay-example.md), ADR 0300) |
@@ -101,7 +101,7 @@ entry:
   rts
 ```
 
-The emitted bytes are validated before an image exists: privileged/system instructions, `trap`, port I/O, `halt`, interrupt control, non-label branch targets, out-of-range branches and absolute stores outside RAM are refused with `E_GUEST_*` classes; overlapping blocks, free ranges and edits are `E_GUEST_COLLISION` (adjacent is fine); bank-switched mappers are `E_MAPPER_UNSUPPORTED`. For Genesis the header checksum is repaired per the `[build]` declaration.
+The emitted bytes are validated before an image exists: privileged/system instructions, `trap`, port I/O, `halt`, interrupt control, non-label branch targets, out-of-range branches and absolute stores outside RAM are refused with `E_GUEST_*` classes; overlapping blocks, free ranges and edits are `E_GUEST_COLLISION` (adjacent is fine); bank-switched Genesis mappers are `E_MAPPER_UNSUPPORTED`. The header checksum is repaired per the `[build]` declaration (`genesis-checksum` or, on Master System, `sms-checksum`; `none` opts out).
 
 ```sh
 segarecomp mod apply <dir|package> --rom <original> --out <target>        # edits + injected code + header repair for that revision
@@ -110,6 +110,31 @@ segarecomp mod verify-bps <dir|package> --rom <original> --bps <patch.bps>  # re
 segarecomp mod pack <dir> --out <package> --rom <image-a> --rom <image-b> # round-trip verifies every named image first
 ```
 
+## Master System: edits, Z80 injection and assets (ADR 0324)
+
+A Master System revision is the exact image digest plus its declared mapper, which must fit the image (`rom_only`: 32 KiB; `sega`: 32 to 512 KiB, a power of two; `E_MAPPER_UNSUPPORTED`). Typed edits default to little-endian and their diagnostics name the bank and bank offset. `sms-checksum` rewrites only the `TMR SEGA` header checksum at `0x7FFA`.
+
+On the `sega` mapper a `guest-asm` block stays inside one 16 KiB bank. The first 1 KiB runs at its offset; any other block runs through a mapper window with the same in-bank position:
+
+```
+free * 0x1c100 0x100 0xff
+org * 0x1c100 at 0x8100     ; bank 7, executed through slot 2
+entry:
+  call @helper              ; a verified symbol (an image offset) in the same bank, or in the first 1 KiB
+  ld (0xc001),a
+  ret
+```
+
+A label or `@symbol` may name only the fixed first 1 KiB or, from a banked block, the same bank through the same window (`E_GUEST_BANK_REFERENCE`). The Z80 decoder then admits the routine (`E_GUEST_NOT_ADMITTED`): no `jp (hl)`, no path that runs off a block or into data or padding, and no branch into the middle of an injected instruction. Making the game call the routine (for example with a typed edit of a `call` operand) and keeping its bank mapped there is the author's job.
+
+A data-only Master System package builds into a distinct program with its own cartridge identity (its save states never load in Vanilla):
+
+```sh
+segarecomp build --rom <original> --output <dir> --cc <compiler> --runtime-dir <platforms-dir>/master-system --data-package <package.segapatch> --data-identity <package_identity>
+```
+
+Asset replacement (tiles, palettes, text, tables) is a mod-owned adapter that turns declared `asset` sources into typed edits; the product ships no universal decoder. See the [asset replacement example](../../platforms/master-system/sdk/examples/asset-replace/README.md). The launcher does not yet install Master System mods.
+
 ## Native sources
 
 `native-c11` sources (`.c` and `.h`, at most 64 files, 256 KiB each, 2 MiB total) may include only `<segarecomp_mod.h>`, the platform's own SDK header, `<stdint.h>`, `<stddef.h>` and package files by their package path. Anything else is refused. `mod build` compiles every `.c` unit in path order with
@@ -117,7 +142,7 @@ strict C11 flags the **host** owns (`-std=c11 -Wall -Wextra -pedantic -Werror`) 
 
 ## Support today
 
-Genesis is the supported adapter. Master System and Sega CD register `host.log` only; a package that needs any other capability, or a Sega CD disc source, is refused (`E_CAPABILITY_UNSUPPORTED`, `E_SOURCE_KIND_RESERVED`). Commercial ROMs, discs, BIOS images and game audio never belong in a project that is committed or shared.
+Genesis is the supported adapter. Master System also supports data-only packages (typed edits, BPS, Z80 injection, assets; above). Its runtime capabilities, like Sega CD's, are `host.log` only; a package that needs any other capability, or a Sega CD disc source, is refused (`E_CAPABILITY_UNSUPPORTED`, `E_SOURCE_KIND_RESERVED`). Commercial ROMs, discs, BIOS images and game audio never belong in a project that is committed or shared.
 
 ## Linking a native ABI 2 package into a program (SEG-138-T011, ADR 0305)
 
@@ -125,4 +150,4 @@ Genesis is the supported adapter. Master System and Sega CD register `host.log` 
 
 ## Data-only packages in a built program (SEG-143-T008)
 
-`segarecomp build --data-package <package.segapatch> --data-identity <64-hex>` verifies a schema 3 **data-only** package (trust class `data`, Genesis), checks that its identity is the selected one, derives the effective image from the exact original (bps image, typed edits, guest code) and compiles THAT as a distinct generated-native variant. No provider, script or scheduler is linked; it is mutually exclusive with `--luau-package`, `--native-package` and `--patch-package`. Luau packages use `--luau-package` and native ABI 2 packages `--native-package`, each with the identity the user approved.
+`segarecomp build --data-package <package.segapatch> --data-identity <64-hex>` verifies a schema 3 **data-only** package (trust class `data`, Genesis or Master System), checks that its identity is the selected one, derives the effective image from the exact original (bps image, typed edits, guest code) and compiles THAT as a distinct generated-native variant. No provider, script or scheduler is linked; it is mutually exclusive with `--luau-package`, `--native-package` and `--patch-package`. Luau packages use `--luau-package` and native ABI 2 packages `--native-package`, each with the identity the user approved.

@@ -181,6 +181,17 @@ Source parse_source(std::span<const std::uint8_t> text, const Manifest &m) {
   return src;
 }
 
+// ------------------------------------------------------------------ Master System bank windows (SEG-147-T002, ADR 0324)
+constexpr std::uint64_t kSmsBank = 0x4000, kSmsFixed = 0x400, kSmsCodeLimit = 0xC000, kSmsMaxImage = 0x80000;
+
+bool sms_banked(const Manifest &m, const Revision &r) { return m.platform == "master-system" && r.mapper == "sega"; }
+bool sms_fixed(const Block &b) { return b.offset < kSmsFixed; }
+// A block may name another injected location only when the mapping is guaranteed while it runs: the target is in the fixed first 1 KiB, or both lie in the same bank seen through the same window.
+bool sms_reaches(const Block &from, const Block &to) {
+  if (sms_fixed(to)) return true;
+  return !sms_fixed(from) && from.offset / kSmsBank == to.offset / kSmsBank && from.address / kSmsBank == to.address / kSmsBank;
+}
+
 // ------------------------------------------------------------------ evaluation
 struct Ctx {
   const Manifest &m;
@@ -191,6 +202,8 @@ struct Ctx {
   bool final = false;   // pass 2: unknown labels and value ranges are real errors
   std::int64_t pc = 0;
   std::size_t line = 0;
+  const Block *banked = nullptr;                                    // set on the Master System `sega` mapper only
+  const std::map<std::string, const Block *> *label_blocks = nullptr;
 };
 
 struct Ev {
@@ -223,6 +236,15 @@ Ev eval(const Ctx &c, std::string_view expr) {
     const auto a = verified_symbol(c.m, name, c.rev, why);
     if (!a) fail(why.code, at(c.line) + why.message);
     r.value = static_cast<std::int64_t>(*a) + addend;
+    if (c.banked != nullptr && c.final) {   // a symbol is an IMAGE offset: translate it into the window the running block sees, or refuse
+      const auto offset = static_cast<std::uint64_t>(r.value);
+      if (r.value < 0 || offset >= kSmsMaxImage) fail("E_GUEST_BANK_REFERENCE", at(c.line) + "the @symbol \"" + name + "\" is not an image offset of a Master System cartridge (RAM addresses are numbers)");
+      if (offset >= kSmsFixed) {
+        if (sms_fixed(*c.banked) || offset / kSmsBank != c.banked->offset / kSmsBank)
+          fail("E_GUEST_BANK_REFERENCE", at(c.line) + "the @symbol \"" + name + "\" lies in bank " + std::to_string(offset / kSmsBank) + ", which is not guaranteed mapped while this block runs");
+        r.value = static_cast<std::int64_t>(c.banked->address / kSmsBank * kSmsBank + offset % kSmsBank);
+      }
+    }
     return r;
   }
   if (!label_ok(base)) fail("E_GUEST_OPERAND", at(c.line) + "the operand \"" + std::string(expr) + "\" is not a number, label or @symbol");
@@ -230,6 +252,11 @@ Ev eval(const Ctx &c, std::string_view expr) {
   if (it == c.labels.end()) {
     if (c.final) fail("E_GUEST_LABEL_UNKNOWN", at(c.line) + "the label \"" + std::string(base) + "\" is not defined for the revision \"" + c.rev + "\"");
     return r;   // pass 1: sizes never depend on label values
+  }
+  if (c.banked != nullptr && c.final) {
+    const Block &to = *c.label_blocks->at(std::string(base));
+    if (!sms_reaches(*c.banked, to))
+      fail("E_GUEST_BANK_REFERENCE", at(c.line) + "the label \"" + std::string(base) + "\" lies in bank " + std::to_string(to.offset / kSmsBank) + ", which is not guaranteed mapped while this block runs");
   }
   r.value = it->second + addend;
   return r;
@@ -693,7 +720,7 @@ std::vector<std::uint8_t> data_encode(const Ctx &c, const Stmt &s) {
 // ------------------------------------------------------------------ assembly of one revision
 struct OutBlock {
   std::uint64_t offset = 0, address = 0;
-  bool has_at = false;
+  bool has_at = false, fixed = true;
   std::size_t line = 0;
   std::vector<std::uint8_t> bytes;
   std::vector<Insn> insns;
@@ -712,6 +739,8 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
   for (const Block &b : src.blocks) if (b.rev == "*" || b.rev == rev.label) blocks.push_back(&b);
   std::map<std::string, std::int64_t> labels;
   std::set<std::string> data_labels;
+  std::map<std::string, const Block *> label_blocks;
+  const bool banked = sms_banked(m, rev);
   for (int pass = 0; pass < 2; ++pass) {
     const bool final = pass == 1;
     if (final) out.blocks.clear();
@@ -720,15 +749,17 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
       ob.offset = b->offset;
       ob.address = b->address;
       ob.has_at = b->has_at;
+      ob.fixed = !banked || sms_fixed(*b);
       ob.line = b->line;
       bool data_mode = false;
       std::string last_op;
       std::size_t last_args = 0;
       for (const Stmt &s : b->stmts) {
         const auto pc = static_cast<std::int64_t>(b->address + ob.bytes.size());
-        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line};
+        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line, banked ? b : nullptr, &label_blocks};
         if (!s.label.empty()) {
           if (!final && !labels.emplace(s.label, pc).second) fail("E_GUEST_LABEL_DUPLICATE", at(s.line) + "the label \"" + s.label + "\" is defined twice for the revision \"" + rev.label + "\"");
+          if (!final) label_blocks.emplace(s.label, b);
           if (!final && data_mode) data_labels.insert(s.label);
         }
         if (s.op.empty()) continue;
@@ -802,7 +833,7 @@ void validate_block(const Manifest &m, Cpu cpu, const OutBlock &b) {
   for (const Insn &i : b.insns) {
     if (!i.code) continue;
     const bool bad = cpu == Cpu::m68k ? i.len >= 2 && m68k_forbidden(static_cast<std::uint16_t>((b.bytes[i.pos] << 8U) | b.bytes[i.pos + 1])) : z80_forbidden(b.bytes, i.pos);
-    if (bad) fail("E_GUEST_FORBIDDEN_INSTRUCTION", "the injected code at offset 0x" + hex(b.offset + i.pos) + " contains an instruction the platform contract forbids (privileged, trap, port I/O, interrupt control or halt)");
+    if (bad) fail("E_GUEST_FORBIDDEN_INSTRUCTION", "the injected code at " + image_location(m.platform, b.offset + i.pos) + " contains an instruction the platform contract forbids (privileged, trap, port I/O, interrupt control or halt)");
     for (const auto &w : i.writes)
       if (w.first < lo || w.first + w.second > hi) fail("E_GUEST_WRITE_OUTSIDE_RAM", "the injected code writes to an absolute address outside the declared writable RAM window");
   }
@@ -833,9 +864,19 @@ void check_placement(const Manifest &m, Cpu cpu, const Revision &rev, const Asse
       if (b.address != b.offset) fail("E_GUEST_ADDRESS", at(b.line) + "M68K code is placed at its cartridge address; `at` is not allowed");
       if ((b.offset & 1) != 0) fail("E_GUEST_ALIGN", at(b.line) + "an M68K block starts at an even offset");
       if (end > 0x400000) fail("E_MAPPER_UNSUPPORTED", at(b.line) + "the block lies beyond the 4 MiB cartridge window; bank-switched mappers are not supported");
+    } else if (m.platform == "master-system" && rev.mapper == "rom_only") {
+      if (b.address != b.offset || end > kSmsCodeLimit) fail("E_GUEST_ADDRESS", at(b.line) + "Z80 code on a rom_only Master System image is placed at its offset below 0xC000");
+    } else if (sms_banked(m, rev)) {   // the `sega` mapper: one 16 KiB bank per block, executed through a declared window; the first 1 KiB is invariant
+      const std::string where = " (" + image_location(m.platform, b.offset) + ")";
+      if (end > kSmsMaxImage) fail("E_MAPPER_UNSUPPORTED", at(b.line) + "the block lies beyond the largest supported Sega-mapper cartridge" + where);
+      if (b.offset / kSmsBank != (end - 1) / kSmsBank || (b.offset < kSmsFixed && end > kSmsFixed))
+        fail("E_GUEST_BANK_BOUNDARY", at(b.line) + "a block stays inside one 16 KiB bank and does not cross the fixed 1 KiB boundary" + where);
+      if (!b.has_at && b.offset >= kSmsCodeLimit) fail("E_GUEST_ADDRESS", at(b.line) + "a block above image offset 0xBFFF needs `at <window address>`" + where);
+      if (b.offset < kSmsFixed ? b.address != b.offset
+                               : (b.address < kSmsFixed || b.address + b.bytes.size() > kSmsCodeLimit || b.address % kSmsBank != b.offset % kSmsBank))
+        fail("E_GUEST_ADDRESS", at(b.line) + "the execution address must be the block's position inside a mapper window below 0xC000 (the fixed 1 KiB runs only at its offset)" + where);
     } else if (m.platform == "master-system") {
-      if (rev.mapper != "rom_only") fail("E_MAPPER_UNSUPPORTED", at(b.line) + "the revision's mapper is not supported for injection (only rom_only; bank-switched mappers are out of scope)");
-      if (b.address != b.offset || end > 0xC000) fail("E_GUEST_ADDRESS", at(b.line) + "Z80 code on a rom_only Master System image is placed at its offset below 0xC000");
+      fail("E_MAPPER_UNSUPPORTED", at(b.line) + "the revision's mapper is not supported for injection");
     } else {
       if (!b.has_at) fail("E_GUEST_ADDRESS", at(b.line) + "Genesis Z80 code needs an `at` Z80 sound-RAM address (its ROM offset is not where it runs)");
       if (b.address + b.bytes.size() > 0x2000) fail("E_GUEST_ADDRESS", at(b.line) + "Genesis Z80 code is assembled for sound-RAM addresses below 0x2000");
@@ -867,7 +908,95 @@ std::uint32_t be32(std::span<const std::uint8_t> b, std::size_t at_) {
 void set_be32(std::vector<std::uint8_t> &b, std::size_t at_, std::uint32_t v) { for (unsigned i = 0; i < 4; ++i) b[at_ + i] = static_cast<std::uint8_t>(v >> (24U - 8U * i)); }
 bool ssf_mapper(std::span<const std::uint8_t> image) { return image.size() >= 0x108 && std::equal(image.begin() + 0x100, image.begin() + 0x108, "SEGA SSF"); }
 
+// ------------------------------------------------------------------ the CPU owner's admission
+GuestListing listing_of(const Assembled &a, const std::string &revision) {
+  GuestListing out;
+  out.revision = revision;
+  for (const OutBlock &b : a.blocks) {
+    GuestBlock g;
+    g.image_offset = b.offset;
+    g.address = static_cast<std::uint32_t>(b.address);
+    g.fixed = b.fixed;
+    g.line = b.line;
+    g.bytes = b.bytes;
+    for (const Insn &i : b.insns) g.items.push_back({i.pos, i.len, i.code});
+    out.blocks.push_back(std::move(g));
+  }
+  return out;
+}
+
+void admit_listing(const Manifest &m, const Assembled &a, const std::string &revision, GuestAdmitter admit) {
+  if (m.platform != "master-system") return;
+  if (admit == nullptr) fail("E_GUEST_ADMISSION_UNAVAILABLE", "Master System guest code needs the Z80 admission of the SMS owner, which this caller does not provide");
+  if (const auto r = admit(listing_of(a, revision))) fail(r->code, r->message);
+}
+
 }  // namespace
+
+std::optional<Rejection> check_sms_cartridge(std::string_view mapper, std::size_t size) {
+  const bool sega = mapper == "sega" && size >= 0x8000 && size <= kSmsMaxImage && (size & (size - 1)) == 0;
+  if (sega || (mapper == "rom_only" && size == 0x8000)) return std::nullopt;
+  return Rejection{"E_MAPPER_UNSUPPORTED", "the image size does not fit the declared mapper \"" + std::string(mapper) + "\" (rom_only: 32 KiB; sega: 32, 64, 128, 256 or 512 KiB)"};
+}
+
+std::optional<std::uint16_t> sms_header_checksum(std::span<const std::uint8_t> image) {
+  constexpr std::size_t header = 0x7FF0;
+  if (image.size() < 0x8000 || !std::equal(image.begin() + header, image.begin() + header + 8, "TMR SEGA")) return std::nullopt;
+  std::size_t limit = 0;
+  switch (image[header + 15] & 0x0F) {   // SMS Power! "ROM header"; code 0xD (48 KiB) is documented as defective and is not accepted
+    case 0xA: limit = 0x2000; break;
+    case 0xB: limit = 0x4000; break;
+    case 0xC: limit = 0x8000; break;
+    case 0xE: limit = 0x10000; break;
+    case 0xF: limit = 0x20000; break;
+    case 0x0: limit = 0x40000; break;
+    case 0x1: limit = 0x80000; break;
+    default: return std::nullopt;
+  }
+  if (limit > image.size()) return std::nullopt;
+  std::uint32_t sum = 0;
+  for (std::size_t i = 0; i < limit; ++i)
+    if (i < header || i >= header + 16) sum += image[i];
+  return static_cast<std::uint16_t>(sum & 0xFFFFU);
+}
+
+bool sms_header_verifies(std::span<const std::uint8_t> image) {
+  const auto sum = sms_header_checksum(image);
+  return sum && *sum == static_cast<std::uint16_t>(image[0x7FFA] | (image[0x7FFB] << 8U));
+}
+
+std::string image_location(std::string_view platform, std::uint64_t offset) {
+  std::string out = "offset 0x" + hex(offset);
+  if (platform == "master-system") {
+    std::string in = hex(offset % kSmsBank);
+    out += " (bank " + std::to_string(offset / kSmsBank) + ", bank offset 0x" + std::string(4 - in.size(), '0') + in + ")";
+  }
+  return out;
+}
+
+std::optional<Rejection> check_guest_admission(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, GuestAdmitter admit) {
+  const Payload *gp = payload_of(m, "guest-asm");
+  if (gp == nullptr || m.platform != "master-system") return std::nullopt;
+  try {
+    const Cpu cpu = cpu_of(m, gp->cpu);
+    const Source src = parse_source(file_of(files, gp), m);
+    for (const Revision &rev : m.revisions) {
+      const Assembled a = assemble_revision(m, cpu, src, rev);
+      for (const OutBlock &b : a.blocks) validate_block(m, cpu, b);
+      std::vector<Range> edits;
+      if (const Payload *ep = payload_of(m, "rom-edit-set")) {
+        const EditRanges er = rom_edit_ranges(m, file_of(files, ep), rev.label);
+        if (!er.ok) return er.rejection;
+        edits = er.ranges;
+      }
+      check_placement(m, cpu, rev, a, edits);
+      admit_listing(m, a, rev.label, admit);
+    }
+    return std::nullopt;
+  } catch (const Fail &f) {
+    return Rejection{f.code, f.message};
+  }
+}
 
 std::uint16_t genesis_checksum(std::span<const std::uint8_t> image, std::uint32_t end_exclusive) {
   std::uint32_t sum = 0;
@@ -906,13 +1035,15 @@ std::optional<Rejection> check_guest_asm(const Manifest &m, std::string_view cpu
 
 bool has_target_edits(const Manifest &m) { return payload_of(m, "rom-edit-set") != nullptr || payload_of(m, "guest-asm") != nullptr; }
 
-TargetImage build_target_image(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original) {
+TargetImage build_target_image(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original, GuestAdmitter admit) {
   TargetImage out;
   try {
     const std::string digest = sha256_hex(original);
     const auto rev = std::find_if(m.revisions.begin(), m.revisions.end(), [&](const Revision &r) { return r.sha256 == digest; });
     if (rev == m.revisions.end()) fail("E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions");
     out.revision = rev->label;
+    if (m.platform == "master-system")
+      if (const auto r = check_sms_cartridge(rev->mapper, original.size())) fail(r->code, r->message);
     out.image.assign(original.begin(), original.end());
     std::vector<Range> authored;   // every byte range this mod writes (edits and injected blocks)
     if (const Payload *edits = payload_of(m, "rom-edit-set")) {
@@ -936,6 +1067,7 @@ TargetImage build_target_image(const Manifest &m, const std::map<std::string, st
         edits = er.ranges;
       }
       check_placement(m, cpu, *rev, a, edits);
+      admit_listing(m, a, rev->label, admit);
       if (m.platform == "genesis" && (ssf_mapper(original) || original.size() > 0x400000)) fail("E_MAPPER_UNSUPPORTED", "the image uses a bank-switched cartridge mapper, which guest injection does not support");
       for (const Free &f : a.frees) {
         if (f.start + f.length > original.size()) fail("E_GUEST_RANGE", at(f.line) + "the free range lies beyond the end of the image");
@@ -949,31 +1081,46 @@ TargetImage build_target_image(const Manifest &m, const std::map<std::string, st
         out.injected_bytes += b.bytes.size();
       }
     }
-    // header repair (ADR 0293): only the documented Genesis header; `none` is an explicit opt-out; absent = repair when the original verifies and the image changed
+    // header repair (ADR 0293, ADR 0324): only the documented header of the platform; `none` is an explicit opt-out; absent = repair when the original verifies and the image changed
     const bool changed = !std::equal(out.image.begin(), out.image.end(), original.begin(), original.end());
-    const bool original_ok = m.platform == "genesis" && genesis_header_verifies(original);
+    const bool genesis = m.platform == "genesis", sms = m.platform == "master-system";
+    const bool original_ok = genesis ? genesis_header_verifies(original) : sms && sms_header_verifies(original);
+    const bool explicit_repair = m.header_repair == "genesis-checksum" || m.header_repair == "sms-checksum";
+    if ((m.header_repair == "genesis-checksum" && !genesis) || (m.header_repair == "sms-checksum" && !sms)) fail("E_HEADER_UNSUPPORTED", "the header repair \"" + m.header_repair + "\" does not exist on " + m.platform);
+    const bool repairs_checksum = explicit_repair || (m.header_repair.empty() && changed && original_ok);
     // Header fields the selected policy will rewrite must not also be authored: the repair would silently discard that write (ADR 0293 section 5).
-    const bool repairs_checksum = m.header_repair == "genesis-checksum" || (m.header_repair.empty() && changed && original_ok);
     const bool repairs_end = m.header_repair == "genesis-checksum";
     for (const Range &a : authored) {
-      if ((repairs_checksum && a.start < 0x190 && 0x18E < a.end) || (repairs_end && a.start < 0x1A8 && 0x1A4 < a.end))
+      if (repairs_checksum && genesis && ((a.start < 0x190 && 0x18E < a.end) || (repairs_end && a.start < 0x1A8 && 0x1A4 < a.end)))
         fail("E_HEADER_FIELD_COLLISION", "an edit or injected block overlaps a header field that the selected header repair rewrites (checksum 0x18E-0x18F" + std::string(repairs_end ? ", ROM end 0x1A4-0x1A7" : "") + "); declare header_repair = \"none\" to write it yourself");
+      if (repairs_checksum && sms && a.start < 0x7FFC && 0x7FFA < a.end)
+        fail("E_HEADER_FIELD_COLLISION", "an edit or injected block overlaps the header checksum (0x7FFA-0x7FFB) that the selected header repair rewrites; declare header_repair = \"none\" to write it yourself");
     }
+    const auto write_genesis_checksum = [&] {
+      const std::uint16_t sum = genesis_checksum(out.image, static_cast<std::uint32_t>(out.image.size()));
+      out.image[0x18E] = static_cast<std::uint8_t>(sum >> 8U);
+      out.image[0x18F] = static_cast<std::uint8_t>(sum);
+      out.header_repaired = true;
+    };
     if (m.header_repair == "genesis-checksum") {
-      if (m.platform != "genesis") fail("E_HEADER_UNSUPPORTED", "header repair exists only for the Genesis header");
       if (out.image.size() < 0x200 || (out.image.size() & 1) != 0 || out.image.size() > 0x400000 || be32(out.image, 0x1A0) != 0) fail("E_HEADER_UNSUPPORTED", "the image does not carry a supported Genesis header (even size 0x200..4 MiB, ROM start 0)");
       if (ssf_mapper(original)) fail("E_MAPPER_UNSUPPORTED", "the image uses a bank-switched cartridge mapper; its header cannot be repaired");
       set_be32(out.image, 0x1A4, static_cast<std::uint32_t>(out.image.size() - 1));
-      const std::uint16_t sum = genesis_checksum(out.image, static_cast<std::uint32_t>(out.image.size()));
-      out.image[0x18E] = static_cast<std::uint8_t>(sum >> 8U);
-      out.image[0x18F] = static_cast<std::uint8_t>(sum);
-      out.header_repaired = true;
-    } else if (m.header_repair.empty() && changed && original_ok) {
-      const std::uint16_t sum = genesis_checksum(out.image, static_cast<std::uint32_t>(out.image.size()));
-      out.image[0x18E] = static_cast<std::uint8_t>(sum >> 8U);
-      out.image[0x18F] = static_cast<std::uint8_t>(sum);
-      out.header_repaired = true;
-    } else if (m.header_repair == "none" && changed && original_ok && !genesis_header_verifies(out.image)) {
+      write_genesis_checksum();
+    } else if (sms && repairs_checksum) {
+      const auto sum = sms_header_checksum(out.image);
+      if (sum) {
+        out.image[0x7FFA] = static_cast<std::uint8_t>(*sum);
+        out.image[0x7FFB] = static_cast<std::uint8_t>(*sum >> 8U);
+        out.header_repaired = true;
+      } else if (explicit_repair) {
+        fail("E_HEADER_UNSUPPORTED", "the image does not carry a supported Master System header (`TMR SEGA` at 0x7FF0 with a size code whose range lies inside the image)");
+      } else {
+        out.warnings.push_back("W_CHECKSUM_NOT_REPAIRED");   // the mod removed or redefined the header it was relying on
+      }
+    } else if (genesis && repairs_checksum) {
+      write_genesis_checksum();
+    } else if (m.header_repair == "none" && changed && original_ok && !(genesis ? genesis_header_verifies(out.image) : sms_header_verifies(out.image))) {
       out.warnings.push_back("W_CHECKSUM_NOT_REPAIRED");
     }
     out.ok = true;
@@ -984,9 +1131,9 @@ TargetImage build_target_image(const Manifest &m, const std::map<std::string, st
   return out;
 }
 
-TargetBps build_target_bps(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original) {
+TargetBps build_target_bps(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original, GuestAdmitter admit) {
   TargetBps out;
-  out.target = build_target_image(m, files, original);
+  out.target = build_target_image(m, files, original, admit);
   if (!out.target.ok) { out.rejection = out.target.rejection; return out; }
   out.revision = out.target.revision;
   const patch::BpsResult built = patch::build_bps(original, out.target.image);

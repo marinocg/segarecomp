@@ -185,6 +185,11 @@ int main(int argc, char **argv) {
         upper_sha.sha256 = std::string(64, 'A');
         expect(sms_save_dir(one) == library / "saves" / "master-system" / sha / "sega", "SMS states: <library>/saves/master-system/<sha256>/<mapper>");
         expect(sms_save_dir(one) != sms_save_dir(other_mapper), "a state of one mapping lives apart from another mapping of the same cartridge");
+        RomView modded = one;   // SEG-147-T001: a patched Master System variant has its own folder, as on Genesis
+        modded.luau_identity = patch;
+        RomView bad_mod = one;
+        bad_mod.luau_identity = "not-an-identity";
+        expect(sms_save_dir(modded) == sms_save_dir(one) / "mods" / patch && sms_save_dir(bad_mod).empty(), "a Master System mod never shares Vanilla's data; an invalid identity gets none");
         expect(sms_save_dir(manifest) == library / "saves" / "master-system" / sha / ("manifest-" + std::string(16, 'c')), "a sidecar mapper manifest keys the folder by its own digest");
         expect(sms_save_dir(undeclared).empty() && sms_save_dir(hostile).empty() && sms_save_dir(upper_sha).empty() && sms_save_dir(genesis).empty(),
                "no folder without a declared mapper, for a hostile mapper name, an upper-case digest or a non-SMS game");

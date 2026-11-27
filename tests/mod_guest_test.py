@@ -219,7 +219,7 @@ refused("two guest-asm", "E_PAYLOAD_COMBINATION", "mod", "check", (lambda dd: (w
 refused("m68k guest-asm on master-system", "E_PAYLOAD_PLATFORM", "mod", "check", project(FREE + "org * 0x1000\n  nop\n", platform="master-system", revs=[("rev-a", sha(sms_rom()), "rom_only")]))
 
 # ------------------------------------------------------------------ T004: Z80 (Master System and the Genesis sound CPU)
-SMS = sms_rom()
+SMS = sms_rom(0x8000)   # rom_only is exactly 32 KiB (SEG-147-T001)
 Z_ASM = "free * 0x3000 0x80 0x00\norg * 0x3000\n  ld a,5\n  ld b,a\n  ld hl,0xc010\n  ld (hl),a\n  ld (0xc020),a\nloop:\n  dec b\n  jr nz,loop\n  push hl\n  pop hl\n  call sub\n  ret\nsub:\n  ret\n"
 dz = project(Z_ASM, platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "rom_only")])
 rc, doc, out = apply(dz, SMS)
@@ -235,7 +235,7 @@ for what, line, code in [("halt", "  halt\n", "E_GUEST_FORBIDDEN_INSTRUCTION"), 
                          ("numeric jp", "  jp 0x0038\n", "E_GUEST_BRANCH_TARGET"), ("jp to data", "  jp l\ndata\nl:\n  db 0x76\n", "E_GUEST_BRANCH_TARGET"),
                          ("label arithmetic", "s:\n  jp s+0x4000\n", "E_GUEST_BRANCH_TARGET"), ("falling into data", "  nop\ndata\n  db 0x76\n", "E_GUEST_SYNTAX")]:
     refused("Z80 " + what, code, "mod", "check", project("free * 0x3000 0x80 0x00\norg * 0x3000\n" + line, platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "rom_only")]))
-refused("a bank-switched mapper is rejected", "E_MAPPER_UNSUPPORTED", "mod", "check", project(Z_ASM, platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "sega")]))
+ok("the sega mapper takes a block below 0xC000 at its reset window (bank-aware rules: mod_sms_test.py)", "mod", "check", project(Z_ASM, platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "sega")]))
 refused("Z80 beyond the unmapped window", "E_GUEST_ADDRESS", "mod", "check", project("free * 0xc000 0x80 0x00\norg * 0xc000\n  nop\n", platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "rom_only")]))
 
 # the Genesis Z80 runs from sound RAM: its code needs an `at` address, which only the Z80 may use

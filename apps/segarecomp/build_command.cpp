@@ -14,6 +14,7 @@
 #include "segarecomp/machine/genesis/z80_static_producer.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
+#include "segarecomp/machine/master_system/z80_guest_admission.hpp"
 #include "segarecomp/patch.hpp"
 #include "segarecomp/rom.hpp"
 #include "segarecomp/sha256.hpp"
@@ -298,7 +299,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (options.data_package.empty() != options.data_identity.empty()) return std::nullopt;   // a package reference and its identity travel together
   if (!options.data_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
-    if (!hex64(options.data_identity) || !options.luau_package.empty() || !options.native_package.empty() || !options.patch_package.empty() || options.platform == "master-system") return std::nullopt;   // one mod, Genesis
+    if (!hex64(options.data_identity) || !options.luau_package.empty() || !options.native_package.empty() || !options.patch_package.empty()) return std::nullopt;   // one mod; the package's own platform selects the route
   }
   if (options.luau_package.empty() != options.luau_identity.empty()) return std::nullopt;   // a package reference and its identity travel together
   if (!options.luau_package.empty()) {
@@ -1883,6 +1884,7 @@ int run_build(Options options) {
   std::string sha;
   std::string sms_provenance;  // status.json members recording the SMS identity, or a Genesis board declaration (ADR 0268); empty otherwise
   std::string sms_images;      // SMS: the status.json executable_images member
+  std::string data_status;     // SMS: the status.json data_mod member of a patched variant
   std::string m68k_images;     // Genesis: sanitized provenance JSON of the M68K executable images
   std::optional<segarecomp::GenesisResetImageReport> genesis_reset;  // Genesis: the accepted reset analysis
   try {
@@ -1996,8 +1998,12 @@ int run_build(Options options) {
       const auto package = segarecomp::mod::read_package_file(options.data_package);
       if (!package.ok) return fail(options, log, original_sha, "analyze", 1, "The mod package is not valid: " + package.rejection.message, "DATA_PACKAGE_INVALID");
       if (package.identity != options.data_identity) return fail(options, log, original_sha, "analyze", 1, "The mod package changed after it was selected.", "DATA_IDENTITY_CHANGED");
-      if (segarecomp::mod::trust_class(package.manifest) != "data" || package.manifest.platform != "genesis") return fail(options, log, original_sha, "analyze", 1, "Only a Genesis data-only package builds through this route.", "DATA_TRUST");
-      const auto effective = segarecomp::mod::effective_image(package, original);
+      const bool sms_data = package.manifest.platform == "master-system";
+      if (segarecomp::mod::trust_class(package.manifest) != "data" || (package.manifest.platform != "genesis" && !sms_data))
+        return fail(options, log, original_sha, "analyze", 1, "Only a Genesis or Master System data-only package builds through this route.", "DATA_TRUST");
+      if (!options.platform.empty() && options.platform != package.manifest.platform)
+        return fail(options, log, original_sha, "analyze", 1, "The mod package targets another platform than --platform names.", "DATA_PLATFORM_MISMATCH");
+      const auto effective = segarecomp::mod::effective_image(package, original, &sms::admit_z80_guest);
       if (!effective.ok) return fail(options, log, original_sha, "analyze", 1, "The image is not the one the package declares: " + effective.rejection.message, "DATA_IMAGE_MISMATCH");
       const fs::path input = options.output / "input";
       std::error_code input_ec;
@@ -2008,6 +2014,15 @@ int run_build(Options options) {
       if (input_ec || !image_out) return fail(options, log, original_sha, "analyze", 1, "The effective image could not be written.", "DATA_ARTIFACT_WRITE");
       options.rom = input / "effective.rom";
       log.line("data mod: package=" + options.data_identity + " original_sha256=" + original_sha + " effective_sha256=" + effective.effective_sha256);
+      if (sms_data) {   // SEG-147-T001 (ADR 0324): platform and mapper come from the verified package (declared for this exact original image), never from the image; a different declaration is a conflict
+        std::string mapper;
+        for (const auto &revision : package.manifest.revisions) if (revision.sha256 == original_sha) mapper = revision.mapper;
+        if (options.mapper_manifest || (!options.mapper.empty() && options.mapper != mapper))
+          return fail(options, log, original_sha, "analyze", 1, "The mod package declares the cartridge mapper \"" + mapper + "\" for this image; another mapper declaration conflicts with it.", "DATA_MAPPER_MISMATCH");
+        options.platform = "master-system";
+        options.mapper = mapper;
+        data_status = ",\"data_mod\":{\"package_identity\":\"" + options.data_identity + "\",\"original_sha256\":\"" + original_sha + "\",\"effective_sha256\":\"" + effective.effective_sha256 + "\"}";
+      }
     }
     if (!options.luau_package.empty()) {   // SEG-137-T007: verify the package, derive its effective image, compile its scripts; `--rom` is replaced by the effective image for the rest of the build
       const auto original = segarecomp::read_binary(options.rom);
@@ -2421,7 +2436,7 @@ int run_build(Options options) {
     }
     fs::remove_all(object_dir, ec);
     stage("link", "done");
-    write_status(options, sha, "ok", "done", "", sms_provenance + sms_images + aot_policy_json(options, log, sha, false));
+    write_status(options, sha, "ok", "done", "", sms_provenance + data_status + sms_images + aot_policy_json(options, log, sha, false));
     std::cout << "@result ok executable=" << executable.string() << std::endl;
     return 0;
   } catch (const std::exception &error) {

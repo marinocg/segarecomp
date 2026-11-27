@@ -320,6 +320,39 @@ inline constexpr std::size_t kMaxGuestBlocks = 64, kMaxGuestFreeRanges = 64, kMa
 // `edit_set` is the rom-edit-set payload text (empty when the package has none).
 [[nodiscard]] std::optional<Rejection> check_guest_asm(const Manifest &manifest, std::string_view cpu, std::span<const std::uint8_t> text, std::span<const std::uint8_t> edit_set);
 
+// ---- static admission of injected guest code by the CPU owner (SEG-147-T002, ADR 0324) ----
+// The assembled blocks of one revision, as plain bytes plus the assembler's instruction boundaries. This library never depends on a CPU library: the CPU owner's decoder is passed in by the caller
+// as a `GuestAdmitter` (Master System Z80: segarecomp::machine::master_system::admit_z80_guest). A Master System `guest-asm` payload is NOT admitted without one (E_GUEST_ADMISSION_UNAVAILABLE).
+struct GuestItem {
+  std::size_t position = 0, length = 0;   // inside the block
+  bool code = true;                       // false: a data directive
+};
+struct GuestBlock {
+  std::uint64_t image_offset = 0;
+  std::uint32_t address = 0;              // the CPU address the block was assembled for
+  bool fixed = true;                      // false: reachable only while its mapper window holds its bank
+  std::size_t line = 0;
+  std::vector<std::uint8_t> bytes;
+  std::vector<GuestItem> items;           // in position order
+};
+struct GuestListing {
+  std::string revision;
+  std::vector<GuestBlock> blocks;
+};
+using GuestAdmitter = std::optional<Rejection> (*)(const GuestListing &);
+// Assembles the Master System `guest-asm` payload for EVERY declared revision and admits each listing. Nothing for another platform or a package without guest code. (Pure; `mod check|pack|build`.)
+[[nodiscard]] std::optional<Rejection> check_guest_admission(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, GuestAdmitter admit);
+
+// ---- Master System cartridge configuration and header (SEG-147-T001, ADR 0324) ----
+// The declared mapper must fit the image: `rom_only` is exactly 32 KiB; `sega` is a power of two from 32 KiB to 512 KiB (the machine contract's sizes). E_MAPPER_UNSUPPORTED otherwise.
+[[nodiscard]] std::optional<Rejection> check_sms_cartridge(std::string_view mapper, std::size_t image_size);
+// The `TMR SEGA` header at 0x7FF0 and its checksum (0x7FFA, little-endian): the byte sum of the range selected by the size code (low nibble of 0x7FFF) without the 16 header bytes.
+// `sms_header_checksum` is empty when the header or size code does not define a range inside the image.
+[[nodiscard]] std::optional<std::uint16_t> sms_header_checksum(std::span<const std::uint8_t> image);
+[[nodiscard]] bool sms_header_verifies(std::span<const std::uint8_t> image);
+// "offset 0x1c010 (bank 7, bank offset 0x0010)" on master-system; "offset 0x1c010" elsewhere.
+[[nodiscard]] std::string image_location(std::string_view platform, std::uint64_t offset);
+
 // Header repair of a Genesis image (documented header: ROM start 0x1A0, ROM end 0x1A4, checksum 0x18E over the big-endian words from 0x200 to ROM end).
 [[nodiscard]] bool genesis_header_verifies(std::span<const std::uint8_t> image);
 [[nodiscard]] std::uint16_t genesis_checksum(std::span<const std::uint8_t> image, std::uint32_t end_exclusive);
@@ -335,7 +368,7 @@ struct TargetImage {
   bool header_repaired = false;
   std::vector<std::string> warnings;   // stable warning classes, e.g. W_CHECKSUM_NOT_REPAIRED
 };
-[[nodiscard]] TargetImage build_target_image(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original);
+[[nodiscard]] TargetImage build_target_image(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original, GuestAdmitter admit = nullptr);
 [[nodiscard]] bool has_target_edits(const Manifest &manifest);   // a rom-edit-set or guest-asm payload exists
 
 // Deterministic BPS of `original` -> that target, verified by applying it back (SEG-136-T006).
@@ -346,7 +379,7 @@ struct TargetBps {
   std::vector<std::uint8_t> patch;
   TargetImage target;
 };
-[[nodiscard]] TargetBps build_target_bps(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original);
+[[nodiscard]] TargetBps build_target_bps(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original, GuestAdmitter admit = nullptr);
 
 // ---- native C11 source policy (SEG-135-T003) ----
 // Include allowlist: the ABI 2 SDK headers, <stdint.h>/<stddef.h>, and package-local files named by their package path. Anything else (`../`, absolute, other system headers, computed
@@ -414,6 +447,6 @@ struct EffectiveImage {
   std::string original_sha256, effective_sha256;
   std::vector<std::uint8_t> image;   // the effective image bytes (SEG-137-T007: what a generated-native build compiles); equals the original when the package changes nothing
 };
-[[nodiscard]] EffectiveImage effective_image(const Package &package, std::span<const std::uint8_t> original);
+[[nodiscard]] EffectiveImage effective_image(const Package &package, std::span<const std::uint8_t> original, GuestAdmitter admit = nullptr);
 
 }  // namespace segarecomp::mod
