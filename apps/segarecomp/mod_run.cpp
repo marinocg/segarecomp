@@ -596,6 +596,7 @@ int run_diff(const RunOptions &o) {
     Observed again;
     if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-again-frames", again)) return refuse({r->code, "modded (repeat): " + r->message});
     if (const auto r = judge_run(again, false, "modded (repeat)")) return refuse(*r);
+    if (again.mod.faulted) return refuse({"E_AUDIO_MOD_FAULT", "the mod faulted during the repeat run, so its sound was not verified: " + again.mod.fault});
     if (again.pcm != modded.pcm) return refuse({"E_AUDIO_NONDETERMINISTIC", "two runs of the modded program with the same input produced different PCM digests"});
   }
   const Divergence d = compare(vanilla, modded, o.aggregate, o.first);

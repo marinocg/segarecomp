@@ -34,7 +34,8 @@ The gate judges two things: what the build observed (a bounded run with **no pad
 | Refusal | Meaning |
 |---|---|
 | `E_AUDIO_STATIC_MATERIALIZATION` | the modified sound code or image cannot be compiled statically: the modded program's sound is `degraded` (for example `structural_code_mismatch`), its build failed while producing the Z80 code (see the build log), or its sound CPU was isolated by a code fault during a compared run |
-| `E_AUDIO_RUNTIME_FAULT` | the modded program's sound faulted during a compared run for another reason (an unsupported access, the mixer, a native replacement) |
+| `E_AUDIO_RUNTIME_FAULT` | the modded program's sound faulted during a compared run for another reason (the mixer, a native replacement) |
+| `E_RUN_INCOMPLETE` | the program stopped before the requested frames. On Genesis a Z80 access or fetch the product cannot serve (an unsupported address, for example) stops the **whole program**, so a driver change can end here. Do not shorten the window to get past it: that only leaves the failing path unexecuted and unverified |
 | `E_AUDIO_MOD_FAULT` | the mod itself faulted during the run, so its sound was not verified |
 | `E_AUDIO_BASELINE` | the original program's sound is not working in this product (at build time or during the compared run), so there is nothing to verify a sound mod against |
 | `E_AUDIO_IMPLEMENTATION_CHANGED` | the modded program selects another sound implementation than the original (their PCM is not comparable) |
