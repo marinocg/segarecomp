@@ -185,6 +185,24 @@ int main(int argc, char **argv) {
         upper_sha.sha256 = std::string(64, 'A');
         expect(sms_save_dir(one) == library / "saves" / "master-system" / sha / "sega", "SMS states: <library>/saves/master-system/<sha256>/<mapper>");
         expect(sms_save_dir(one) != sms_save_dir(other_mapper), "a state of one mapping lives apart from another mapping of the same cartridge");
+        RomView modded = one;   // SEG-147-T001: a patched Master System variant has its own folder, as on Genesis
+        modded.luau_identity = patch;
+        RomView bad_mod = one;
+        bad_mod.luau_identity = "not-an-identity";
+        expect(sms_save_dir(modded) == sms_save_dir(one) / "mods" / patch && sms_save_dir(bad_mod).empty(), "a Master System mod never shares Vanilla's data; an invalid identity gets none");
+        {  // the identity a state binds to (ADR 0279): the modded program is told its EFFECTIVE image and its own variant, Vanilla the original and 'vanilla'
+          RomView variant = modded;
+          variant.luau_effective_sha256 = std::string(64, 'e');
+          SDL_Environment *menv = SDL_CreateEnvironment(true);
+          apply_game_environment(menv, variant);
+          expect(std::string(SDL_GetEnvironmentVariable(menv, "SEGARECOMP_ROM_SHA256")) == variant.luau_effective_sha256 && std::string(SDL_GetEnvironmentVariable(menv, "SEGARECOMP_SAVE_VARIANT")) == patch &&
+                     std::string(SDL_GetEnvironmentVariable(menv, "SEGARECOMP_SAVE_DIR")) == sms_save_dir(variant).string(),
+                 "a Master System mod's save-state identity is its effective image and its package identity");
+          apply_game_environment(menv, one);
+          expect(std::string(SDL_GetEnvironmentVariable(menv, "SEGARECOMP_ROM_SHA256")) == sha && std::string(SDL_GetEnvironmentVariable(menv, "SEGARECOMP_SAVE_VARIANT")) == "vanilla",
+                 "Vanilla's save-state identity is the original image");
+          SDL_DestroyEnvironment(menv);
+        }
         expect(sms_save_dir(manifest) == library / "saves" / "master-system" / sha / ("manifest-" + std::string(16, 'c')), "a sidecar mapper manifest keys the folder by its own digest");
         expect(sms_save_dir(undeclared).empty() && sms_save_dir(hostile).empty() && sms_save_dir(upper_sha).empty() && sms_save_dir(genesis).empty(),
                "no folder without a declared mapper, for a hostile mapper name, an upper-case digest or a non-SMS game");

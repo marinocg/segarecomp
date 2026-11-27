@@ -7,6 +7,11 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Master System mods: typed edits, Z80 injection and asset replacement (ADR 0324)
+
+* Developer preview: a mod can target a Master System cartridge by exact digest and declared mapper, apply typed edits and deterministic BPS (with the `TMR SEGA` checksum repaired when the original verified), inject bounded Z80 routines (including bank-switched `sega` cartridges, checked by the Z80 decoder before they enter the image) and replace art, palettes, text and tables through its own adapter. `segarecomp build --data-package` builds the patched game as a separate program. The launcher does not install Master System mods yet.
+* Stricter: a Master System image whose size does not fit its declared mapper is now refused (`E_MAPPER_UNSUPPORTED`).
+
 ### Native mods: ABI 1 is deprecated, not removed (ADR 0322)
 
 * New native providers use ABI 2 / schema 3; a [migration guide](docs/product/native-abi-migration.md) and an ABI 2 sample are provided. Existing ABI 1 packages and the schema 2 reader keep working unchanged. Removal is not scheduled.

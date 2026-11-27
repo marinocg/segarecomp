@@ -1,0 +1,5 @@
+# <index> <red> <green> <blue>, levels 0..3. Entries not listed keep the original colour.
+0 0 0 1
+1 3 3 3
+2 3 0 0
+3 0 3 0

@@ -35,12 +35,6 @@ bool literal_hex(std::string_view token, std::size_t max_digits, std::uint64_t &
   return token.size() > 2 && token.substr(0, 2) == "0x" && token.size() - 2 <= max_digits && hex_value(token.substr(2), out);
 }
 
-std::string hex_string(std::uint64_t v) {
-  std::string out;
-  do { out.insert(out.begin(), "0123456789abcdef"[v & 15U]); v >>= 4U; } while (v != 0);
-  return out;
-}
-
 std::vector<std::string_view> split_spaces(std::string_view line) {
   std::vector<std::string_view> out;
   std::size_t i = 0;
@@ -225,9 +219,9 @@ EditedImage apply_rom_edits(const Manifest &m, std::span<const std::uint8_t> tex
     const RomEditSet set = parse_set(text, m);
     const std::vector<Resolved> plan = resolve(m, set, rev->label);
     for (const Resolved &r : plan) {   // assert everything before changing anything
-      if (r.offset + r.edit->expected.size() > original.size()) fail("E_EDIT_RANGE", at(r.edit->line) + "the edit lies beyond the end of the image");
+      if (r.offset + r.edit->expected.size() > original.size()) fail("E_EDIT_RANGE", at(r.edit->line) + "the edit at " + image_location(m.platform, r.offset) + " lies beyond the end of the image");
       if (!std::equal(r.edit->expected.begin(), r.edit->expected.end(), original.begin() + static_cast<std::ptrdiff_t>(r.offset)))
-        fail("E_EDIT_EXPECTED_MISMATCH", at(r.edit->line) + "the original bytes at offset 0x" + hex_string(r.offset) + " differ from the expected value");
+        fail("E_EDIT_EXPECTED_MISMATCH", at(r.edit->line) + "the original bytes at " + image_location(m.platform, r.offset) + " differ from the expected value");
     }
     out.image.assign(original.begin(), original.end());
     for (const Resolved &r : plan) std::copy(r.edit->value.begin(), r.edit->value.end(), out.image.begin() + static_cast<std::ptrdiff_t>(r.offset));

@@ -4,6 +4,7 @@ add_library(segarecomp_machine_master_system
   src/cartridge.cpp
   src/image_set.cpp
   src/emit.cpp
+  src/z80_guest_admission.cpp
   src/ml_region_z80_producer.cpp
 )
 add_library(segarecomp::machine_master_system ALIAS segarecomp_machine_master_system)

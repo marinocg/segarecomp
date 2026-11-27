@@ -1585,7 +1585,10 @@ fs::path sms_save_dir(const RomView &rom) {
   if (family.empty() || family.size() > 40) return {};
   for (const char ch : family)
     if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-')) return {};   // a path component of a known shape, never user text
-  return library_root() / "saves" / "master-system" / rom.sha256 / family;
+  const fs::path dir = library_root() / "saves" / "master-system" / rom.sha256 / family;
+  if (rom.luau_mod()) return lowercase_hex(rom.luau_identity, 64) ? dir / "mods" / rom.luau_identity : fs::path();   // SEG-147-T001: the Genesis rule: a mod variant never shares Vanilla's data
+  if (rom.patched()) return lowercase_hex(rom.patch_identity, 64) ? dir / "patches" / rom.patch_identity : fs::path();
+  return dir;
 }
 
 fs::path game_save_dir(const RomView &rom) { return rom.platform_id == "master-system" ? sms_save_dir(rom) : genesis_save_dir(rom); }

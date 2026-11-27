@@ -1,0 +1,41 @@
+[mod]
+id = "sms-asset-demo"
+version = "1.0.0"
+name = "SMS asset replacement example"
+license = "CC0-1.0"
+
+[target]
+platform = "master-system"
+
+[[target.revision]]
+label = "demo"
+sha256 = "4689e82a16a380a893490f95f411cb572de45472f953a29dc77e72a78fcdfdbb"
+mapper = "rom_only"
+
+[[source]]
+kind = "rom-edit-set"
+path = "edits/main.edits"
+
+[[source]]
+kind = "asset"
+path = "assets/palette.txt"
+asset_class = "data"
+format = "demo-palette"
+
+[[source]]
+kind = "asset"
+path = "assets/tiles.txt"
+asset_class = "data"
+format = "demo-tiles"
+
+[[source]]
+kind = "asset"
+path = "assets/room.txt"
+asset_class = "data"
+format = "demo-room"
+
+[[source]]
+kind = "asset"
+path = "assets/text.txt"
+asset_class = "data"
+format = "demo-text"

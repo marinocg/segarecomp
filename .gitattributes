@@ -60,3 +60,5 @@ tests/segarecomp_seg085_test.py text eol=lf
 
 # SEG-137-T001: the vendored Luau sources are byte-exact (SHA256SUMS); never rewrite their line endings.
 third_party/luau/** -text
+# SEG-147-T007: the asset-replacement example is packaged and compared byte for byte (edit files and asset payloads are LF-only), so Windows autocrlf must not rewrite it.
+platforms/master-system/sdk/examples/asset-replace/** text eol=lf

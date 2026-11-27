@@ -2555,6 +2555,15 @@ add_test(NAME mod_edits_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURC
 # SEG-136-T003..T006 (ADR 0292/0293, delivery F05): bounded guest assembly/injection, collisions, header repair, deterministic BPS; the injected routine is then run through the generated-native path.
 add_test(NAME mod_guest_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_guest_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_guest_exec_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_guest_exec_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-147-T001/T002/T007 (ADR 0324, delivery F17): Master System target identity, typed edits/BPS/header repair, bank-aware Z80 injection with the CPU owner's static admission, the injected routine
+# and the asset-replacement example through the unchanged generated-native producer. Synthetic images only.
+add_test(NAME mod_sms_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_sms_test.py $<TARGET_FILE:segarecomp>)
+set_property(TEST mod_sms_test APPEND PROPERTY LABELS full fast)
+add_test(NAME mod_sms_native_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_sms_native_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME mod_sms_assets_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_sms_assets_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST mod_sms_native_test mod_sms_assets_test APPEND PROPERTY LABELS full)   # generated-native builds: CI full tier and --focus
+set_property(TEST mod_sms_native_test mod_sms_assets_test PROPERTY TIMEOUT 900)
+set_property(TEST mod_sms_test mod_sms_native_test mod_sms_assets_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_executable(mod_hooks_resolve_test mod_hooks_resolve_test.cpp)
 target_link_libraries(mod_hooks_resolve_test PRIVATE segarecomp::media)
 segarecomp_enable_warnings(mod_hooks_resolve_test)
