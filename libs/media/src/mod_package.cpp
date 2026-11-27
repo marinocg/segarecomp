@@ -748,6 +748,12 @@ std::string content_digest(const Manifest &m) {
     text += "\n";
   }
   for (const MemoryRange &r : m.memory) text += "memory " + r.revision + " " + r.space + " " + std::to_string(r.offset) + " " + std::to_string(r.length) + " " + r.access + "\n";   // ranges decide what a scheduled mod may touch
+  for (const Mapping &mp : m.mappings) {   // command/event mappings decide which guest bytes a scheduled mod writes and observes (SEG-145-T008)
+    if (mp.kind != "command" && mp.kind != "event") continue;
+    text += "mapping " + mp.id + " " + mp.kind + " " + mp.space + " " + std::to_string(mp.offset) + " " + std::to_string(mp.width);
+    for (const auto &v : mp.values) text += " " + v.first + "=" + std::to_string(v.second);
+    text += "\n";
+  }
   for (const Symbol &y : m.symbols) text += "symbol " + y.name + " " + y.revision + " " + std::to_string(y.address) + " " + y.provenance + "\n";   // symbols decide where edits land
   return sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(text.data()), text.size()));
 }
@@ -879,6 +885,43 @@ struct SpaceInfo {
 constexpr SpaceInfo kSpaces[] = {{"m68k.work_ram", 65536, true}, {"z80.ram", 8192, false}, {"z80.work_ram", 8192, false}, {"z80.cart_ram", 32768, false},
                                  {"main.work_ram", 65536, true}, {"main.word_ram", 262144, true}, {"sub.prg_ram", 524288, true}};
 }  // namespace
+
+const Mapping *find_audio_mapping(const Manifest &m, std::string_view kind, std::string_view id) {
+  for (const Mapping &mp : m.mappings)
+    if (mp.kind == kind && mp.id == id) return &mp;
+  return nullptr;
+}
+
+bool audio_mapping_servable(const Mapping &mp) {
+  return mp.space == "m68k.work_ram" && (mp.kind == "event" || (mp.kind == "command" && (mp.id == "sfx" || mp.id == "music")));
+}
+
+bool audio_capability_servable(const Manifest &m, std::string_view capability) {
+  const std::string_view kind = capability == "audio.command.send" ? "command" : capability == "audio.event.read" ? "event" : "";
+  return kind.empty() || std::any_of(m.mappings.begin(), m.mappings.end(), [&](const Mapping &mp) { return mp.kind == kind && audio_mapping_servable(mp); });
+}
+
+std::optional<Rejection> check_audio_interface(const Manifest &m) {
+  const auto declares = [](const std::vector<std::string> &list, std::string_view name) { return std::find(list.begin(), list.end(), name) != list.end(); };
+  const bool send_required = declares(m.capabilities, "audio.command.send"), read_required = declares(m.capabilities, "audio.event.read");
+  const bool send = send_required || declares(m.capabilities_optional, "audio.command.send"), read = read_required || declares(m.capabilities_optional, "audio.event.read");
+  if (!send && !read) return std::nullopt;
+  if (auto r = check_adapter(m)) return r;
+  std::size_t rows = 0;
+  for (const Mapping &mp : m.mappings) {
+    if (mp.kind != "command" && mp.kind != "event") continue;
+    if (audio_mapping_servable(mp)) {
+      rows += mp.values.size();
+    } else if (mp.kind == "command" ? send_required : read_required) {   // an unservable mapping of an OPTIONAL capability is ignored, never emitted
+      if (mp.space != "m68k.work_ram") return Rejection{"E_AUDIO_TARGET", "the audio API serves mappings in m68k.work_ram only (mapping \"" + mp.id + "\" names " + mp.space + ")"};
+      return Rejection{"E_AUDIO_TARGET", "a command mapping of the audio API has the id \"sfx\" or \"music\", not \"" + mp.id + "\""};
+    }
+  }
+  if (rows > kMaxAudioRows) return Rejection{"E_AUDIO_TARGET", "the audio mappings declare more than 128 values in total"};
+  if (send_required && !audio_capability_servable(m, "audio.command.send")) return Rejection{"E_AUDIO_TARGET", "audio.command.send is required but no command mapping \"sfx\" or \"music\" is declared: there is no verified audio interface"};
+  if (read_required && !audio_capability_servable(m, "audio.event.read")) return Rejection{"E_AUDIO_TARGET", "audio.event.read is required but no event mapping is declared: there is no verified audio interface"};
+  return std::nullopt;
+}
 
 std::optional<Rejection> check_adapter(const Manifest &m) {
   const Adapter *adapter = find_adapter(m.platform);

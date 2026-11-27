@@ -35,6 +35,17 @@ extern "C" {
 #define GENESIS_MOD_ROM_READS_MAX 4096U         /* read operations per callback */
 #define GENESIS_MOD_ROM_READ_BYTES_MAX 8192U    /* bytes read per callback */
 
+/* SEG-145-T008: the declared audio interface of this mod, one flat row per (mapping, value). All values are work-RAM mailboxes/observed locations (m68k.work_ram, big-endian). */
+#define GENESIS_MOD_AUDIO_ENTRIES_MAX 128U
+#define GENESIS_MOD_AUDIO_COMMAND 1U
+#define GENESIS_MOD_AUDIO_EVENT 2U
+typedef struct GenesisModAudioEntry {
+  const char *mapping; /* the mapping id; a command mapping is "sfx" or "music" */
+  const char *name;    /* the declared value name */
+  uint32_t kind;       /* GENESIS_MOD_AUDIO_COMMAND | GENESIS_MOD_AUDIO_EVENT */
+  uint32_t offset, width, value;
+} GenesisModAudioEntry;
+
 /* Access modes of a declared range. */
 #define GENESIS_MOD_ACCESS_READ 1U
 #define GENESIS_MOD_ACCESS_WRITE 2U
@@ -78,6 +89,8 @@ typedef struct GenesisModConfig {
   uint32_t site_count;
   const SegaGenesisRenderApi *render_api; /* SEG-138-T011: the host adapter's render-phase output API (typed ABI 2 feature); published as SegaGenesisFeatures::render only when overlay.rgba is granted; NULL = none */
   const SegaGenesisVdpHelpers *vdp_helpers; /* SEG-152-T004 (ADR 0320 decision 5): the host's pure VDP helpers (the ABI 1 GenesisCompatHost functions); published as SegaGenesisFeatures::vdp only when frame.vdp is granted; NULL = none */
+  const GenesisModAudioEntry *audio; /* SEG-145-T008: the declared audio mappings (copied at attach); NULL/0 = no verified audio interface */
+  uint32_t audio_count;
 } GenesisModConfig;
 
 /* ADR 0320 (SEG-152-T003): the producer's data of one produced frame, handed to an exact-frame provider (one that REQUIRES frame.vdp). Every pointer is read during the call only and is COPIED into scheduler-owned buffers
@@ -103,6 +116,12 @@ typedef struct GenesisModWriteRecord {
 typedef struct GenesisModStagedWrite {
   uint32_t offset, width, value;
 } GenesisModStagedWrite;
+
+typedef struct GenesisModAudioRow {
+  char mapping[SEGA_MOD_AUDIO_NAME_BYTES];
+  char name[SEGA_MOD_AUDIO_NAME_BYTES];
+  uint32_t kind, offset, width, value;
+} GenesisModAudioRow;
 
 typedef struct GenesisModScheduler {
   /* ---- fixed after attach ---- */
@@ -149,6 +168,12 @@ typedef struct GenesisModScheduler {
   uint64_t hook_skips[4];      /* by GenesisFunctionHooks::skipped kind (1 abandoned, 2 unproven caller, 3 frame stack full) */
   uint32_t hook_skip_logged;   /* one diagnostic line per kind (bit per kind), counters count them all */
   const char *external_cause; /* a fault reported by a host-side adapter (genesis_mod_fault_current), NULL = none */
+  /* ---- declared audio interface (SEG-145-T008) ---- */
+  SegaModAudioApi audio_api;
+  GenesisModAudioRow audio[GENESIS_MOD_AUDIO_ENTRIES_MAX];
+  uint32_t audio_count;
+  uint32_t audio_observed[GENESIS_MOD_AUDIO_ENTRIES_MAX]; /* `render`: the value each event row's location held after frame-end (copied only when audio.event.read is granted; never the whole work RAM) */
+  uint8_t audio_observed_valid;
   /* ---- render copy (only when frame.work_ram is granted) ---- */
   uint8_t render_copy[GENESIS_MOD_WORK_RAM_BYTES];
   uint8_t render_copy_valid;
@@ -177,7 +202,8 @@ int genesis_mod_scheduler_present(GenesisModScheduler *scheduler, const GenesisM
 /* Detaches: clears the hooks and the pad interception. The scheduler may then be discarded. */
 void genesis_mod_scheduler_detach(GenesisModScheduler *scheduler);
 
-/* The capabilities (bitset by id) this scheduler can grant: host.log, memory.read/write, input.read/intercept, frame.work_ram (render copy), overlay.rgba (render output, collected by the adapter). */
+/* The capabilities (bitset by id) this scheduler can grant: host.log, memory.read/write, input.read/intercept, frame.work_ram (render copy), overlay.rgba (render output, collected by the adapter),
+ * audio.command.send and audio.event.read (SEG-145-T008, only through the declared mappings of the config). */
 void genesis_mod_scheduler_supported(uint64_t out[2]);
 
 /* For a host-side adapter (the Luau binding) running INSIDE a callback: reports that the callback failed for a reason the scheduler did not see (a script error, memory, budget or watchdog

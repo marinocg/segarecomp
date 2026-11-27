@@ -187,6 +187,7 @@ int compile_natives(const mod::Package &pkg, const std::string &cc, const fs::pa
       while (at < text.size()) {
         const std::size_t end = text.find('\n', at) == std::string::npos ? text.size() : text.find('\n', at);
         const std::string_view line(text.data() + at, end - at);
+        if (line.find("no member named") != std::string_view::npos && m.abi_minor < 4U && line.find("audio") != std::string_view::npos) return true;   // SEG-145-T008: a minor-4 member
         if (line.find("no member named") != std::string_view::npos && m.abi_minor < 3U && line.find("scenery_row_origin") != std::string_view::npos) return true;   // SEG-152-T017: a minor-3 member
         if (line.find("no member named") != std::string_view::npos && m.abi_minor < 2U && line.find("scenery_generic_rows") != std::string_view::npos) return true;   // SEG-152-T007: a minor-2 member
         if (m.abi_minor == 0U && line.find("no member named") != std::string_view::npos && (line.find("frame") != std::string_view::npos || line.find("vdp") != std::string_view::npos || line.find("overlay_bitmap") != std::string_view::npos || line.find("overlay_layer_bitmap") != std::string_view::npos || line.find("overlay_layer_clip") != std::string_view::npos || line.find("overlay_fallback") != std::string_view::npos || line.find("decline") != std::string_view::npos)) return true;
@@ -197,7 +198,7 @@ int compile_natives(const mod::Package &pkg, const std::string &cc, const fs::pa
     // The entry is missing only when the linker reports THAT symbol as undefined (GNU ld, Apple ld, lld spellings); any other link error is E_LINK_FAILED.
     if (link) class_out = has("undefined reference to `segarecomp_mod_provider'") || has("\"_segarecomp_mod_provider\"") || has("undefined symbol: segarecomp_mod_provider") || has("undefined symbol: _segarecomp_mod_provider") || has("unresolved external symbol segarecomp_mod_provider") || has("unresolved external symbol _segarecomp_mod_provider") ? "E_ABI_ENTRY_MISSING" : "E_LINK_FAILED";
     else class_out = text.find("E_ABI_PLATFORM") != std::string::npos ? "E_ABI_PLATFORM" : text.find("E_ABI_HEADER_MISMATCH") != std::string::npos ? "E_ABI_HEADER_MISMATCH" : text.find("E_ABI_MINOR_TOO_NEW") != std::string::npos ? "E_ABI_MINOR_TOO_NEW" : minor_member_missing() ? "E_ABI_MINOR_UNDECLARED" : "E_COMPILE_FAILED";
-    detail = where + ": " + (std::string_view(class_out) == "E_ABI_MINOR_UNDECLARED" ? "the source uses a member of a newer ABI minor of the Genesis tables (minor 1: SegaGenesisFeatures::frame/::vdp or SegaGenesisRenderApi::overlay_bitmap/overlay_layer_bitmap/overlay_layer_clip/overlay_fallback/decline; minor 2: SegaGenesisRenderApi::scenery_generic_rows; minor 3: SegaGenesisRenderApi::scenery_row_origin) than the manifest abi.minor declares; declare \"minor = 1\" (2 for scenery_generic_rows, 3 for scenery_row_origin) under [abi]. " : "") + text.substr(0, 1500);
+    detail = where + ": " + (std::string_view(class_out) == "E_ABI_MINOR_UNDECLARED" ? "the source uses a member of a newer ABI minor of the Genesis tables (minor 1: SegaGenesisFeatures::frame/::vdp or SegaGenesisRenderApi::overlay_bitmap/overlay_layer_bitmap/overlay_layer_clip/overlay_fallback/decline; minor 2: SegaGenesisRenderApi::scenery_generic_rows; minor 3: SegaGenesisRenderApi::scenery_row_origin; minor 4: SegaGenesisFeatures::audio) than the manifest abi.minor declares; declare \"minor = 1\" (2 for scenery_generic_rows, 3 for scenery_row_origin, 4 for audio) under [abi]. " : "") + text.substr(0, 1500);
   };
   for (const auto &[path, bytes] : pkg.files) {   // std::map order: deterministic compile order
     (void)bytes;
@@ -567,7 +568,7 @@ int usage() {
                "       segarecomp mod install <package.segapatch> --rom <original-image> --library <dir> [--approve <package-identity>]\n"
                "       segarecomp mod variant --library <dir> --identity <package-identity> --rom <original-image> [--cc <compiler> --sdk-dir <platforms-dir>]\n"
                "       segarecomp mod inspect [--json] [<dir|package.segapatch>]\n"
-               "       segarecomp mod diff-run <dir|package> --rom <original-image> --cc <compiler> --sdk-dir <platforms-dir> --frames <n> --budget <instructions> --timeout <seconds> [--first <frame>] [--input <pad-script>] [--ram <offset:length>]... [--code <offset:length>]... [--aggregate] [--work <dir>]\n"
+               "       segarecomp mod diff-run <dir|package> --rom <original-image> --cc <compiler> --sdk-dir <platforms-dir> --frames <n> --budget <instructions> --timeout <seconds> [--first <frame>] [--input <pad-script>] [--ram <offset:length>]... [--code <offset:length>]... [--audio] [--aggregate] [--work <dir>]\n"
                "       segarecomp mod test <dir> --rom <original-image> --cc <compiler> --sdk-dir <platforms-dir> [--scenario <name>] [--aggregate] [--work <dir>]\n"
                "       segarecomp mod convert-audio <file.wav> --out <file.u8>\n"
                "       segarecomp mod apply <dir|package.segapatch> --rom <original-image> --out <edited-image>\n"
@@ -622,12 +623,14 @@ int segarecomp_mod_command(int argc, char **argv) {
     else if (a == "--scenario") { if (!value(run.scenario)) return usage(); }
     else if (a == "--work") { if (!value(tmp)) return usage(); run.work = tmp; }
     else if (a == "--aggregate") run.aggregate = true;
+    else if (a == "--audio") run.audio = true;
     else if (a == "--bmp") { if (!value(tmp)) return usage(); bmp = tmp; }
     else if (a == "--json") continue;   // output is always JSON
     else if (a.substr(0, 2) == "--" || !target.empty()) return usage();
     else target = std::string(a);
   }
   if (sub == "api" && target.empty()) return run_api(declarations_only);
+  if (run.audio && sub != "diff-run") return usage();   // the sound gate is a Vanilla-versus-Modded comparison
   if (sub == "diff-run" || sub == "test") {   // SEG-136-T007 (ADR 0300): bounded Vanilla-versus-Modded workflow; always explicit budgets and timeouts
     run.target = target;
     run.rom = rom;

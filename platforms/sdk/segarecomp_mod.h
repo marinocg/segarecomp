@@ -14,7 +14,7 @@
 #include <stdint.h>
 
 #define SEGA_MOD_ABI_MAJOR 2U
-#define SEGA_MOD_ABI_MINOR 3U /* a host with a larger minor accepts a provider requiring a smaller or equal minor. Minor 1 (ADR 0320, SEG-152-T003): the exact-frame view and VDP helpers of the Genesis table; minor 2 (SEG-152-T007): SegaGenesisRenderApi::scenery_generic_rows; minor 3 (SEG-152-T017): SegaGenesisRenderApi::scenery_row_origin */
+#define SEGA_MOD_ABI_MINOR 4U /* a host with a larger minor accepts a provider requiring a smaller or equal minor. Minor 1 (ADR 0320, SEG-152-T003): the exact-frame view and VDP helpers of the Genesis table; minor 2 (SEG-152-T007): SegaGenesisRenderApi::scenery_generic_rows; minor 3 (SEG-152-T017): SegaGenesisRenderApi::scenery_row_origin; minor 4 (SEG-145-T008): the audio API (SegaModAudioApi, SegaGenesisFeatures::audio) and the two audio status values */
 
 #if defined(SEGA_MOD_TARGET_ABI_MAJOR) && (SEGA_MOD_TARGET_ABI_MAJOR != SEGA_MOD_ABI_MAJOR)
 #error "E_ABI_HEADER_MISMATCH: the manifest abi.native differs from SEGA_MOD_ABI_MAJOR of this header"
@@ -56,7 +56,9 @@ typedef enum SegaModStatus {
   SEGA_MOD_E_READONLY = 5,
   SEGA_MOD_E_NOT_OWNER = 6,
   SEGA_MOD_E_BUDGET = 7,
-  SEGA_MOD_E_PHASE = 8
+  SEGA_MOD_E_PHASE = 8,
+  SEGA_MOD_E_AUDIO_TARGET = 9, /* minor 4: the call has no verified interface: the manifest declares no mapping for it */
+  SEGA_MOD_E_AUDIO_NAME = 10   /* minor 4: the name is not one of the declared mapping's values */
 } SegaModStatus;
 
 /* Capability ids (ABI 2 section 4; append-only; 0 and unlisted ids are reserved). `granted` is a bitset indexed by id. */
@@ -77,6 +79,25 @@ enum {
   SEGA_MOD_CAP_AUDIO_COMMAND_SEND = 14,
   SEGA_MOD_CAP_AUDIO_HOST_PLAY = 15
 };
+
+/* SEG-145-T008 (ABI minor 4, docs/architecture/modding-audio-architecture.md section 10): the cross-platform audio API. It knows no sound chip, driver or id: every call resolves a NAME through a mapping the
+ * package declared and verified (`mappings`), or fails. A command writes the declared value into the declared work-RAM mailbox as an ordinary staged write (phases section 4): it is committed with the
+ * callback, takes no guest time, counts against the write budget and enters the replay witness; the mailbox holds one value (the SDK never queues, retries or acknowledges). Channels:
+ *   play_sfx(name)    a value `name` of the command mapping with id "sfx"        (audio.command.send)
+ *   play_music(name)  a value `name` of the command mapping with id "music"      (audio.command.send)
+ *   stop_music()      the value named "stop" of the command mapping "music"      (audio.command.send)
+ *   read_event(mapping, out)  the first declared event name of the event mapping `mapping` whose value the observed location holds now, else "" (audio.event.read; a level, not a queue)
+ * Command phases: frame-begin, post-input, hook-entry, hook-exit, frame-end. Event phases: frame-end, render. There is no volume call: no mapping or platform exposes a verified control.
+ * Each call returns a SegaModStatus; a non-zero result is also a fault of the callback (SEGA_MOD_E_CAPABILITY, _PHASE, _AUDIO_TARGET, _AUDIO_NAME, _RANGE for a NULL argument, _BUDGET). */
+#define SEGA_MOD_AUDIO_NAME_BYTES 33U /* the longest mapping or value name (32) and its terminator */
+typedef struct SegaModAudioApi {
+  uint32_t size; /* the host's sizeof */
+  int (*play_sfx)(const char *name);
+  int (*play_music)(const char *name);
+  int (*stop_music)(void);
+  int (*read_event)(const char *mapping, char name_out[SEGA_MOD_AUDIO_NAME_BYTES]);
+  void *reserved[4]; /* NULL */
+} SegaModAudioApi;
 
 /* Host services. The host fills it; `size` is the host's sizeof; a provider reads only fields below `size`. Every pointer may be NULL when its capability was not granted. */
 typedef struct SegaModHost {

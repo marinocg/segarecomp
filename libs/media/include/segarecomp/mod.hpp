@@ -41,7 +41,7 @@ inline constexpr std::size_t kMaxHooks = 64;      // manifest `hooks` entries (A
 inline constexpr std::uint32_t kMaxAudioSeconds = 600;
 inline constexpr std::uint64_t kLuauMemoryPolicyMax = 4194304, kLuauBudgetPolicyMax = 100000;
 inline constexpr unsigned kNativeAbiMajor = 2;
-inline constexpr unsigned kNativeAbiMinor = 3;   // ADR 0320 decision 10: equals SEGA_MOD_ABI_MINOR; a manifest `abi.minor` above it is E_ABI_MINOR_TOO_NEW
+inline constexpr unsigned kNativeAbiMinor = 4;   // ADR 0320 decision 10: equals SEGA_MOD_ABI_MINOR; a manifest `abi.minor` above it is E_ABI_MINOR_TOO_NEW
 
 // ---- platform adapters (ADR 0280): a table of capability sets, never a class hierarchy ----
 enum class Support { unsupported, experimental, supported_with_limitations, supported_and_tested };
@@ -198,6 +198,17 @@ struct Package {
 // Validates the archive, the manifest and every payload against schema 3. Reserved kinds/sources are parsed and rejected.
 [[nodiscard]] Package read_package(std::span<const std::uint8_t> zip);
 [[nodiscard]] Package read_package_file(const std::filesystem::path &path);
+// SEG-145-T008: the audio API serves a program only through mappings the package declared and the runtime can serve. A mapping is SERVABLE when it lies in m68k.work_ram and is an event mapping, or a command mapping
+// named "sfx" or "music". For a manifest that declares audio.command.send / audio.event.read this checks the adapter rules of every mapping and the 128 (mapping, value) row limit of the servable ones; a REQUIRED
+// audio capability additionally refuses an unservable mapping of its kind and needs at least one servable one. An OPTIONAL audio capability is never refused here: unservable mappings are ignored and, without a
+// servable one, the capability is not granted (audio_capability_servable). Classes: E_AUDIO_TARGET (and the adapter's own). A manifest without audio capabilities is never refused. (Pure.)
+[[nodiscard]] std::optional<Rejection> check_audio_interface(const Manifest &manifest);
+[[nodiscard]] bool audio_mapping_servable(const Mapping &mapping);
+// False only for audio.command.send / audio.event.read without a servable mapping of its kind; true for every other capability name. The ONE rule the grant resolvers use (luau_config.cpp).
+[[nodiscard]] bool audio_capability_servable(const Manifest &manifest, std::string_view capability);
+inline constexpr std::size_t kMaxAudioRows = 128;   // GENESIS_MOD_AUDIO_ENTRIES_MAX
+// The command mapping `id` ("sfx"/"music") or event mapping `id` of the manifest, or null. `kind` is "command" | "event".
+[[nodiscard]] const Mapping *find_audio_mapping(const Manifest &manifest, std::string_view kind, std::string_view id);
 // Cross-checks a manifest against its platform adapter: capability support, space legality of mappings, audio conversion availability. (Pure; used by `mod check`.)
 [[nodiscard]] std::optional<Rejection> check_adapter(const Manifest &manifest);
 // Canonical stored ZIP (schema 3 section 2): path order, manifest first, fixed times and attributes. Deterministic for equal inputs.

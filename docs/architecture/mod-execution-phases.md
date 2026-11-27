@@ -142,4 +142,4 @@ Equivalent spikes gate SEG-147-T003 (Z80) and SEG-148-T004 (Sega CD); no functio
 
 ## 9. What this contract does not define
 
-Scheduler implementation, hook plumbing beyond the generated-native M68K path, a universal CPU interception API, multi-mod ordering and ownership (SEG-141), audio events (see [modding-audio-architecture.md](modding-audio-architecture.md) section 5).
+Scheduler implementation, hook plumbing beyond the generated-native M68K path, a universal CPU interception API, multi-mod ordering and ownership (SEG-141), audio events and commands (the Genesis audio API follows these phases: [modding-audio-architecture.md](modding-audio-architecture.md) sections 5 and 10).

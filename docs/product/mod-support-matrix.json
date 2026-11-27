@@ -488,12 +488,17 @@
   {
    "platform": "genesis",
    "capability": "guest-native-audio",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-and-tested",
    "evidence": [
-    "docs/architecture/modding-audio-architecture.md"
+    "docs/product/genesis-sound-mods.md",
+    "ADR 0323"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_sound_workflow_test.py",
+    "tests/mod_audio_api_test.py",
+    "tests/genesis_mod_audio_test.cpp"
+   ],
    "planned_owner": "SEG-145-T003"
   },
   {

@@ -60,6 +60,9 @@ struct HostServices {
   int (*write)(void *ctx, std::uint32_t space, std::uint32_t offset, std::uint32_t width, std::uint32_t value) = nullptr;
   int (*input_get)(void *ctx, std::uint32_t port, std::uint32_t *buttons) = nullptr;
   int (*input_set)(void *ctx, std::uint32_t port, std::uint32_t buttons) = nullptr;
+  // SEG-145-T008: the declared audio interface (SegaModAudioApi). `op`: 0 play_sfx, 1 play_music, 2 stop_music (name ignored). `audio_event` writes at most 32 characters and a terminator ("" = no event).
+  int (*audio_command)(void *ctx, int op, const char *name) = nullptr;
+  int (*audio_event)(void *ctx, const char *mapping, char name_out[33]) = nullptr;
 };
 struct FrameInput {
   std::uint64_t number = 0;

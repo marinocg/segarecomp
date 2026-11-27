@@ -17,6 +17,8 @@ _Static_assert(SEGA_GEN_FRAME_MAX_LINES == GENESIS_RASTER_MAX_LINES, "the exact-
                       PHASE_BIT(SEGA_MOD_PHASE_FRAME_END) | PHASE_BIT(SEGA_MOD_PHASE_RENDER) | HOOK_PHASES)
 #define READ_PHASES (PHASE_BIT(SEGA_MOD_PHASE_RESET) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_END) | HOOK_PHASES)
 #define WRITE_PHASES (PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_END) | HOOK_PHASES)
+#define AUDIO_COMMAND_PHASES WRITE_PHASES /* audio.command.send: the phases that may write guest memory (modding-audio-architecture.md section 5) */
+#define AUDIO_EVENT_PHASES (PHASE_BIT(SEGA_MOD_PHASE_FRAME_END) | PHASE_BIT(SEGA_MOD_PHASE_RENDER))
 #define INPUT_READ_PHASES (PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT))
 
 static uint64_t cap_bit(unsigned id) { return UINT64_C(1) << (id % 64U); }
@@ -24,6 +26,7 @@ static uint64_t cap_bit(unsigned id) { return UINT64_C(1) << (id % 64U); }
 void genesis_mod_scheduler_supported(uint64_t out[2]) {
   out[0] = cap_bit(SEGA_MOD_CAP_HOST_LOG) | cap_bit(SEGA_MOD_CAP_FRAME_WORK_RAM) | cap_bit(SEGA_MOD_CAP_MEMORY_READ) | cap_bit(SEGA_MOD_CAP_MEMORY_WRITE) | cap_bit(SEGA_MOD_CAP_INPUT_READ) |
            cap_bit(SEGA_MOD_CAP_INPUT_INTERCEPT) | cap_bit(SEGA_MOD_CAP_HOOK_FUNCTION) | cap_bit(SEGA_MOD_CAP_STATE_MOD) |
+           cap_bit(SEGA_MOD_CAP_AUDIO_COMMAND_SEND) | cap_bit(SEGA_MOD_CAP_AUDIO_EVENT_READ) |
            cap_bit(SEGA_MOD_CAP_SCENERY_WORDS) | cap_bit(SEGA_MOD_CAP_OVERLAY_RGBA) | cap_bit(SEGA_MOD_CAP_FRAME_VDP); /* frame.vdp (ADR 0320): REQUIRED-only, it selects the exact-frame callback; scenery.words (SEG-140-T011) is output of the same kind: */ /* presentation output of `render`: collected by the provider adapter and presented by the host, not a scheduler service */
   out[1] = 0;
 }
@@ -53,6 +56,8 @@ const char *genesis_mod_status_cause(int status) {
     case SEGA_MOD_E_NOT_OWNER: return "owner";
     case SEGA_MOD_E_BUDGET: return "budget";
     case SEGA_MOD_E_PHASE: return "phase";
+    case SEGA_MOD_E_AUDIO_TARGET: return "audio-target";
+    case SEGA_MOD_E_AUDIO_NAME: return "audio-name";
     default: break;
   }
   return "";
@@ -168,9 +173,19 @@ static int service_read(uint32_t space, uint32_t offset, uint32_t width, uint32_
   return SEGA_MOD_OK;
 }
 
+static int stage_write(GenesisModScheduler *s, uint32_t offset, uint32_t width, uint32_t value) {
+  GenesisModStagedWrite *w;
+  if (s->staged_count >= GENESIS_MOD_WRITE_OPS_MAX || s->staged_bytes + width > GENESIS_MOD_WRITE_BYTES_MAX) return violation(s, SEGA_MOD_E_BUDGET);
+  w = &s->staged[s->staged_count++];
+  w->offset = offset;
+  w->width = width;
+  w->value = value;
+  s->staged_bytes += width;
+  return SEGA_MOD_OK;
+}
+
 static int service_write(uint32_t space, uint32_t offset, uint32_t width, uint32_t value) {
   GenesisModScheduler *s = g_current;
-  GenesisModStagedWrite *w;
   if (s == NULL || !s->in_callback) return SEGA_MOD_E_PHASE;
   if (space == SEGA_GEN_SPACE_M68K_HOOK_REGS) return service_reg_write(s, offset, width, value);
   if (!granted(s, SEGA_MOD_CAP_MEMORY_WRITE)) return violation(s, SEGA_MOD_E_CAPABILITY);
@@ -180,13 +195,7 @@ static int service_write(uint32_t space, uint32_t offset, uint32_t width, uint32
   if (!width_ok(width) || (width < 4U && value >> (8U * width)) != 0U) return violation(s, SEGA_MOD_E_RANGE);
   if (width > 1U && (offset & 1U) != 0U) return violation(s, SEGA_MOD_E_ALIGNMENT);
   if ((uint64_t)offset + width > GENESIS_MOD_WORK_RAM_BYTES || !in_declared_range(s, space, offset, width, GENESIS_MOD_ACCESS_WRITE)) return violation(s, SEGA_MOD_E_RANGE);
-  if (s->staged_count >= GENESIS_MOD_WRITE_OPS_MAX || s->staged_bytes + width > GENESIS_MOD_WRITE_BYTES_MAX) return violation(s, SEGA_MOD_E_BUDGET);
-  w = &s->staged[s->staged_count++];
-  w->offset = offset;
-  w->width = width;
-  w->value = value;
-  s->staged_bytes += width;
-  return SEGA_MOD_OK;
+  return stage_write(s, offset, width, value);
 }
 
 static int service_input_get(uint32_t port, uint32_t *buttons) {
@@ -213,6 +222,123 @@ static int service_input_set(uint32_t port, uint32_t buttons) {
   s->staged_pad[port - 1U] = (uint8_t)buttons;
   s->staged_pad_set[port - 1U] = 1U;
   return SEGA_MOD_OK;
+}
+
+/* ---- the declared audio interface (SEG-145-T008). Names resolve only through the rows the package declared: no id, chip or driver protocol is known here. ---- */
+static int audio_name_is(const char *declared, const char *asked) { return strncmp(declared, asked, SEGA_MOD_AUDIO_NAME_BYTES) == 0; } /* declared names are NUL-terminated within the bound, so a longer `asked` never matches */
+
+static int audio_command(const char *mapping, const char *name) {
+  GenesisModScheduler *s = g_current;
+  uint32_t i;
+  int declared = 0;
+  if (s == NULL || !s->in_callback) return SEGA_MOD_E_PHASE;
+  if (!granted(s, SEGA_MOD_CAP_AUDIO_COMMAND_SEND)) return violation(s, SEGA_MOD_E_CAPABILITY);
+  if ((AUDIO_COMMAND_PHASES & PHASE_BIT(s->phase)) == 0U) return violation(s, SEGA_MOD_E_PHASE);
+  if (name == NULL) return violation(s, SEGA_MOD_E_RANGE);
+  for (i = 0; i < s->audio_count; ++i) {
+    const GenesisModAudioRow *row = &s->audio[i];
+    if (row->kind != GENESIS_MOD_AUDIO_COMMAND || !audio_name_is(row->mapping, mapping)) continue;
+    declared = 1;
+    if (audio_name_is(row->name, name)) return stage_write(s, row->offset, row->width, row->value);
+  }
+  return violation(s, declared ? SEGA_MOD_E_AUDIO_NAME : SEGA_MOD_E_AUDIO_TARGET);
+}
+
+static int service_audio_sfx(const char *name) { return audio_command("sfx", name); }
+static int service_audio_music(const char *name) { return audio_command("music", name); }
+static int service_audio_stop(void) { return audio_command("music", "stop"); }
+
+static int service_audio_event(const char *mapping, char name_out[SEGA_MOD_AUDIO_NAME_BYTES]) {
+  GenesisModScheduler *s = g_current;
+  uint32_t i, k;
+  int declared = 0, render;
+  if (name_out != NULL) memset(name_out, 0, SEGA_MOD_AUDIO_NAME_BYTES);
+  if (s == NULL || !s->in_callback) return SEGA_MOD_E_PHASE;
+  if (!granted(s, SEGA_MOD_CAP_AUDIO_EVENT_READ)) return violation(s, SEGA_MOD_E_CAPABILITY);
+  if ((AUDIO_EVENT_PHASES & PHASE_BIT(s->phase)) == 0U) return violation(s, SEGA_MOD_E_PHASE);
+  if (mapping == NULL || name_out == NULL) return violation(s, SEGA_MOD_E_RANGE);
+  render = s->phase == SEGA_MOD_PHASE_RENDER;
+  /* An exact-frame render observes the producer's previous-onset copy, which the host hands over only under frame.work_ram: without that grant there is nothing to observe, and answering "no event" would lie. */
+  if (render && s->exact_frame && !granted(s, SEGA_MOD_CAP_FRAME_WORK_RAM)) return violation(s, SEGA_MOD_E_CAPABILITY);
+  for (i = 0; i < s->audio_count; ++i) {
+    const GenesisModAudioRow *row = &s->audio[i];
+    uint32_t value = 0U;
+    if (row->kind != GENESIS_MOD_AUDIO_EVENT || !audio_name_is(row->mapping, mapping)) continue;
+    declared = 1;
+    if (render) {
+      if (!s->audio_observed_valid) continue; /* an exact frame without a previous-onset copy: nothing observed, no event */
+      value = s->audio_observed[i];
+    } else {
+      for (k = 0; k < row->width; ++k) value = (value << 8U) | byte_at(s, s->runtime->work_ram, row->offset + k); /* sees this callback's staged writes */
+    }
+    if (value == row->value) {
+      memcpy(name_out, row->name, SEGA_MOD_AUDIO_NAME_BYTES);
+      return SEGA_MOD_OK;
+    }
+  }
+  return declared ? SEGA_MOD_OK : violation(s, SEGA_MOD_E_AUDIO_TARGET);
+}
+
+/* `render` observes a copy: the declared event locations only, taken from `work_ram` (the after-frame-end image). */
+static void observe_audio(GenesisModScheduler *s, const uint8_t *work_ram) {
+  uint32_t i, k;
+  s->audio_observed_valid = 0U;
+  if (work_ram == NULL || !granted(s, SEGA_MOD_CAP_AUDIO_EVENT_READ)) return;
+  for (i = 0; i < s->audio_count; ++i) {
+    uint32_t value = 0U;
+    if (s->audio[i].kind != GENESIS_MOD_AUDIO_EVENT) continue;
+    for (k = 0; k < s->audio[i].width; ++k) value = (value << 8U) | work_ram[s->audio[i].offset + k];
+    s->audio_observed[i] = value;
+  }
+  s->audio_observed_valid = 1U;
+}
+
+static int bounded_name(const char *name) {
+  uint32_t i;
+  if (name == NULL) return 0;
+  for (i = 0; i < SEGA_MOD_AUDIO_NAME_BYTES; ++i) {
+    if (name[i] == '\0') return i != 0U;
+    if (name[i] < 0x21 || name[i] > 0x7E) return 0;
+  }
+  return 0;
+}
+
+/* Validates and copies the declared interface (defence in depth: the package layer checked the same). A required audio capability without a usable mapping is refused (E_AUDIO_TARGET); an optional one is
+ * simply not granted: the capability is ABSENT, never a guess. */
+static const char *attach_audio(GenesisModScheduler *s, const GenesisModConfig *config) {
+  uint32_t i, j, kinds = 0U;
+  if (config->audio_count > GENESIS_MOD_AUDIO_ENTRIES_MAX || (config->audio_count != 0U && config->audio == NULL)) return "E_AUDIO_MAPPING";
+  for (i = 0; i < config->audio_count; ++i) {
+    const GenesisModAudioEntry *e = &config->audio[i];
+    GenesisModAudioRow *row = &s->audio[s->audio_count];
+    if (!bounded_name(e->mapping) || !bounded_name(e->name) || (e->kind != GENESIS_MOD_AUDIO_COMMAND && e->kind != GENESIS_MOD_AUDIO_EVENT) || !width_ok(e->width) ||
+        (e->width > 1U && (e->offset % e->width) != 0U) || (uint64_t)e->offset + e->width > GENESIS_MOD_WORK_RAM_BYTES || (e->width < 4U && e->value >> (8U * e->width)) != 0U)
+      return "E_AUDIO_MAPPING";
+    if (e->kind == GENESIS_MOD_AUDIO_COMMAND && strcmp(e->mapping, "sfx") != 0 && strcmp(e->mapping, "music") != 0) return "E_AUDIO_MAPPING";
+    for (j = 0; j < s->audio_count; ++j) {
+      const GenesisModAudioRow *o = &s->audio[j];
+      if (strcmp(o->mapping, e->mapping) != 0) continue;
+      if (o->kind != e->kind || o->offset != e->offset || o->width != e->width || strcmp(o->name, e->name) == 0) return "E_AUDIO_MAPPING"; /* one mapping, one location, unique names */
+    }
+    if (!granted(s, e->kind == GENESIS_MOD_AUDIO_COMMAND ? SEGA_MOD_CAP_AUDIO_COMMAND_SEND : SEGA_MOD_CAP_AUDIO_EVENT_READ)) return "E_AUDIO_MAPPING";
+    memcpy(row->mapping, e->mapping, strlen(e->mapping) + 1U);
+    memcpy(row->name, e->name, strlen(e->name) + 1U);
+    row->kind = e->kind;
+    row->offset = e->offset;
+    row->width = e->width;
+    row->value = e->value;
+    kinds |= e->kind;
+    ++s->audio_count;
+  }
+  {
+    const struct { uint32_t cap, kind; } needs[2] = {{SEGA_MOD_CAP_AUDIO_COMMAND_SEND, GENESIS_MOD_AUDIO_COMMAND}, {SEGA_MOD_CAP_AUDIO_EVENT_READ, GENESIS_MOD_AUDIO_EVENT}};
+    for (i = 0; i < 2U; ++i) {
+      if ((kinds & needs[i].kind) != 0U || !granted(s, needs[i].cap)) continue;
+      if ((config->required[0] & cap_bit(needs[i].cap)) != 0U) return "E_AUDIO_TARGET";
+      s->host.granted[0] &= ~cap_bit(needs[i].cap);
+    }
+  }
+  return NULL;
 }
 
 static void service_log(const char *ascii, uint32_t length) {
@@ -455,8 +581,10 @@ static void hook_after_snapshot(void *ctx, GenesisRuntime *rt) {
       memcpy(s->render_copy, rt->work_ram, GENESIS_MOD_WORK_RAM_BYTES);
       s->render_copy_valid = 1U;
     }
+    observe_audio(s, rt->work_ram);
     run_phase(s, SEGA_MOD_PHASE_RENDER, ended);
     s->render_copy_valid = 0U;
+    s->audio_observed_valid = 0U;
   }
   open_frame(s, rt);
 }
@@ -486,7 +614,9 @@ int genesis_mod_scheduler_present(GenesisModScheduler *s, const GenesisModExactF
   s->view.line_count = lines;
   s->features.frame = &s->view;
   ++s->exact_calls;
+  observe_audio(s, f->work_ram);
   run_phase(s, SEGA_MOD_PHASE_RENDER, s->runtime->virtual_frame_count - 1U);
+  s->audio_observed_valid = 0U;
   s->features.frame = NULL;
   s->render_copy_valid = 0U;
   return s->disabled ? 0 : 1;
@@ -536,6 +666,14 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
     *rejection = "E_PROVIDER_ENTRY";
     return 1;
   }
+  {
+    const char *audio_rejection = attach_audio(s, config);
+    if (audio_rejection != NULL) {
+      *rejection = audio_rejection;
+      return 1;
+    }
+  }
+  s->config.audio = NULL; /* the scheduler owns copies in s->audio: the caller's array and strings need not outlive attach */
   if (sega_mod_is_granted(&s->host, SEGA_MOD_CAP_FRAME_VDP) && config->vdp_helpers == NULL) { /* ADR 0320 decisions 2 and 5: a granted frame.vdp promises the view AND the helper table; a host that has no producer seam (the headless capture) supplies neither, so the requirement is refused, exactly as before frame.vdp became grantable */
     *rejection = "E_CAPABILITY_UNSUPPORTED";
     return 1;
@@ -644,6 +782,12 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
   s->features.render = sega_mod_is_granted(&s->host, SEGA_MOD_CAP_OVERLAY_RGBA) || sega_mod_is_granted(&s->host, SEGA_MOD_CAP_SCENERY_WORDS) ? config->render_api : NULL;   /* SEG-140-T011: scenery.words is render output too */
   s->features.frame = NULL;   /* non-NULL only inside the exact-frame render callback */
   s->features.vdp = sega_mod_is_granted(&s->host, SEGA_MOD_CAP_FRAME_VDP) ? config->vdp_helpers : NULL;   /* ADR 0320 decision 5: the host's own VDP functions, supplied by the adapter (the scheduler never links the VDP renderer) */
+  s->audio_api.size = (uint32_t)sizeof(SegaModAudioApi);
+  s->audio_api.play_sfx = service_audio_sfx;
+  s->audio_api.play_music = service_audio_music;
+  s->audio_api.stop_music = service_audio_stop;
+  s->audio_api.read_event = service_audio_event;
+  s->features.audio = granted(s, SEGA_MOD_CAP_AUDIO_COMMAND_SEND) || granted(s, SEGA_MOD_CAP_AUDIO_EVENT_READ) ? &s->audio_api : NULL;
   s->host.platform_features = &s->features;
   s->host.platform_features_size = (uint32_t)sizeof(SegaGenesisFeatures);
   s->host.log = service_log;
@@ -975,6 +1119,14 @@ static void compat_digest(const GenesisModScheduler *s, uint8_t out[32]) {
   sha_u32(&sha, s->config.provider != NULL ? s->config.provider->implementation_version : 0U);
   sha_u32(&sha, s->config.range_count);
   for (i = 0; i < s->config.range_count; ++i) { sha_u32(&sha, s->ranges[i].space); sha_u32(&sha, s->ranges[i].offset); sha_u32(&sha, s->ranges[i].length); sha_u32(&sha, s->ranges[i].modes); }
+  if (s->audio_count != 0U) { /* the declared audio interface decides which guest bytes a command writes (only when one exists, so other digests are unchanged) */
+    sha_u32(&sha, s->audio_count);
+    for (i = 0; i < s->audio_count; ++i) {
+      genesis_sha256_update(&sha, (const uint8_t *)s->audio[i].mapping, SEGA_MOD_AUDIO_NAME_BYTES);
+      genesis_sha256_update(&sha, (const uint8_t *)s->audio[i].name, SEGA_MOD_AUDIO_NAME_BYTES);
+      sha_u32(&sha, s->audio[i].kind); sha_u32(&sha, s->audio[i].offset); sha_u32(&sha, s->audio[i].width); sha_u32(&sha, s->audio[i].value);
+    }
+  }
   if (s->config.rom_data_bytes != 0U) { /* the materialised bytes are part of the configuration (only when ROM ranges exist, so other digests are unchanged) */
     sha_u32(&sha, s->config.rom_data_bytes);
     genesis_sha256_update(&sha, s->config.rom_data, s->config.rom_data_bytes);

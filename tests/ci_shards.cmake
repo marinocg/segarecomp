@@ -26,7 +26,7 @@ set(SEGARECOMP_CI_SHARD_BUDGET_SECONDS 700)   # per shard (~530 s expected, ~585
 set(SEGARECOMP_CI_MAX_TEST_SECONDS 600)
 set(SEGARECOMP_CI_DEFAULT_COST 3)
 set(SEGARECOMP_CI_TEST_COSTS
-  m68k_capability_ratchet_test=298 genesis_m68k_alias_build_test=17 z80_owner_group_differential_test_slice4=488 z80_owner_group_differential_test_slice2=231
+  m68k_capability_ratchet_test=298 mod_audio_api_test=150 mod_sound_workflow_test=120 mod_audio_optional_test=300 genesis_m68k_alias_build_test=17 z80_owner_group_differential_test_slice4=488 z80_owner_group_differential_test_slice2=231
   z80_owner_group_differential_test=286 genesis_z80_build_pipeline_bound_test=401 sms_machine_scheduler_test=103
   z80_owner_group_differential_test_slice3=215 sms_owner_group_equivalence_render_test=129
   m68k_pipeline_tests=178 sms_machine_e2e_test=77 genesis_generated_c_compaction_differential_test=150

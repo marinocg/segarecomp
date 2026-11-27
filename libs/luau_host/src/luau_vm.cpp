@@ -372,8 +372,8 @@ const HostServices *services_of(lua_State *L, const char *name) {
 
 [[noreturn]] void service_fault(lua_State *L, int status, const char *name) {
   const Fault f = status == 1 ? Fault::capability : status == 8 ? Fault::phase : status == 7 ? Fault::budget : Fault::range;
-  static const char *const kClass[] = {"ok", "capability", "space", "range", "alignment", "readonly", "owner", "budget", "phase"};
-  binding_fault(L, f, std::string(name) + ": " + (status >= 0 && status <= 8 ? kClass[status] : "range") + " violation");
+  static const char *const kClass[] = {"ok", "capability", "space", "range", "alignment", "readonly", "owner", "budget", "phase", "audio-target", "audio-name"};
+  binding_fault(L, f, std::string(name) + ": " + (status >= 0 && status <= 10 ? kClass[status] : "range") + " violation");
 }
 
 int sega_mem_read(lua_State *L) {
@@ -420,6 +420,37 @@ int sega_input_set(lua_State *L) {
   const int st = sv->input_set(sv->ctx, static_cast<std::uint32_t>(port), static_cast<std::uint32_t>(buttons));
   if (st != 0) service_fault(L, st, "sega.input.set");
   return 0;
+}
+
+// SEG-145-T008: the audio bindings are thin copies of the scheduler's audio services (the SegaModAudioApi a native provider calls), so phase, capability, mapping and name rules are identical.
+// A name that cannot be a declared token (empty, longer than 32, a NUL or non-printable byte) is passed as one no declaration can hold, so the scheduler answers "name" / "target" exactly as for C11.
+std::string audio_token(std::string_view text) {
+  const bool plausible = !text.empty() && text.size() <= 32 && std::all_of(text.begin(), text.end(), [](char c) { return c >= 0x21 && c <= 0x7E; });
+  return plausible ? std::string(text) : std::string(" ");
+}
+
+int audio_command(lua_State *L, int op, const char *name) {
+  const HostServices *sv = services_of(L, name);
+  require_args(L, op == 2 ? 0 : 1, name);
+  const std::string token = op == 2 ? std::string("stop") : audio_token(str_arg(L, 1, name));
+  const int st = sv->audio_command != nullptr ? sv->audio_command(sv->ctx, op, token.c_str()) : 1;
+  if (st != 0) service_fault(L, st, name);
+  return 0;
+}
+int sega_audio_play_sfx(lua_State *L) { return audio_command(L, 0, "sega.audio.play_sfx"); }
+int sega_audio_play_music(lua_State *L) { return audio_command(L, 1, "sega.audio.play_music"); }
+int sega_audio_stop_music(lua_State *L) { return audio_command(L, 2, "sega.audio.stop_music"); }
+
+int sega_audio_event(lua_State *L) {
+  const HostServices *sv = services_of(L, "sega.audio.event");
+  require_args(L, 1, "sega.audio.event");
+  const std::string token = audio_token(str_arg(L, 1, "sega.audio.event"));
+  char out[33] = {};
+  const int st = sv->audio_event != nullptr ? sv->audio_event(sv->ctx, token.c_str(), out) : 1;
+  if (st != 0) service_fault(L, st, "sega.audio.event");
+  if (out[0] == '\0') lua_pushnil(L);
+  else lua_pushstring(L, out);
+  return 1;
 }
 
 int sega_frame_value(lua_State *L) {
@@ -642,6 +673,14 @@ void install_host(lua_State *L, VmImpl *im) {
   guard_namespace(L, "sega.sprite");
   lua_setreadonly(L, -1, true);
   lua_setfield(L, -2, "sprite");
+  lua_newtable(L);   // sega.audio (SEG-145-T008)
+  bind(L, im, "sega.audio.play_sfx", sega_audio_play_sfx);
+  bind(L, im, "sega.audio.play_music", sega_audio_play_music);
+  bind(L, im, "sega.audio.stop_music", sega_audio_stop_music);
+  bind(L, im, "sega.audio.event", sega_audio_event);
+  guard_namespace(L, "sega.audio");
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, -2, "audio");
   guard_namespace(L, "sega");
   lua_setreadonly(L, -1, true);
   lua_setfield(L, LUA_GLOBALSINDEX, "sega");

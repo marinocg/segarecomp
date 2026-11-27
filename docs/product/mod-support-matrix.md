@@ -61,7 +61,7 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Widescreen presentation (16:9 today; up to 32:9 planned) | Genesis / Mega Drive | supported-with-limitations | supported-with-limitations | `tests/genesis_extension_test.cpp`, `tests/mod_vsprite_wide_test.py` |
 | Widescreen presentation (16:9 today; up to 32:9 planned) | Master System | experimental | unsupported | planned: SEG-147-T009 |
 | Widescreen presentation (16:9 today; up to 32:9 planned) | Sega CD | experimental | unsupported | planned: SEG-148-T010 |
-| Guest-native audio | Genesis / Mega Drive | unsupported | supported-and-tested | planned: SEG-145-T003 |
+| Guest-native audio | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/mod_sound_workflow_test.py`, `tests/mod_audio_api_test.py`, `tests/genesis_mod_audio_test.cpp` |
 | Guest-native audio | Master System | unsupported | supported-with-limitations | planned: SEG-145-T004 |
 | Guest-native audio | Sega CD | unsupported | experimental | planned: SEG-145-T006 |
 | Enhanced audio | Genesis / Mega Drive | unsupported | unsupported | planned: SEG-145-T009 |

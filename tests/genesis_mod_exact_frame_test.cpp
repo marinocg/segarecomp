@@ -347,7 +347,7 @@ void test_optional_and_ordinary() {
     const uint64_t req[2] = {kExact, 0U};
     check(sega_mod_negotiate(p, &host, req) == SEGA_MOD_NEG_E_ABI_MINOR_TOO_NEW && std::string(sega_mod_negotiation_class(SEGA_MOD_NEG_E_ABI_MINOR_TOO_NEW)) == "E_ABI_MINOR_TOO_NEW", "an older host (minor 0) refuses a provider requiring minor 1 with E_ABI_MINOR_TOO_NEW");
     host.abi_minor = SEGA_MOD_ABI_MINOR;
-    check(SEGA_MOD_ABI_MINOR == 3U && sega_mod_negotiate(p, &host, req) == SEGA_MOD_NEG_OK, "the extended host (minor 3) accepts a minor-1 provider unchanged");
+    check(SEGA_MOD_ABI_MINOR == 4U && sega_mod_negotiate(p, &host, req) == SEGA_MOD_NEG_OK, "the extended host (minor 4) accepts a minor-1 provider unchanged");
     // SEG-152-T007: a provider requiring minor 2 (scenery_generic_rows) is refused by a minor-1 host at attach, so it can never run against a host that lacks the member, and is accepted by the minor-2 host.
     g_exact_required_minor = 2U;
     p = exact_frame_provider(&state);

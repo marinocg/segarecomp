@@ -9,6 +9,7 @@
 
 #include "luau_build.hpp"
 #include "process_run.hpp"
+#include "sound_gate.hpp"
 #include "segarecomp/mod.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -181,6 +182,8 @@ struct Observed {
   std::vector<std::string> digests, ram_frames;
   std::vector<Region> regions;
   ModResult mod;
+  // The run's own sound state (SOUND_SUMMARY), read by the sound gate: the build's status cannot see a path only this run's input reaches. Empty = missing or malformed.
+  std::optional<sound_gate::RunSound> sound;
 };
 
 struct Workspace {
@@ -292,6 +295,7 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
     if (const auto s = line_with(text, "SOUND_SUMMARY")) {
       const std::size_t audio = s->find("\"audio\":{");
       if (audio != std::string::npos) obs.pcm = str_field(*s, "sha256", audio);
+      obs.sound = sound_gate::parse_run_sound(*s);
     }
   }
   if (obs.outcome != "window_complete" && obs.outcome != "incomplete_guest_stop" && obs.outcome != "incomplete_guest_complete")
@@ -462,6 +466,18 @@ std::optional<Refusal> bounds(std::uint64_t frames, std::uint64_t budget, std::u
   return std::nullopt;
 }
 
+// ---- the sound-mod gate (SEG-145-T003, ADR 0323; the evidence and the verdicts are sound_gate.cpp) ----
+std::string status_text(const fs::path &out) {
+  std::vector<std::uint8_t> raw;
+  return read_file(out / "status.json", raw, 8U << 20U) ? std::string(raw.begin(), raw.end()) : std::string();
+}
+// A modded build that failed while producing the Z80 code (the materialization or sound-driver stages): the modified driver cannot be compiled statically. It is rejected, never interpreted.
+bool failed_in_sound_stage(const fs::path &out) {
+  const std::string stage = str_field(status_text(out), "stage");
+  return stage == "z80-materialize" || stage == "sound-driver";
+}
+Refusal as_refusal(const sound_gate::Refusal &r) { return Refusal{r.code, r.message}; }
+
 }  // namespace
 
 // ------------------------------------------------------------------------------------------------ diff-run
@@ -517,9 +533,30 @@ int run_diff(const RunOptions &o) {
   modded_spec.expect_mod = p.luau;
   Observed vanilla, modded;
   if (const auto r = build_program(o, p.original_path, ws.dir / "vanilla", {}, {})) return refuse(*r);
-  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
+  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) {
+    if (o.audio && r->code == "E_BUILD_FAILED" && failed_in_sound_stage(ws.dir / "modded")) return refuse({"E_AUDIO_STATIC_MATERIALIZATION", "the modded program's sound code could not be produced statically (see the build log): " + r->message});
+    return refuse(*r);
+  }
+  std::string audio_json;
+  if (o.audio) {
+    const auto a = sound_gate::parse_build_sound(status_text(ws.dir / "vanilla")), b = sound_gate::parse_build_sound(status_text(ws.dir / "modded"));
+    if (const auto r = sound_gate::judge_builds(a, b)) return refuse(as_refusal(*r));
+    audio_json = ",\"audio\":{\"vanilla_status\":\"" + esc(a->status) + "\",\"modded_status\":\"" + esc(b->status) + "\",\"implementation\":\"" + esc(b->implementation) + "\",\"repeat_identical\":true}";
+  }
   if (const auto r = run_program(ws.dir / "vanilla", spec, ws.dir / "vanilla-frames", vanilla)) return refuse({r->code, "vanilla: " + r->message});
   if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-frames", modded)) return refuse({r->code, "modded: " + r->message});
+  if (o.audio) {   // the run's own sound state first, then reproducibility: the same program with the same input again
+    if (const auto r = sound_gate::judge_run(vanilla.sound, true, "vanilla")) return refuse(as_refusal(*r));
+    if (const auto r = sound_gate::judge_run(modded.sound, false, "modded")) return refuse(as_refusal(*r));
+    vanilla.pcm = vanilla.sound->pcm_sha256;   // under the gate, the digests compared and reported are the ones of the validated evidence
+    modded.pcm = modded.sound->pcm_sha256;
+    if (modded.mod.faulted) return refuse({"E_AUDIO_MOD_FAULT", "the mod faulted during this run, so its sound was not verified: " + modded.mod.fault});
+    Observed again;
+    if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-again-frames", again)) return refuse({r->code, "modded (repeat): " + r->message});
+    if (const auto r = sound_gate::judge_run(again.sound, false, "modded (repeat)")) return refuse(as_refusal(*r));
+    if (again.mod.faulted) return refuse({"E_AUDIO_MOD_FAULT", "the mod faulted during the repeat run, so its sound was not verified: " + again.mod.fault});
+    if (again.sound->pcm_sha256 != modded.sound->pcm_sha256) return refuse({"E_AUDIO_NONDETERMINISTIC", "two runs of the modded program with the same input produced different PCM digests"});
+  }
   const Divergence d = compare(vanilla, modded, o.aggregate, o.first);
   std::string codes = "[";
   for (std::size_t i = 0; i < code->size(); ++i) {
@@ -543,7 +580,7 @@ int run_diff(const RunOptions &o) {
             << "\",\"first_frame\":" << o.first << ",\"frames\":" << o.frames << ",\"bounds\":{\"budget\":" << o.budget << ",\"timeout_seconds\":" << o.timeout << ",\"build_timeout_seconds\":" << kBuildTimeoutSeconds
             << ",\"slice_dispatches\":" << kSliceDispatches << "},\"input\":\"" << esc(o.input) << "\",\"aggregate\":" << (o.aggregate ? "true" : "false") << ",\"vanilla\":" << observed_json(vanilla, o.aggregate)
             << ",\"modded\":" << observed_json(modded, o.aggregate) << ",\"diverged_frames\":" << d.diverged_frames << ",\"mod_faulted\":" << (modded.mod.faulted ? "true" : "false") << ",\"final_state_differs\":" << (state_differs ? "true" : "false")
-            << ",\"pcm_differs\":" << (pcm_differs ? "true" : "false") << ",\"first_divergence\":";
+            << ",\"pcm_differs\":" << (pcm_differs ? "true" : "false") << audio_json << ",\"first_divergence\":";
   if (d.any) std::cout << "{\"frame\":" << d.frame << "," << d.detail << "}";
   else std::cout << "null";
   std::cout << ",\"code\":" << codes << "}\n";

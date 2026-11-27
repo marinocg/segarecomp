@@ -54,11 +54,11 @@ const char *const kUnsupported = "E_CAPABILITY_UNSUPPORTED";
 
 std::vector<Row> make_rows() {
   std::vector<Row> rows;
-  {   // Genesis: the reference adapter. Every row passes, except the audio-command mapping, which the registry declares but the scheduler does not serve until SEG-145-T008 (then this flips to pass).
+  {   // Genesis: the reference adapter. Every row passes (the audio-command mapping since SEG-145-T008).
     Row r;
     r.platform = "genesis";
     for (const char *s : kScenarios) r.expect[s] = "pass";
-    r.expect["audio_command_mapping"] = "E_CAPABILITY_UNSUPPORTED:runtime";
+    r.expect["audio_command_mapping"] = "pass";
     r.declared_capabilities = {
         {"host.log", "experimental"}, {"frame.work_ram", "supported-with-limitations"}, {"frame.vdp", "supported-with-limitations"}, {"scenery.words", "supported-with-limitations"},
         {"overlay.rgba", "supported-with-limitations"}, {"memory.read.m68k.work_ram", "experimental"}, {"memory.read.m68k.rom", "experimental"}, {"memory.write.m68k.work_ram", "experimental"}, {"input.read", "experimental"},
@@ -153,6 +153,8 @@ struct GenesisRig {
   GenesisSnapshotModState snap{};
   GenesisSnapshotMachine machine{};
   GenesisSnapshotIdentity id{};
+  const GenesisModAudioEntry *audio = nullptr;
+  uint32_t audio_count = 0;
   bool attach(uint32_t phases, uint64_t caps, bool with_state) {
     setup(*rt);
     provider.size = sizeof provider;
@@ -169,7 +171,9 @@ struct GenesisRig {
     c.phase_mask = phases;
     c.required[0] = caps;
     c.ranges = kRanges;
-    c.range_count = 1U;
+    c.range_count = audio != nullptr ? 0U : 1U;   // an audio-only mod is granted no memory capability, so it declares no memory range
+    c.audio = audio;
+    c.audio_count = audio_count;
     c.state_schema = with_state ? 1U : 0U;
     c.log_sink = sink;
     c.log_ctx = this;
@@ -364,11 +368,19 @@ std::vector<Scenario> make_scenarios() {
                }});
 
   s.push_back({"audio_command_mapping", [](const mod::Adapter &) { return std::vector<std::string>{"audio.command.send"}; }, [](const mod::Adapter &a) {
-                 // declared by the registry, but is it SERVED? The Genesis scheduler grants no audio capability until SEG-145-T008, and refuses it at attach with the stable class.
+                 // declared by the registry, and SERVED (SEG-145-T008): only with a declared mapping; without one the required capability has no verified interface and is refused at attach.
                  return genesis_only(a, []() -> std::string {
+                   {
+                     GenesisRig bare;
+                     if (bare.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_AUDIO_COMMAND_SEND), false)) return "E_ACCEPTED_WITHOUT_MAPPING";
+                     if (bare.rejection != "E_AUDIO_TARGET") return "E_ATTACH:" + bare.rejection;
+                   }
                    GenesisRig r;
-                   if (r.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_AUDIO_COMMAND_SEND), false)) return "pass";
-                   return r.rejection == kUnsupported ? "E_CAPABILITY_UNSUPPORTED:runtime" : "E_ATTACH:" + r.rejection;
+                   static const GenesisModAudioEntry rows[] = {{"sfx", "blip", GENESIS_MOD_AUDIO_COMMAND, 0x20U, 1U, 3U}};
+                   r.audio = rows;
+                   r.audio_count = 1U;
+                   if (!r.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_AUDIO_COMMAND_SEND), false)) return "E_ATTACH:" + r.rejection;
+                   return "pass";
                  });
                }});
   return s;

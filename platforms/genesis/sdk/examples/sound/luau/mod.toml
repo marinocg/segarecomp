@@ -1,0 +1,94 @@
+# SEG-145-T008 example: a Luau mod that triggers the fixture's own effects and music through declared mappings. Revision = the image of ../fixture_rom.py.
+[mod]
+id = "sound-luau-example"
+version = "0.1.0"
+name = "Sound API example (Luau)"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "92c51033a77f6af58de65bff8d6b822c14b5d7b0bdb234f69027267f613fdfee"
+
+[[source]]
+kind = "luau-source"
+path = "scripts/main.luau"
+
+[capabilities]
+required = ["host.log", "input.read", "audio.command.send", "audio.event.read", "state.mod"]
+
+[state]
+schema = 1
+
+# The declared, verified audio interface of THIS revision. The SDK knows no sound id: every name below is the mod author's statement about the fixture's mailboxes.
+[[audio.mapping]]
+id = "sfx"
+kind = "command"
+space = "m68k.work_ram"
+offset = 32
+width = 1
+
+[[audio.mapping.value]]
+name = "blip"
+value = 3
+
+[[audio.mapping.value]]
+name = "drum"
+value = 4
+
+[[audio.mapping.value]]
+name = "chime"
+value = 5
+
+[[audio.mapping]]
+id = "music"
+kind = "command"
+space = "m68k.work_ram"
+offset = 33
+width = 1
+
+[[audio.mapping.value]]
+name = "theme"
+value = 1
+
+[[audio.mapping.value]]
+name = "alt"
+value = 2
+
+[[audio.mapping.value]]
+name = "stop"
+value = 127
+
+# The byte the game sets to the last command it forwarded to its sound driver (read-only for the mod).
+[[audio.mapping]]
+id = "accepted"
+kind = "event"
+space = "m68k.work_ram"
+offset = 34
+width = 1
+
+[[audio.mapping.value]]
+name = "theme"
+value = 1
+
+[[audio.mapping.value]]
+name = "alt"
+value = 2
+
+[[audio.mapping.value]]
+name = "blip"
+value = 3
+
+[[audio.mapping.value]]
+name = "drum"
+value = 4
+
+[[audio.mapping.value]]
+name = "chime"
+value = 5
+
+[[audio.mapping.value]]
+name = "stop"
+value = 127

@@ -1,7 +1,8 @@
 #pragma once
 
 // Internal to libs/media: the bounded ZIP reader, raw-DEFLATE decoder and closed-JSON reader shared by the schema 1/2 reader (patch_package.cpp) and the schema 3 reader
-// (mod_package.cpp). Every limit is a parameter of the caller's policy; nothing here knows about a payload kind.
+// (mod_package.cpp). Every limit is a parameter of the caller's policy; nothing here knows about a payload kind. The JSON reader is also used by the CLI's sound gate (apps/segarecomp/sound_gate.cpp) on the
+// documents this product writes.
 
 #include "segarecomp/patch.hpp"
 
@@ -41,13 +42,15 @@ struct JsonLimits {
   std::uint64_t max_number = 999999999U;
   bool allow_slash_escape = true;
   bool allow_whitespace = true;
+  bool allow_booleans = false;   // `true` / `false` values: never in a package manifest; the product's own status and run summaries have them
 };
 
 struct Value {
-  enum class Kind { string, number, object, array } kind = Kind::string;
+  enum class Kind { string, number, object, array, boolean } kind = Kind::string;
   std::vector<Value> items;
   std::string text;
   std::uint64_t number = 0;
+  bool flag = false;   // Kind::boolean
   std::vector<std::string> keys;   // insertion order, parallel to `members`
   std::vector<Value> members;
   [[nodiscard]] const Value *find(const std::string &key) const {
@@ -57,7 +60,7 @@ struct Value {
   [[nodiscard]] const Value &at(const std::string &key) const { return *find(key); }   // callers check presence first
 };
 
-// Parses `text` as the closed JSON subset (objects, arrays, ASCII strings, non-negative integers; duplicate keys are errors) under `limits`.
+// Parses `text` as the closed JSON subset (objects, arrays, ASCII strings, non-negative integers, and booleans only when allowed; duplicate keys are errors) under `limits`. The whole text must be one value.
 [[nodiscard]] bool parse_json(std::string_view text, const JsonLimits &limits, Value &out, std::string &error);
 
 [[nodiscard]] bool printable(const std::string &s);
