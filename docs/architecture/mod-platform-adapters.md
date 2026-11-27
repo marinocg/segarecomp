@@ -4,7 +4,7 @@ Status: accepted contract (SEG-146-T001, ADR [0280](../decisions/0280-mod-platfo
 SEG-133-T004 (phases), SEG-146-T002/T003/T004, SEG-147, SEG-148. Baseline facts: [gap inventory](modding-platform-gap-inventory.md).
 This document defines **vocabulary and ownership only**. It introduces no bus, CPU or device interface.
 
-Implemented (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md)): the registry is `libs/media/src/mod_adapter.cpp` (a table of capability support levels per platform, never a class hierarchy), reported by `segarecomp mod inspect --json`; `mod check`/`mod build` dispatch on the declared platform and refuse an unsupported capability with `E_CAPABILITY_UNSUPPORTED`. Genesis is the fully supported adapter; Master System and Sega CD register `host.log` only (`experimental`).
+Implemented (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md)): the registry is `libs/media/src/mod_adapter.cpp` (a table of capability support levels per platform, never a class hierarchy), reported by `segarecomp mod inspect --json`; `mod check`/`mod build` dispatch on the declared platform and refuse an unsupported capability with `E_CAPABILITY_UNSUPPORTED`. Genesis is the fully supported adapter; Master System registers the scheduled-mod capabilities of [ADR 0325](../decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md) (`supported-with-limitations`; no function hooks, no audio commands); Sega CD registers `host.log` only (`experimental`).
 
 ## 1. What an adapter is
 
@@ -25,7 +25,7 @@ The capability table lists which capabilities, spaces and phases the platform su
 
 Capability domains: `frame.*` (read-only presentation views), `scenery.*`, `overlay.*`, `memory.read.<space>`, `memory.write.<space>`, `input.*`, `hook.function`, `audio.*`,
 `host.log`, `state.mod`. A capability name is shared across platforms **only when its semantics are identical**; otherwise it is a platform-specific name
-(for example `frame.vdp` is Genesis and Sega CD (shared Genesis VDP), while a Master System VDP view would be `frame.sms_vdp`). A package that declares a capability its platform lacks is rejected at `mod check` with a stable diagnostic (`E_CAPABILITY_UNSUPPORTED`).
+(for example `frame.vdp` is Genesis and Sega CD (shared Genesis VDP), while a Master System VDP view is `frame.sms_vdp`, and its presentation-only palette mapping and picture offset are `present.transform`). A package that declares a capability its platform lacks is rejected at `mod check` with a stable diagnostic (`E_CAPABILITY_UNSUPPORTED`).
 
 ## 3. Address spaces
 

@@ -54,6 +54,9 @@ install(DIRECTORY ${_src}/libs/viewer/include/ DESTINATION ${_rt}/libs/viewer/in
 foreach(_sms_dir runtime headless viewer)
   install(DIRECTORY ${_src}/platforms/master-system/${_sms_dir}/ DESTINATION ${_rt}/platforms/master-system/${_sms_dir} FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
 endforeach()
+# SEG-147 (ADR 0325): a build with a Master System mod also compiles the mod layer (with the Luau provider shim) against the platform's public SDK header.
+install(DIRECTORY ${_src}/platforms/master-system/mod/ DESTINATION ${_rt}/platforms/master-system/mod FILES_MATCHING PATTERN "*.c" PATTERN "*.cpp" PATTERN "*.h")
+install(DIRECTORY ${_src}/platforms/master-system/sdk/ DESTINATION ${_rt}/platforms/master-system/sdk FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/device/sega/psg/ DESTINATION ${_rt}/libs/device/sega/psg FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/codegen/c11/include/ DESTINATION ${_rt}/libs/codegen/c11/include FILES_MATCHING PATTERN "*.h")
 

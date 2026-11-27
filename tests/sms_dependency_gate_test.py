@@ -40,8 +40,13 @@ SMS_CMAKE = re.compile(r"master[_-]system|\bsms_[a-z]", re.I)
 SMS_PRODUCT_TARGETS = {
     "segarecomp_runtime_master_system", "segarecomp_machine_master_system", "segarecomp_headless_master_system",
     "segarecomp_viewer_master_system", "segarecomp_viewer_master_system_main_check", "segarecomp_viewer_master_system_sdl3",
+    # SEG-147 (ADR 0325): the mod scheduler/compositor library and the compile checks of a build with a mod.
+    "segarecomp_runtime_master_system_mod", "segarecomp_runtime_master_system_mod_host_check", "segarecomp_headless_master_system_mod_check",
+    "segarecomp_viewer_master_system_mod_main_check",
 }
 PSG = "segarecomp_device_psg"
+# SEG-147: the mod layer reaches only the runtime, the PSG and the SDL-free viewer core (its bitmap font).
+MOD_CLOSURE = {"segarecomp_runtime_master_system", PSG, "segarecomp_viewer_core", "m"}
 # Exact allowed transitive closure (excluding the target itself) of every SMS target.
 ALLOWED_CLOSURE = {
     PSG: set(),
@@ -54,6 +59,10 @@ ALLOWED_CLOSURE = {
                                          "Threads::Threads"},
     "segarecomp_headless_master_system": {"segarecomp_runtime_master_system", PSG},
     "segarecomp_viewer_master_system": {"segarecomp_runtime_master_system", PSG},
+    "segarecomp_runtime_master_system_mod": MOD_CLOSURE,
+    "segarecomp_runtime_master_system_mod_host_check": MOD_CLOSURE | {"segarecomp_runtime_master_system_mod"},
+    "segarecomp_headless_master_system_mod_check": MOD_CLOSURE | {"segarecomp_runtime_master_system_mod"},
+    "segarecomp_viewer_master_system_mod_main_check": MOD_CLOSURE | {"segarecomp_runtime_master_system_mod", "segarecomp_viewer_master_system"},
     "segarecomp_viewer_master_system_main_check": {"segarecomp_viewer_master_system", "segarecomp_runtime_master_system", PSG},
     "segarecomp_viewer_master_system_sdl3": {"segarecomp_viewer_master_system", "segarecomp_runtime_master_system", PSG, "SDL3::SDL3", "segarecomp_viewer_host", "segarecomp_viewer_input", "segarecomp_viewer_core", "m"},  # SEG-058: the shared SDL3 viewer foundation (host + input diagnostics)
 }

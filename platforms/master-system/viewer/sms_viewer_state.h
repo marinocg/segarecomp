@@ -20,6 +20,7 @@ extern "C" {
 typedef struct SmsViewerStateConfig {
   SmsViewerRig *rig;
   SmsSnapshotIdentity identity;
+  const SmsModState *mod;                  /* SEG-147-T005: the attached mod's state seam, or NULL; it must outlive the adapter */
   const char *state_dir;                   /* directory of the slot files; NULL = no slots */
   const char *unavailable_reason;          /* slots unavailable (no save location, no verified identity ...) */
   const char *rewind_unavailable_reason;   /* rewind unavailable (a recording session ...) */

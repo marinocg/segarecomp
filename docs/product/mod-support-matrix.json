@@ -1,7 +1,7 @@
 {
  "schema": "segarecomp-mod-support-matrix",
  "schema_version": 1,
- "as_of": "2026-11-08",
+ "as_of": "2026-11-27",
  "note": "Mod platform support levels, kept alongside the compatibility ledger and checked by tools/check_product_truth.py. A reporting document: it never changes capability detection or build admission. Rules: docs/product/mod-support-matrix.md.",
  "levels": [
   "supported-and-tested",
@@ -198,12 +198,16 @@
   {
    "platform": "master_system",
    "capability": "luau-scripting",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
-    "docs/architecture/luau-trust-policy.md"
+    "docs/decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md",
+    "docs/product/master-system-mods.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_sms_lifecycle_test.py",
+    "tests/mod_platform_conformance_test.cpp"
+   ],
    "planned_owner": "SEG-147-T004"
   },
   {
@@ -237,13 +241,14 @@
   {
    "platform": "master_system",
    "capability": "native-c11-extension",
-   "level": "experimental",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
-    "docs/architecture/native-sdk-abi-2.md",
-    "ADR 0288"
+    "docs/decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md",
+    "docs/architecture/native-sdk-abi-2.md"
    ],
    "existing_tests": [
+    "tests/mod_sms_lifecycle_test.py",
     "tests/mod_sources_test.py"
    ],
    "planned_owner": "SEG-147-T004"
@@ -280,12 +285,16 @@
   {
    "platform": "master_system",
    "capability": "input-modifications",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
+    "docs/decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md",
     "docs/architecture/mod-execution-phases.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_sms_lifecycle_test.py",
+    "tests/sms_mod_scheduler_test.cpp"
+   ],
    "planned_owner": "SEG-147-T004"
   },
   {
@@ -318,12 +327,17 @@
   {
    "platform": "master_system",
    "capability": "memory-access",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
+    "docs/decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md",
     "docs/architecture/mod-platform-adapters.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_sms_lifecycle_test.py",
+    "tests/sms_mod_scheduler_test.cpp",
+    "tests/mod_platform_conformance_test.cpp"
+   ],
    "planned_owner": "SEG-147-T004"
   },
   {
@@ -439,12 +453,16 @@
   {
    "platform": "master_system",
    "capability": "graphics-hud",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
-    "docs/architecture/modding-platform-gap-inventory.md"
+    "docs/decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md",
+    "docs/product/master-system-mods.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_sms_lifecycle_test.py",
+    "tests/sms_mod_scheduler_test.cpp"
+   ],
    "planned_owner": "SEG-147-T006"
   },
   {
@@ -515,12 +533,15 @@
   {
    "platform": "master_system",
    "capability": "guest-native-audio",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
+    "docs/decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md",
     "docs/architecture/modding-audio-architecture.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_sms_sound_test.py"
+   ],
    "planned_owner": "SEG-145-T004"
   },
   {
@@ -618,12 +639,18 @@
   {
    "platform": "master_system",
    "capability": "save-states-rewind-with-mods",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
-    "docs/architecture/mod-execution-phases.md"
+    "docs/decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md",
+    "docs/product/save-states.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/sms_mod_scheduler_test.cpp",
+    "tests/mod_sms_lifecycle_test.py",
+    "tests/sms_viewer_mod_test.py",
+    "tests/mod_platform_conformance_test.cpp"
+   ],
    "planned_owner": "SEG-147-T005"
   },
   {

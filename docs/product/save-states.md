@@ -59,6 +59,7 @@ choice. **A state is never loaded when a game starts.**
   sound samples (checked from every frame boundary of a fixture run).
 * **Where it lives:** `<library>/saves/master-system/<64-hex SHA-256 of the cartridge image>/<mapper>/states/{quick,slot-1,...,slot-5}.sgstate`. A different mapper declaration of the same image is a different folder, and the state itself
   also carries the mapper, the ROM size and the PSG variant, so a copied file is refused too.
+* **With a mod** (a program built with a Master System mod, [guide](master-system-mods.md)): the state also holds the mod's own data and is bound to that mod. It loads only into a program with the same mod; a Vanilla program and a modded one refuse each other's states. A mod that changes the game but cannot save its data offers no states. The first frame shown after a load has no mod overlay yet.
 * **After a load** queued audio is dropped, pacing restarts, held keys are released, and the widescreen extension is produced again by the next frame (so the first frame after a load is shown in Original).
 * **Limits:** no game save file (see above); `--viewer-record` sessions have no states.
 

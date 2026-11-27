@@ -40,10 +40,11 @@ void sms_pad_reset(SmsPad *pad) {
 }
 
 uint8_t sms_pad_read(SmsPad *pad, SmsPortClass cls, uint64_t cycles) {
+  const SmsInputState *seen = pad->intercept != NULL ? pad->intercept : pad->input;
   (void)cycles;
-  if (pad->input == NULL) return 0xFFu;
-  if (cls == SMS_PORT_PAD_DC) return sms_pad_port_dc(pad->input, pad->io_control);
-  if (cls == SMS_PORT_PAD_DD) return sms_pad_port_dd(pad->input, pad->io_control);
+  if (seen == NULL) return 0xFFu;
+  if (cls == SMS_PORT_PAD_DC) return sms_pad_port_dc(seen, pad->io_control);
+  if (cls == SMS_PORT_PAD_DD) return sms_pad_port_dd(seen, pad->io_control);
   return 0xFFu;
 }
 
@@ -75,6 +76,7 @@ static void seam_digest(void *context, SmsSha256 *sha) { sms_pad_digest((const S
 
 void sms_pad_install(SmsMachine *m, SmsPad *pad, SmsVdp *vdp) {
   pad->input = &m->input;
+  pad->intercept = NULL;
   pad->vdp = vdp;
   m->pad.context = pad;
   m->pad.reset = seam_reset;

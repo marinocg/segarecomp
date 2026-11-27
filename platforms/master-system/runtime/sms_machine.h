@@ -127,6 +127,19 @@ static inline int sms_stop_is_unadmitted_pc(const SmsStop *stop) {
   return stop->kind == SMS_STOP_Z80_ERROR && stop->z80_outcome == Z80_ERROR_UNADMITTED_PC;
 }
 
+/* ---- frame hooks (SEG-147-T004, ADR 0325) -------------------------------------------------------------------- */
+
+struct SmsMachine;
+/* Optional guest-time observation points for a mod scheduler; NULL (the default) leaves the machine exactly as it was. All three run at guest-time points that do not depend on how the host slices a run:
+ * `boundary` at the start of frame N (T = N x 59,736), BEFORE the scripted input of frame N is applied and before the VDP's line-0 event; `sampled` immediately AFTER that input was applied and before the
+ * guest can execute an instruction of frame N; `reset` at the end of `sms_machine_reset`. A hook takes no guest time. */
+typedef struct SmsFrameHooks {
+  void *context;
+  void (*reset)(void *context, struct SmsMachine *machine);
+  void (*boundary)(void *context, struct SmsMachine *machine, uint64_t frame);
+  void (*sampled)(void *context, struct SmsMachine *machine, uint64_t frame);
+} SmsFrameHooks;
+
 /* ---- machine -------------------------------------------------------------------------------------------------- */
 
 typedef struct SmsMachine {
@@ -153,6 +166,7 @@ typedef struct SmsMachine {
   uint32_t irq_capacity, irq_count, irq_dropped;
   SmsMapperTraceEntry *mapper_trace;
   uint32_t mapper_capacity, mapper_count, mapper_dropped;
+  const SmsFrameHooks *frame_hooks; /* host attachment, never part of the machine state, its digest or a snapshot */
 } SmsMachine;
 
 /* Binds the cartridge (see sms_memory_init), wires the Z80 host callbacks and performs `sms_machine_reset` with no

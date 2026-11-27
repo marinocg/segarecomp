@@ -69,7 +69,7 @@ Audio assets and mappings are data (trust class BPS-only/data); `audio.command.s
 
 ## 7. Master System YM2413
 
-The Master System YM2413 FM unit is **unsupported hardware, outside this SDK milestone**: it is not modelled by the runtime (ports `$F0-$F2` do not decode) and no task creates it. A separate capability may be defined if a verified use case appears. Audio mods on the Master System are limited to PSG and Z80 data/driver edits.
+Original-hardware PSG sound mods are implemented (SEG-145-T004, [ADR 0325](../decisions/0325-master-system-mod-lifecycle-state-presentation-and-psg-sound-mods.md) section 6; [example](../../platforms/master-system/sdk/examples/sound/README.md)); the audio-command mapping is not. The Master System YM2413 FM unit is **unsupported hardware, outside this SDK milestone**: it is not modelled by the runtime (ports `$F0-$F2` do not decode) and no task creates it. A separate capability may be defined if a verified use case appears. Audio mods on the Master System are limited to PSG and Z80 data/driver edits.
 
 ## 8. Review against schema 3 and ABI 2
 

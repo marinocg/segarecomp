@@ -7,6 +7,10 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Master System mods: gameplay scripting, saved state, presentation and PSG sound mods (ADR 0325)
+
+* Developer preview: Luau and native C11 (ABI 2 minor 5) mods now run in Master System programs built with `segarecomp build --luau-package` / `--native-package`: frame and input phases, pad interception, declared work-RAM reads and writes, and presentation-only HUD, palette mapping, picture offset and authored sprites. Mod state is part of save states and rewind. `mod test` runs Master System scenarios. A redistributable gameplay example (with a C11 twin) and a PSG sound-mod example are included ([guide](docs/product/master-system-mods.md)). The launcher does not install Master System mods yet; the FM unit stays unsupported.
+
 ### Master System mods: typed edits, Z80 injection and asset replacement (ADR 0324)
 
 * Developer preview: a mod can target a Master System cartridge by exact digest and declared mapper, apply typed edits and deterministic BPS (with the `TMR SEGA` checksum repaired when the original verified), inject bounded Z80 routines (including bank-switched `sega` cartridges, checked by the Z80 decoder before they enter the image) and replace art, palettes, text and tables through its own adapter. `segarecomp build --data-package` builds the patched game as a separate program. The launcher does not install Master System mods yet.

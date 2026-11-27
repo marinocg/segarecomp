@@ -346,6 +346,6 @@ reject("write access without memory.write", memory_manifest(mem(), caps=["host.l
 reject("read access without memory.read", memory_manifest(mem(), caps=["host.log", "memory.write.m68k.work_ram"]), "E_CAPABILITY_INCONSISTENT")
 reject("a range key that is not defined", mutate(lambda m: m.update(capabilities=list(MEM_CAPS), memory=[dict(mem(), mode="x")])), "E_FIELD_UNKNOWN")
 reject("more than sixteen ranges", memory_manifest(*[mem(offset=i * 4, length=2) for i in range(17)]), "E_MEMORY_COUNT")
-reject("memory ranges on Master System", mutate(lambda m: m.update(capabilities=["host.log"], memory=[mem(space="z80.work_ram")]), platform="master-system"), "E_MEMORY_SPACE")
+reject("a Genesis memory space on Master System", mutate(lambda m: m.update(capabilities=["host.log"], memory=[mem()]), platform="master-system"), "E_MEMORY_SPACE")
 
 cli.done("mod_package_test")

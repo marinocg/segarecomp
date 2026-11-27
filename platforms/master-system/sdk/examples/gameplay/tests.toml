@@ -1,0 +1,24 @@
+# `segarecomp mod test` scenarios of the Master System gameplay example (SEG-147-T011, ADR 0325). The file belongs to the PROJECT: never packed, never part of a package identity.
+# On the Master System a scenario is bounded by its frame count, an explicit Z80 cycle budget (`budget`, T-states) and a wall-clock timeout. Frames are the machine's 0-based frame numbers, in the pad
+# script ("<frame>:<player>:<mask>"; right 0x08, button 1 0x10, button 2 0x20) as in the expectations: entry i is the work RAM after frame i ended.
+# The per-frame expectations are derived by hand from the two rules (the program scores 1 per frame with button 1 and moves by its speed byte with Right, from frame 11, the first VBlank it handles;
+# while button 2 is held the mod holds Right and writes speed 3), not copied from a run. Each sample is score u16, position u16 (little-endian), pad seen by the game, handled frames, speed.
+
+[[scenario]]
+name = "run-while-button-2-held"
+frames = 40
+budget = 3000000
+timeout = 60
+input = "20:1:0x10,24:1:0x30,28:1:0x00,30:1:0x08,33:1:0x00"
+ram = ["16:7"]
+checkpoint = 26
+expect_ram_frames = ["00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000101", "00000000000201", "00000000000301", "00000000000401", "00000000000501", "00000000000601", "00000000000701", "00000000000801", "00000000000901", "01000000100a01", "02000000100b01", "03000000100c01", "04000000100d01", "05000300180e03", "06000600180f03", "07000900181003", "08000c00181103", "08000c00001201", "08000c00001301", "08000d00081401", "08000e00081501", "08000f00081601", "08000f00001701", "08000f00001801", "08000f00001901", "08000f00001a01", "08000f00001b01", "08000f00001c01", "08000f00001d01"]
+
+[[scenario]]
+name = "walk-without-button-2"
+frames = 40
+budget = 3000000
+timeout = 60
+input = "30:1:0x08,33:1:0x00"
+ram = ["16:7"]
+expect_ram_frames = ["00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000001", "00000000000101", "00000000000201", "00000000000301", "00000000000401", "00000000000501", "00000000000601", "00000000000701", "00000000000801", "00000000000901", "00000000000a01", "00000000000b01", "00000000000c01", "00000000000d01", "00000000000e01", "00000000000f01", "00000000001001", "00000000001101", "00000000001201", "00000000001301", "00000100081401", "00000200081501", "00000300081601", "00000300001701", "00000300001801", "00000300001901", "00000300001a01", "00000300001b01", "00000300001c01", "00000300001d01"]

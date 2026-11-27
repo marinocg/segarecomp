@@ -90,6 +90,13 @@ state schema and every size/constant the sections depend on (RAM, cart RAM, VRAM
 `rate_num/rate_den/full_scale`, cycles-per-frame). A state saved under one mapper declaration cannot load under another. Variant (patch) identity is the launcher's
 `SEGARECOMP_SAVE_VARIANT` (all zero = vanilla) as in Genesis. Rebuilding the same program keeps the identity: nothing about the build directory or compiler enters it.
 
+### 2.4a Mod state (SEG-147-T005, ADR 0325)
+
+A program with a Master System mod adds an eighth, required `MODSTATE` section: package identity, state schema, a compatibility digest (ABI major, granted capabilities, phases, provider version, ranges) and the
+scheduler's body (disabled / fault, pad latch, write witness, the mod's blob of at most 64 KiB). A program without a mod writes the seven sections above, byte for byte as before. Restore compares mod presence,
+identity, schema and digest, stages and validates the body, and runs the mod's own load before any guest state is replaced; the commit also restores the pad interception. The capture barrier needs the PSG
+synchronised to the guest clock (the viewer does so every frame; the headless checkpoint of a mod program does so too).
+
 ### 2.5 Recording implication
 
 Sessions that record (`--viewer-record`) are refused (reason shown). The script describes the run since the last reset; a restore would break monotonic frame

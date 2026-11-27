@@ -21,34 +21,35 @@ constexpr std::array<Adapter, 3> kAdapters = {{
 
 constexpr Support U = Support::unsupported, E = Support::experimental, L = Support::supported_with_limitations;
 
-// Capability table (native-sdk-abi-2.md section 4). Genesis keeps the four ABI 1 names at `supported-with-limitations` (they run today). The ABI 2 services are declarable on Genesis
-// (`experimental`) while their runtime lands in M05; function hooks and host audio are gated. Master System and Sega CD register lifecycle + `host.log` only (SEG-146-T003);
-// everything else is `unsupported` until SEG-147 / SEG-148 raise it, and a package that needs it is rejected, never ignored.
-constexpr std::array<CapabilityInfo, 24> kCapabilities = {{
-    {"host.log", 1, {E, E, E}, true},
-    {"frame.work_ram", 2, {L, U, U}, true},
+// Capability table (native-sdk-abi-2.md section 4). Master System gained its scheduled-mod services with ADR 0325 (`supported-with-limitations`). Genesis keeps the four ABI 1 names at `supported-with-limitations` (they run today). The ABI 2 services are declarable on Genesis
+// (`experimental`) while their runtime lands in M05; function hooks and host audio are gated. Sega CD registers lifecycle + `host.log` only (SEG-146-T003);
+// everything else is `unsupported` until its task raises it, and a package that needs it is rejected, never ignored.
+constexpr std::array<CapabilityInfo, 25> kCapabilities = {{
+    {"host.log", 1, {E, L, E}, true},
+    {"frame.work_ram", 2, {L, L, U}, true},
     {"frame.vdp", 3, {L, U, U}, true},
-    {"frame.sms" "_vdp", 4, {U, U, U}, true},   // the ABI 2 catalogue name (data only); split so the SMS dependency gate sees no product identifier in generic code
+    {"frame.sms" "_vdp", 4, {U, L, U}, true},   // the ABI 2 catalogue name (data only); split so the SMS dependency gate sees no product identifier in generic code
     {"scenery.words", 5, {L, U, U}, false},
-    {"overlay.rgba", 6, {L, U, U}, true},
+    {"overlay.rgba", 6, {L, L, U}, true},
     {"memory.read.m68k.work_ram", 7, {E, U, U}, true},
     {"memory.read.m68k.rom", 7, {E, U, U}, true},   // ADR 0321: build-time materialised effective-image ranges, render phase only
     {"memory.read.z80.ram", 7, {U, U, U}, true},
-    {"memory.read.z80.work_ram", 7, {U, U, U}, true},
-    {"memory.read.z80.cart_ram", 7, {U, U, U}, true},
+    {"memory.read.z80.work_ram", 7, {U, L, U}, true},
+    {"memory.read.z80.cart_ram", 7, {U, L, U}, true},
     {"memory.read.main.work_ram", 7, {U, U, U}, true},
     {"memory.read.main.word_ram", 7, {U, U, U}, true},
     {"memory.read.sub.prg_ram", 7, {U, U, U}, true},
     {"memory.write.m68k.work_ram", 8, {E, U, U}, true},
-    {"memory.write.z80.work_ram", 8, {U, U, U}, true},
+    {"memory.write.z80.work_ram", 8, {U, L, U}, true},
     {"memory.write.main.work_ram", 8, {U, U, U}, true},
-    {"input.read", 9, {E, U, U}, true},
-    {"input.intercept", 10, {E, U, U}, true},
+    {"input.read", 9, {E, L, U}, true},
+    {"input.intercept", 10, {E, L, U}, true},
     {"hook.function", 11, {E, U, U}, true},
-    {"state.mod", 12, {E, U, U}, true},
+    {"state.mod", 12, {E, L, U}, true},
     {"audio.event.read", 13, {E, U, U}, true},
     {"audio.command.send", 14, {E, U, U}, true},
     {"audio.host.play", 15, {U, U, U}, false},
+    {"present.transform", 16, {U, L, U}, true},   // ADR 0325: presentation-only palette mapping and picture offset
 }};
 
 }  // namespace

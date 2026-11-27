@@ -1,0 +1,12 @@
+# SEG-145-T004: original-hardware sound mod of the synthetic PSG cartridge. Every line asserts the exact original bytes before it replaces them.
+# <revision> <type> <site> <expected> <value>   (offsets and layout: ../fixture_rom.py)
+# command table: play the notes in another order
+fixture bytes 0x00001000 0001020302010003 0300030102030102
+# tone period data: notes 0 and 1 get another pitch (each note is the PSG's latch nibble, then its data byte)
+fixture bytes 0x00001010 0c1a0d17 060d0e0b
+# step volumes (attenuation)
+fixture bytes 0x00001020 0203040506070809 0000000000000000
+# noise channel: another control and a louder attenuation
+fixture bytes 0x00001030 040c 0508
+# the driver patch: redirect the volume routine's call to the injected one (asm/main.asm)
+fixture u16 0x000001c8 0x01e9 0x2000

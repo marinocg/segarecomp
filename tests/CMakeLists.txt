@@ -2028,6 +2028,12 @@ add_test(NAME sms_viewer_states_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_viewer_states_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_viewer_states_test PROPERTY TIMEOUT 900)
 set_property(TEST sms_viewer_states_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-147-T004/T005 (ADR 0325): a scheduled mod in the real played program: save/load, rewind, replay of the recording. Skips without SDL3.
+add_test(NAME sms_viewer_mod_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_viewer_mod_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_viewer_mod_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_viewer_mod_test PROPERTY TIMEOUT 1500)
+set_property(TEST sms_viewer_mod_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-132 (ADR 0279): reversible Sega CD machine snapshots on generated-native programs (the cdda fixture; the production Z80 + YM2612 + PSG + mixer configuration) linked with a test host instead of the SDL3 viewer.
 add_test(NAME sega_cd_snapshot_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_snapshot_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -2564,6 +2570,16 @@ add_test(NAME mod_sms_assets_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_
 set_property(TEST mod_sms_native_test mod_sms_assets_test APPEND PROPERTY LABELS full)   # generated-native builds: CI full tier and --focus
 set_property(TEST mod_sms_native_test mod_sms_assets_test PROPERTY TIMEOUT 900)
 set_property(TEST mod_sms_test mod_sms_native_test mod_sms_assets_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-147-T004/T005/T006/T011 (ADR 0325): the synthetic Master System gameplay mod end to end: developer workflow, built Vanilla/Luau/C11 programs, parity, presentation-only, state, faults and refusals.
+add_test(NAME mod_sms_lifecycle_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_sms_lifecycle_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST mod_sms_lifecycle_test APPEND PROPERTY LABELS full)
+set_property(TEST mod_sms_lifecycle_test PROPERTY TIMEOUT 1500)
+set_property(TEST mod_sms_lifecycle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-145-T004: original-hardware PSG sound mods of the synthetic cartridge: typed data edits and an admitted driver patch, compared by the PCM artifact.
+add_test(NAME mod_sms_sound_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_sms_sound_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST mod_sms_sound_test APPEND PROPERTY LABELS full)
+set_property(TEST mod_sms_sound_test PROPERTY TIMEOUT 1500)
+set_property(TEST mod_sms_sound_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_executable(mod_hooks_resolve_test mod_hooks_resolve_test.cpp)
 target_link_libraries(mod_hooks_resolve_test PRIVATE segarecomp::media)
 segarecomp_enable_warnings(mod_hooks_resolve_test)
@@ -2623,8 +2639,18 @@ segarecomp_enable_warnings(genesis_mod_replay_tests)
 add_test(NAME genesis_mod_replay_tests COMMAND genesis_mod_replay_tests)
 set_tests_properties(genesis_mod_replay_tests PROPERTIES TIMEOUT 300)
 # SEG-146-T004 (ADR 0299): the portable Luau and native conformance suite, one table-driven suite over every registered platform adapter (a new platform adds a row, not a suite).
-add_executable(mod_platform_conformance_tests mod_platform_conformance_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c)
-target_link_libraries(mod_platform_conformance_tests PRIVATE segarecomp::luau_host segarecomp::luau segarecomp::media segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+# SEG-147-T004..T006 (ADR 0325): the Master System mod scheduler, its state/rewind seam and render transactionality over the real machine with a scripted CPU; and the built-program end-to-end workflow.
+add_executable(sms_mod_scheduler_tests sms_mod_scheduler_test.cpp mod_platform_conformance_sms_cpu.c)
+target_link_libraries(sms_mod_scheduler_tests PRIVATE segarecomp::runtime_master_system_mod segarecomp::viewer_master_system segarecomp::media)
+target_compile_features(sms_mod_scheduler_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(sms_mod_scheduler_tests)
+add_test(NAME sms_mod_scheduler_tests COMMAND sms_mod_scheduler_tests)
+set_tests_properties(sms_mod_scheduler_tests PROPERTIES TIMEOUT 300)
+set_property(TEST sms_mod_scheduler_tests APPEND PROPERTY LABELS full fast)
+
+add_executable(mod_platform_conformance_tests mod_platform_conformance_test.cpp mod_platform_conformance_sms_cpu.c ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c)
+target_link_libraries(mod_platform_conformance_tests PRIVATE segarecomp::luau_host segarecomp::luau segarecomp::media segarecomp::runtime_genesis_mod segarecomp::runtime_genesis
+  segarecomp::runtime_master_system_mod segarecomp::viewer_master_system)
 target_compile_features(mod_platform_conformance_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(mod_platform_conformance_tests)
 add_test(NAME mod_platform_conformance_tests COMMAND mod_platform_conformance_tests)

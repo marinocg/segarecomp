@@ -52,6 +52,7 @@ struct VmImpl {
   std::uint64_t used = 0;
   bool out_of_memory = false;
   bool running = false;
+  std::string platform = "genesis";   // ADR 0325: which names and capability rules the bindings follow
   Fault fault = Fault::none;
   std::string fault_message;
   bool nondeterministic = false;
@@ -354,7 +355,8 @@ int sega_log(lua_State *L) {
 }
 
 // ---- guest memory and input (SEG-138-T001/T002): thin copies of the scheduler's services; the scheduler decides phase, range, alignment and budget ----
-std::uint32_t space_id(std::string_view name) {   // SegaGenesisSpace ids; 0 = unknown (the scheduler answers "space")
+std::uint32_t space_id(std::string_view name, std::string_view platform) {   // SegaGenesisSpace / SegaSmsSpace ids; 0 = unknown (the scheduler answers "space")
+  if (platform == "master-system") return name == "z80.work_ram" ? 1U : name == "z80.cart_ram" ? 2U : 0U;
   if (name == "m68k.work_ram") return 1;
   if (name == "m68k.rom") return 2;
   if (name == "z80.ram") return 3;
@@ -386,7 +388,7 @@ int sega_mem_read(lua_State *L) {
   const std::string_view space = str_arg(L, 1, "sega.mem.read");
   const std::int64_t offset = int_arg(L, 2, 0, 0xFFFFFFFFLL, "sega.mem.read"), width = int_arg(L, 3, 0, 255, "sega.mem.read");
   std::uint32_t value = 0;
-  const int st = sv->read(sv->ctx, space_id(space), static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(width), &value);
+  const int st = sv->read(sv->ctx, space_id(space, impl_of(L)->platform), static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(width), &value);
   if (st != 0) service_fault(L, st, "sega.mem.read");
   lua_pushnumber(L, static_cast<double>(value));
   return 1;
@@ -397,7 +399,7 @@ int sega_mem_write(lua_State *L) {
   require_args(L, 4, "sega.mem.write");
   const std::string_view space = str_arg(L, 1, "sega.mem.write");
   const std::int64_t offset = int_arg(L, 2, 0, 0xFFFFFFFFLL, "sega.mem.write"), width = int_arg(L, 3, 0, 255, "sega.mem.write"), value = int_arg(L, 4, 0, 0xFFFFFFFFLL, "sega.mem.write");
-  const int st = sv->write(sv->ctx, space_id(space), static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(value));
+  const int st = sv->write(sv->ctx, space_id(space, impl_of(L)->platform), static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(value));
   if (st != 0) service_fault(L, st, "sega.mem.write");
   return 0;
 }
@@ -451,6 +453,91 @@ int sega_audio_event(lua_State *L) {
   if (out[0] == '\0') lua_pushnil(L);
   else lua_pushstring(L, out);
   return 1;
+}
+
+// ---- Master System presentation and render copies (ADR 0325): argument TYPES here, every value rule in the scheduler / compositor, so Luau and C11 refuse the same requests with the same cause ----
+constexpr std::int64_t kInt32Lo = -2147483647LL - 1, kInt32Hi = 2147483647LL, kUint32Hi = 4294967295LL;
+bool picture_overlay(lua_State *L) { return impl_of(L)->platform == "master-system"; }
+
+void present_call(lua_State *L, PresentOp op, const std::int64_t *args, const std::uint8_t *bytes, std::uint32_t length, const char *name) {
+  const HostServices *sv = services_of(L, name);
+  const int st = sv->present != nullptr ? sv->present(sv->ctx, op, args, bytes, length) : 1;
+  if (st != 0) service_fault(L, st, name);
+}
+
+template <std::size_t N>
+int present_integers(lua_State *L, PresentOp op, const std::int64_t (&lo)[N], const std::int64_t (&hi)[N], const char *name) {
+  require_phase(L, Phase::render, name);
+  require_args(L, static_cast<int>(N), name);
+  std::int64_t a[N];
+  for (std::size_t i = 0; i < N; ++i) a[i] = int_arg(L, static_cast<int>(i) + 1, lo[i], hi[i], name);
+  present_call(L, op, a, nullptr, 0, name);
+  return 0;
+}
+int sega_present_color(lua_State *L) { return present_integers<2U>(L, PresentOp::color, {0, 0}, {kUint32Hi, kUint32Hi}, "sega.present.color"); }
+int sega_present_scroll(lua_State *L) { return present_integers<2U>(L, PresentOp::scroll, {kInt32Lo, kInt32Lo}, {kInt32Hi, kInt32Hi}, "sega.present.scroll"); }
+int sega_present_sprite(lua_State *L) {
+  return present_integers<6U>(L, PresentOp::sprite, {kInt32Lo, kInt32Lo, 0, 0, 0, 0}, {kInt32Hi, kInt32Hi, kUint32Hi, kUint32Hi, kUint32Hi, kUint32Hi}, "sega.present.sprite");
+}
+
+// Exactly 2 * N hexadecimal digits -> N bytes.
+void hex_bytes(lua_State *L, int n, std::uint8_t *out, std::size_t count, const char *name) {
+  const std::string_view text = str_arg(L, n, name);
+  const auto nibble = [](char c) -> int { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; };
+  if (text.size() != count * 2) binding_fault(L, Fault::range, std::string(name) + " takes " + std::to_string(count * 2) + " hexadecimal digits");
+  for (std::size_t i = 0; i < count; ++i) {
+    const int hi = nibble(text[2 * i]), lo = nibble(text[2 * i + 1]);
+    if (hi < 0 || lo < 0) binding_fault(L, Fault::range, std::string(name) + " takes hexadecimal digits");
+    out[i] = static_cast<std::uint8_t>(hi * 16 + lo);
+  }
+}
+int sega_present_pattern(lua_State *L) {
+  require_phase(L, Phase::render, "sega.present.pattern");
+  require_args(L, 2, "sega.present.pattern");
+  const std::int64_t index = int_arg(L, 1, 0, kUint32Hi, "sega.present.pattern");
+  std::uint8_t rows[32];
+  hex_bytes(L, 2, rows, sizeof rows, "sega.present.pattern");
+  present_call(L, PresentOp::pattern, &index, rows, sizeof rows, "sega.present.pattern");
+  return 0;
+}
+int sega_present_colors(lua_State *L) {
+  require_phase(L, Phase::render, "sega.present.colors");
+  require_args(L, 1, "sega.present.colors");
+  std::uint8_t colours[16];
+  hex_bytes(L, 1, colours, sizeof colours, "sega.present.colors");
+  present_call(L, PresentOp::colors, nullptr, colours, sizeof colours, "sega.present.colors");
+  return 0;
+}
+int sega_frame_work_ram(lua_State *L) {
+  require_phase(L, Phase::render, "sega.frame.work_ram");
+  require_args(L, 2, "sega.frame.work_ram");
+  const HostServices *sv = services_of(L, "sega.frame.work_ram");
+  const std::int64_t offset = int_arg(L, 1, 0, kUint32Hi, "sega.frame.work_ram"), width = int_arg(L, 2, 0, 255, "sega.frame.work_ram");
+  std::uint32_t value = 0;
+  const int st = sv->read(sv->ctx, 1U, static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(width), &value);
+  if (st != 0) service_fault(L, st, "sega.frame.work_ram");
+  lua_pushnumber(L, static_cast<double>(value));
+  return 1;
+}
+int sega_frame_vdp_byte(lua_State *L) {
+  static const char *const kName = "sega.frame.sms" "_vdp";
+  require_phase(L, Phase::render, kName);
+  require_args(L, 2, kName);
+  const HostServices *sv = services_of(L, kName);
+  const std::string_view region = str_arg(L, 1, kName);
+  static const struct { std::string_view name; VdpRegion region; } kRegions[] = {{"vram", VdpRegion::vram},         {"cram", VdpRegion::cram},
+                                                                                   {"register", VdpRegion::registers}, {"sprite_y", VdpRegion::sprite_y},
+                                                                                   {"sprite_x", VdpRegion::sprite_x},  {"sprite_pattern", VdpRegion::sprite_pattern}};
+  const std::int64_t index = int_arg(L, 2, 0, kUint32Hi, kName);
+  for (const auto &r : kRegions) {
+    if (r.name != region) continue;
+    std::uint32_t value = 0;
+    const int st = sv->vdp_byte != nullptr ? sv->vdp_byte(sv->ctx, r.region, static_cast<std::uint32_t>(index), &value) : 1;
+    if (st != 0) service_fault(L, st, kName);
+    lua_pushnumber(L, static_cast<double>(value));
+    return 1;
+  }
+  binding_fault(L, Fault::range, std::string(kName) + ": unknown region");
 }
 
 int sega_frame_value(lua_State *L) {
@@ -519,6 +606,11 @@ int sega_overlay_rect(lua_State *L) {
   const std::int64_t x = int_arg(L, 1, -kCoord, kCoord, "sega.overlay.rect"), y = int_arg(L, 2, -kCoord, kCoord, "sega.overlay.rect");
   const std::int64_t w = int_arg(L, 3, 0, kCoord, "sega.overlay.rect"), h = int_arg(L, 4, 0, kCoord, "sega.overlay.rect");
   const std::int64_t rgba = int_arg(L, 5, 0, 4294967295LL, "sega.overlay.rect");
+  if (picture_overlay(L)) {   // ADR 0325: on this platform the overlay surface is the presented picture, drawn by the scheduler's compositor
+    const std::int64_t a[5] = {x, y, w, h, rgba};
+    present_call(L, PresentOp::rect, a, nullptr, 0, "sega.overlay.rect");
+    return 0;
+  }
   overlay_result(L, overlay_rect(im->staged, im->overlay_target, x, y, w, h, static_cast<std::uint32_t>(rgba)));
   return 0;
 }
@@ -591,8 +683,18 @@ int sega_overlay_text(lua_State *L) {
   const std::int64_t x = int_arg(L, 1, -kCoord, kCoord, "sega.overlay.text"), y = int_arg(L, 2, -kCoord, kCoord, "sega.overlay.text");
   const std::string_view text = str_arg(L, 3, "sega.overlay.text");
   const std::int64_t rgba = int_arg(L, 4, 0, 4294967295LL, "sega.overlay.text");
+  if (picture_overlay(L)) {
+    const std::int64_t a[3] = {x, y, rgba};
+    present_call(L, PresentOp::text, a, reinterpret_cast<const std::uint8_t *>(text.data()), static_cast<std::uint32_t>(std::min<std::size_t>(text.size(), 0xFFFF)), "sega.overlay.text");
+    return 0;
+  }
   overlay_result(L, overlay_text(im->staged, im->overlay_target, x, y, text, static_cast<std::uint32_t>(rgba)));
   return 0;
+}
+
+bool api_granted(const VmImpl &im, const ApiEntry &e) {
+  const std::vector<std::string_view> any = api_capabilities(e, im.platform);
+  return any.empty() || std::any_of(any.begin(), any.end(), [&](std::string_view c) { return im.granted.count(std::string(c)) != 0; });
 }
 
 // __index of every `sega` namespace table: a name that exists in the API list but whose capability was not declared is a capability fault the moment the script reaches for it (the binding is absent);
@@ -602,8 +704,8 @@ int sega_missing(lua_State *L) {
   const char *prefix = lua_tostring(L, lua_upvalueindex(1));
   if (lua_type(L, 2) == LUA_TSTRING && prefix != nullptr) {
     const ApiEntry *e = find_api(std::string(prefix) + "." + lua_tostring(L, 2));
-    if (e != nullptr && !e->capability.empty() && im->granted.count(std::string(e->capability)) == 0)
-      binding_fault(L, Fault::capability, "capability not declared: " + std::string(e->capability));
+    if (e != nullptr && api_on_platform(*e, im->platform) && !e->capability.empty() && !api_granted(*im, *e))
+      binding_fault(L, Fault::capability, "capability not declared: " + std::string(api_capabilities(*e, im->platform).front()));
   }
   lua_pushnil(L);
   return 1;
@@ -622,7 +724,7 @@ void guard_namespace(lua_State *L, const char *prefix) {   // table on top of th
 
 void bind(lua_State *L, VmImpl *im, std::string_view name, lua_CFunction fn) {   // `sega.<name>` leaf on the table on top of the stack, only when its capability is granted
   const ApiEntry *e = find_api(name);
-  if (e == nullptr || (!e->capability.empty() && im->granted.count(std::string(e->capability)) == 0)) return;
+  if (e == nullptr || !api_on_platform(*e, im->platform) || !api_granted(*im, *e)) return;
   const std::string leaf(name.substr(name.rfind('.') + 1));
   lua_pushcfunction(L, fn, leaf.c_str());
   lua_setfield(L, -2, leaf.c_str());
@@ -634,6 +736,8 @@ void install_host(lua_State *L, VmImpl *im) {
   bind(L, im, "sega.scene", sega_scene);
   lua_newtable(L);   // sega.frame
   bind(L, im, "sega.frame.value", sega_frame_value);
+  bind(L, im, "sega.frame.work_ram", sega_frame_work_ram);
+  bind(L, im, "sega.frame.sms" "_vdp", sega_frame_vdp_byte);
   guard_namespace(L, "sega.frame");
   lua_setreadonly(L, -1, true);
   lua_setfield(L, -2, "frame");
@@ -655,9 +759,9 @@ void install_host(lua_State *L, VmImpl *im) {
   bind(L, im, "sega.overlay.layer", sega_overlay_layer);
   bind(L, im, "sega.overlay.target", sega_overlay_target);
   if (im->granted.count("overlay.rgba") != 0) {
-    lua_pushnumber(L, kOverlayWidth);
+    lua_pushnumber(L, im->platform == "master-system" ? 256 : kOverlayWidth);   // the presented picture (ADR 0325)
     lua_setfield(L, -2, "width");
-    lua_pushnumber(L, kOverlayHeight);
+    lua_pushnumber(L, im->platform == "master-system" ? 224 : kOverlayHeight);
     lua_setfield(L, -2, "height");
   }
   guard_namespace(L, "sega.overlay");
@@ -673,6 +777,17 @@ void install_host(lua_State *L, VmImpl *im) {
   guard_namespace(L, "sega.sprite");
   lua_setreadonly(L, -1, true);
   lua_setfield(L, -2, "sprite");
+  if (im->platform == "master-system") {
+    lua_newtable(L);   // sega.present (ADR 0325)
+    bind(L, im, "sega.present.color", sega_present_color);
+    bind(L, im, "sega.present.scroll", sega_present_scroll);
+    bind(L, im, "sega.present.pattern", sega_present_pattern);
+    bind(L, im, "sega.present.colors", sega_present_colors);
+    bind(L, im, "sega.present.sprite", sega_present_sprite);
+    guard_namespace(L, "sega.present");
+    lua_setreadonly(L, -1, true);
+    lua_setfield(L, -2, "present");
+  }
   lua_newtable(L);   // sega.audio (SEG-145-T008)
   bind(L, im, "sega.audio.play_sfx", sega_audio_play_sfx);
   bind(L, im, "sega.audio.play_music", sega_audio_play_music);
@@ -953,6 +1068,7 @@ std::unique_ptr<Vm> Vm::create_vm(std::string_view package_identity, const Limit
   if (host != nullptr) {
     im->has_host = true;
     im->granted.insert(host->capabilities.begin(), host->capabilities.end());
+    im->platform = host->platform;
   }
   im->identity_hex = std::string(package_identity);
   for (std::size_t i = 0; i < 32; ++i) {

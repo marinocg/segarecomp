@@ -77,7 +77,11 @@ static void advance_events(SmsMachine *m, uint64_t cycles) {
     const uint64_t t = sms_next_event_cycles(m);
     const uint64_t frame = m->next_line / SMS_LINES_PER_FRAME;
     const uint32_t line = (uint32_t)(m->next_line % SMS_LINES_PER_FRAME);
-    if (line == 0u) apply_input_at_frame_start(m, frame, t);
+    if (line == 0u) {
+      if (m->frame_hooks != NULL && m->frame_hooks->boundary != NULL) m->frame_hooks->boundary(m->frame_hooks->context, m, frame);
+      apply_input_at_frame_start(m, frame, t);
+      if (m->frame_hooks != NULL && m->frame_hooks->sampled != NULL) m->frame_hooks->sampled(m->frame_hooks->context, m, frame);
+    }
     if (m->vdp.scanline != NULL) m->vdp.scanline(m->vdp.port.context, frame, line, t);
     sample_irq(m, t);
     ++m->next_line;
@@ -200,6 +204,7 @@ void sms_machine_reset(SmsMachine *m) {
   if (m->psg.reset != NULL) m->psg.reset(m->psg.context);                /* T007 */
   if (m->pad.reset != NULL) m->pad.reset(m->pad.context);                /* T006 */
   sample_irq(m, 0);
+  if (m->frame_hooks != NULL && m->frame_hooks->reset != NULL) m->frame_hooks->reset(m->frame_hooks->context, m);
 }
 
 SmsError sms_machine_init(SmsMachine *m, const uint8_t *rom, uint32_t rom_size, SmsMapperFamily family) {

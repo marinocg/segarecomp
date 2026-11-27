@@ -10,6 +10,7 @@
 #include "luau_build.hpp"
 #include "process_run.hpp"
 #include "sound_gate.hpp"
+#include "segarecomp/machine/master_system/z80_guest_admission.hpp"
 #include "segarecomp/mod.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -429,7 +430,7 @@ struct Prepared {
 // Validates the common arguments and prepares the two build inputs (the original image; the package or the effective image).
 std::optional<Refusal> prepare(const RunOptions &o, const Target &t, const fs::path &work, Prepared &p) {
   if (!read_file(o.rom, p.original, mod::kMaxImageBytes)) return Refusal{"E_IMAGE_MISMATCH", "the original image cannot be read"};
-  const mod::EffectiveImage e = mod::effective_image(t.package, p.original);
+  const mod::EffectiveImage e = mod::effective_image(t.package, p.original, &machine::master_system::admit_z80_guest);   // used only for Master System guest code (ADR 0324)
   if (!e.ok) return Refusal{e.rejection.code, "the image is not one the package declares: " + e.rejection.message};
   p.effective = e.image;
   p.original_path = o.rom;
@@ -478,6 +479,134 @@ bool failed_in_sound_stage(const fs::path &out) {
 }
 Refusal as_refusal(const sound_gate::Refusal &r) { return Refusal{r.code, r.message}; }
 
+// ---- Master System programs (SEG-147-T011, ADR 0325) ----
+// The Master System has its own headless driver: the run is bounded by `--frames` and an explicit Z80 `--cycle-budget` (the scenario's `budget`, in T-states; there is no instruction counter) plus the
+// wall-clock timeout. Frames are the machine's own 0-based frame numbers, in the input script as in the per-frame expectations: entry i of `expect_frames` / `expect_ram_frames` describes frame i after it
+// ended. The pad script uses the shared "<frame>:<player>:<mask>" grammar with the Master System bits (up 1, down 2, left 4, right 8, button 1 0x10, button 2 0x20).
+std::string sms_input_script(const std::string &pad) {
+  std::map<std::uint64_t, std::pair<unsigned, unsigned>> frames;
+  unsigned p1 = 0, p2 = 0;
+  for (std::size_t at = 0; at < pad.size();) {   // already validated by pad_script_ok: non-decreasing frames
+    std::size_t end = pad.find(',', at);
+    if (end == std::string::npos) end = pad.size();
+    const std::string entry = pad.substr(at, end - at);
+    const std::size_t a = entry.find(':'), b = entry.find(':', a + 1);
+    const std::uint64_t frame = std::stoull(entry.substr(0, a));
+    const std::string mask = entry.substr(b + 1);
+    const unsigned value = static_cast<unsigned>(std::stoul(mask, nullptr, mask.size() > 2 && (mask[1] == 'x' || mask[1] == 'X') ? 16 : 10));
+    (entry.substr(a + 1, b - a - 1) == "1" ? p1 : p2) = value;
+    frames[frame] = {p1, p2};
+    at = end + 1;
+  }
+  const auto keys = [](unsigned m) {
+    static const char names[] = "UDLR12";
+    std::string out(6, '-');
+    for (unsigned i = 0; i < 6; ++i) if ((m >> i) & 1U) out[i] = names[i];
+    return out;
+  };
+  std::string out;
+  for (const auto &[frame, pads] : frames) out += std::to_string(frame) + " " + keys(pads.first) + " " + keys(pads.second) + " -\n";
+  return out;
+}
+
+bool sms_pad_masks_ok(const std::string &pad) {
+  for (std::size_t at = 0; at < pad.size();) {
+    std::size_t end = pad.find(',', at);
+    if (end == std::string::npos) end = pad.size();
+    const std::string mask = pad.substr(pad.rfind(':', end - 1) + 1, end - pad.rfind(':', end - 1) - 1);
+    if (std::stoul(mask, nullptr, mask.size() > 2 && (mask[1] == 'x' || mask[1] == 'X') ? 16 : 10) > 0x3F) return false;
+    at = end + 1;
+  }
+  return true;
+}
+
+std::optional<Refusal> build_sms_program(const RunOptions &o, const fs::path &image, const fs::path &out, const Prepared &p, const std::string &mapper) {
+  std::vector<std::string> argv{self_exe().string(), "build", "--rom", image.string(), "--output", out.string(), "--cc", o.cc, "--runtime-dir", (o.sdk / "master-system").string(), "--platform", "master-system", "--optimize", "0"};
+  if (p.luau) {
+    argv.push_back(p.native ? "--native-package" : "--luau-package"); argv.push_back(p.package_path.string()); argv.push_back(p.native ? "--native-identity" : "--luau-identity"); argv.push_back(p.identity);
+  } else {   // a data-only variant: the effective image under the package's declared mapper
+    argv.push_back("--mapper"); argv.push_back(mapper);
+  }
+  std::error_code ec;
+  fs::create_directories(out.parent_path(), ec);
+  const fs::path log = out.parent_path() / (out.filename().string() + "-build.log");
+  const int rc = run_process(argv, log, {}, kBuildTimeoutSeconds);
+  if (rc == kProcessTimedOut) return Refusal{"E_BUILD_TIMEOUT", "the program build exceeded " + std::to_string(kBuildTimeoutSeconds) + " seconds"};
+  if (rc != 0) {
+    std::ifstream in(log, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::size_t at = text.rfind("@result failed");
+    return Refusal{"E_BUILD_FAILED", "the program did not build" + (at == std::string::npos ? std::string() : ": " + text.substr(at, text.find('\n', at) - at))};
+  }
+  return std::nullopt;
+}
+
+std::optional<Refusal> run_sms_program(const fs::path &out, const RunSpec &spec, const fs::path &dir, Observed &obs) {
+  std::error_code ec;
+  fs::create_directories(dir / "artifacts", ec);
+#if defined(_WIN32)
+  const fs::path exe = out / "game.exe";
+#else
+  const fs::path exe = out / "game";
+#endif
+  const fs::path script = dir / "input.txt";
+  {
+    std::ofstream s(script, std::ios::binary | std::ios::trunc);
+    s << sms_input_script(spec.input);
+    if (!s) return Refusal{"E_RUN_FAILED", "the input script cannot be written"};
+  }
+  std::vector<std::string> argv{exe.string(), "--cycle-budget", std::to_string(spec.budget), "--frames", std::to_string(spec.frames), "--input", script.string(), "--artifacts", (dir / "artifacts").string()};
+  if (spec.expect_mod && !spec.regions.empty()) {
+    std::string ram;
+    for (const Region &r : spec.regions) ram += (ram.empty() ? "" : ",") + std::to_string(r.offset) + ":" + std::to_string(r.length);
+    argv.push_back("--mod-ram"); argv.push_back(ram);
+  }
+  if (spec.checkpoint != 0) { argv.push_back("--mod-checkpoint"); argv.push_back(std::to_string(spec.checkpoint)); }
+  const fs::path log = dir / "run.log";
+  const int rc = run_process(argv, log, {}, spec.timeout, nullptr, "SEGARECOMP_");
+  if (rc == kProcessTimedOut) return Refusal{"E_RUN_TIMEOUT", "the program run exceeded its " + std::to_string(spec.timeout) + " second timeout"};
+  std::ifstream in(log, std::ios::binary);
+  const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  if (const auto refused = line_with(text, "MOD_REFUSED")) return Refusal{"E_MOD_REFUSED", "the program refused the mod: " + str_field(*refused, "class")};
+  if (rc == 2) return Refusal{"E_RUN_INCOMPLETE", "the cycle budget ran out before the requested frames (raise the budget or lower frames)"};
+  if (rc != 0) return Refusal{"E_RUN_FAILED", "the program exited with status " + std::to_string(rc)};
+  const auto artifact_sha = [&](const char *name, std::string &out_sha) {
+    std::vector<std::uint8_t> bytes;
+    if (!read_file(dir / "artifacts" / name, bytes, 64U << 20U)) return false;
+    out_sha = sha256_hex(bytes);
+    return true;
+  };
+  if (!artifact_sha("ram.bin", obs.final_state)) return Refusal{"E_RUN_FAILED", "the program wrote no work-RAM artifact"};
+  std::vector<std::uint8_t> sums;
+  if (read_file(dir / "artifacts" / "audio.sha256", sums, 16U << 20U)) {   // the last line is "run <samples> <sha256 of the whole PCM>"
+    const std::string t(sums.begin(), sums.end());
+    const std::size_t at = t.rfind("run ");
+    const std::size_t space = at == std::string::npos ? std::string::npos : t.find(' ', at + 4);
+    if (space != std::string::npos) obs.pcm = t.substr(space + 1, 64);
+  }
+  obs.regions = spec.regions;
+  obs.frames_captured = spec.frames;
+  const auto summary = line_with(text, "MOD_SUMMARY");
+  if (spec.expect_mod) {
+    if (!summary || !line_with(text, "MOD_LOADED")) return Refusal{"E_RUN_FAILED", "the program was built with a mod but did not report it (no MOD_LOADED / MOD_SUMMARY)"};
+    obs.mod.present = true;
+    obs.mod.id = str_field(*summary, "mod");
+    obs.mod.faulted = summary->find("\"faulted\":true") != std::string::npos;
+    obs.mod.fault = str_field(*summary, "fault");
+    obs.mod.write_digest = str_field(*summary, "write_digest");
+    obs.mod.nondeterministic = summary->find("\"nondeterministic\":true") != std::string::npos;
+    obs.digests = list_field(*summary, "digests");
+    obs.ram_frames = list_field(*summary, "ram_frames");
+    const std::size_t rt = summary->find("\"roundtrip\":");
+    obs.mod.roundtrip_status = rt == std::string::npos ? std::string() : str_field(*summary, "status", rt);
+    obs.mod.state_sha256 = rt == std::string::npos ? std::string() : str_field(*summary, "state_sha256", rt);
+  } else if (summary) {
+    return Refusal{"E_RUN_FAILED", "a program built without a mod reported one"};
+  }
+  if (spec.want_pcm && obs.pcm.size() != 64) return Refusal{"E_RUN_FAILED", "the program reported no PCM digest"};
+  return std::nullopt;
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------------------------------------ diff-run
@@ -498,6 +627,7 @@ int run_diff(const RunOptions &o) {
   if (!have_symbols) code = code_probe();
   Target t;
   if (const auto r = load_target(o.target, t)) return refuse(*r);
+  if (t.package.manifest.platform != "genesis") return refuse({"E_DIFF_PLATFORM", "mod diff-run compares Genesis programs only; use `mod test` for a " + t.package.manifest.platform + " mod"});
   Workspace ws;
   ws.dir = make_work(o, ws.keep);
   Prepared p;
@@ -691,6 +821,12 @@ int run_test(const RunOptions &o) {
   std::vector<Scenario> scenarios;
   if (const auto r = parse_scenarios(std::string(raw.begin(), raw.end()), scenarios)) return refuse(*r);
   if (!o.scenario.empty() && std::none_of(scenarios.begin(), scenarios.end(), [&](const Scenario &s) { return s.name == o.scenario; })) return refuse({"E_TEST_SCENARIO", "no scenario is named \"" + o.scenario + "\""});
+  const bool sms = t.package.manifest.platform == "master-system";
+  if (sms)
+    for (const Scenario &s : scenarios) {
+      if (!sms_pad_masks_ok(s.input)) return refuse({"E_INPUT_SCRIPT", "scenario \"" + s.name + "\": a Master System pad mask is 0..0x3f"});
+      if (!parse_regions(s.ram, 8192)) return refuse({"E_REGION", "scenario \"" + s.name + "\": a ram region lies inside the 8 KiB Master System work RAM"});
+    }
   Workspace ws;
   ws.dir = make_work(o, ws.keep);
   Prepared p;
@@ -698,7 +834,14 @@ int run_test(const RunOptions &o) {
   for (const Scenario &sc : scenarios)   // a checkpoint needs a scheduled mod (the MODSTATE round trip): refuse explicitly rather than let a scenario appear to pass
     if (sc.checkpoint != 0 && !p.luau && (o.scenario.empty() || o.scenario == sc.name))
       return refuse({"E_TEST_CHECKPOINT_UNSUPPORTED", "scenario \"" + sc.name + "\" requests a checkpoint, which needs a Luau mod linked into the program (this package is data-only)"});
-  if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
+  if (sms && !p.luau)   // per-frame observations come from the scheduled-mod driver; a data-only program reports its final state and PCM
+    for (const Scenario &sc : scenarios)
+      if (!sc.ram.empty() || !sc.expect_frames.empty() || !sc.expect_frame.empty()) return refuse({"E_TEST_SYNTAX", "scenario \"" + sc.name + "\": a data-only Master System package supports expect_state and expect_pcm only"});
+  std::string mapper;
+  for (const auto &rev : t.package.manifest.revisions) if (rev.sha256 == sha256_hex(p.original)) mapper = rev.mapper;
+  if (const auto r = sms ? build_sms_program(o, p.luau ? p.original_path : p.modded_input, ws.dir / "modded", p, mapper)
+                     : p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity, p.native) : build_program(o, p.modded_input, ws.dir / "modded", {}, {}))
+    return refuse(*r);
 
   bool all = true;
   std::string results = "[";
@@ -708,16 +851,16 @@ int run_test(const RunOptions &o) {
     RunSpec spec{s.frames, s.budget, static_cast<unsigned>(s.timeout), s.input, *parse_regions(s.ram, 65536), s.checkpoint, !s.expect_pcm.empty(), 1, p.luau};
     Observed obs;
     std::string failure;   // the first divergence, as JSON members
-    if (const auto r = run_program(ws.dir / "modded", spec, ws.dir / ("frames-" + s.name), obs)) {
+    if (const auto r = sms ? run_sms_program(ws.dir / "modded", spec, ws.dir / ("frames-" + s.name), obs) : run_program(ws.dir / "modded", spec, ws.dir / ("frames-" + s.name), obs)) {
       failure = "\"class\":\"" + esc(r->code) + "\",\"message\":\"" + esc(r->message) + "\"";
     } else {
       if (obs.mod.present && obs.mod.faulted) failure = "\"field\":\"mod_fault\",\"fault\":\"" + esc(obs.mod.fault) + "\"";
       for (std::size_t i = 0; failure.empty() && i < s.expect_frames.size(); ++i)
-        if (obs.digests[i] != s.expect_frames[i]) failure = "\"field\":\"frame\",\"frame\":" + std::to_string(i + 1) + ",\"expected\":\"" + s.expect_frames[i] + "\",\"actual\":\"" + obs.digests[i] + "\"";
+        if (i >= obs.digests.size() || obs.digests[i] != s.expect_frames[i]) failure = "\"field\":\"frame\",\"frame\":" + std::to_string(i + 1) + ",\"expected\":\"" + s.expect_frames[i] + "\",\"actual\":\"" + (i < obs.digests.size() ? obs.digests[i] : std::string()) + "\"";
       for (std::size_t i = 0; failure.empty() && i < s.expect_ram_frames.size(); ++i)
         if (i >= obs.ram_frames.size() || obs.ram_frames[i] != s.expect_ram_frames[i])
           failure = "\"field\":\"ram\",\"frame\":" + std::to_string(i + 1) + ",\"expected\":\"" + s.expect_ram_frames[i] + "\",\"actual\":\"" + (i < obs.ram_frames.size() ? obs.ram_frames[i] : std::string()) + "\"";
-      if (failure.empty() && !s.expect_frame.empty() && obs.digests.back() != s.expect_frame)
+      if (failure.empty() && !s.expect_frame.empty() && (obs.digests.empty() || obs.digests.back() != s.expect_frame))
         failure = "\"field\":\"final_frame\",\"frame\":" + std::to_string(s.frames) + ",\"expected\":\"" + s.expect_frame + "\",\"actual\":\"" + obs.digests.back() + "\"";
       if (failure.empty() && !s.expect_state.empty() && obs.final_state != s.expect_state)
         failure = "\"field\":\"state\",\"expected\":\"" + s.expect_state + "\",\"actual\":\"" + obs.final_state + "\"";

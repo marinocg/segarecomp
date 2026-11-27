@@ -9,3 +9,10 @@ set_target_properties(segarecomp_headless_master_system PROPERTIES
 )
 target_link_libraries(segarecomp_headless_master_system PRIVATE segarecomp::runtime_master_system)
 segarecomp_enable_warnings(segarecomp_headless_master_system)
+# SEG-147-T004/T005 (ADR 0325): the driver of a build with a scheduled mod, compile-checked (a built program compiles these with -DSEGARECOMP_SMS_MOD).
+add_library(segarecomp_headless_master_system_mod_check OBJECT sms_headless.c sms_headless_mod.c sms_devices_vdp.c)
+set_target_properties(segarecomp_headless_master_system_mod_check PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_compile_definitions(segarecomp_headless_master_system_mod_check PRIVATE SEGARECOMP_SMS_MOD=1)
+target_include_directories(segarecomp_headless_master_system_mod_check PRIVATE ${PROJECT_SOURCE_DIR}/platforms/master-system/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/src)
+target_link_libraries(segarecomp_headless_master_system_mod_check PRIVATE segarecomp::runtime_master_system_mod)
+segarecomp_enable_warnings(segarecomp_headless_master_system_mod_check)

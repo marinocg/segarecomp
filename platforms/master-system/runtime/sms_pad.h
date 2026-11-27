@@ -24,6 +24,7 @@ extern "C" {
 
 typedef struct SmsPad {
   const SmsInputState *input; /* the machine's live scripted-input state */
+  const SmsInputState *intercept; /* SEG-147-T004: when non-NULL the guest reads THIS state instead (a mod's final input); `input` stays the physical state that is recorded, saved and digested */
   SmsVdp *vdp;                /* receives the H counter latch; NULL: no latch */
   uint8_t io_control;         /* last write to port $3F, reset $FF */
   uint32_t h_latches;         /* TH rising edges seen since reset */

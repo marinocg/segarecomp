@@ -187,7 +187,7 @@ sms_for_genesis = (FIXTURES / "provider_sms.c").read_bytes()
 refused("an SMS provider in a genesis package", project("wrong-platform", {"src/provider.c": sms_for_genesis}), "E_ABI_PLATFORM")
 refused("a genesis provider in a master-system package", project("wrong-platform2", {"src/provider.c": (FIXTURES / "provider_genesis.c").read_bytes()}, platform="master-system"), "E_ABI_PLATFORM")
 refused("master-system declaring a capability it lacks", project("sms-cap", {"src/provider.c": sms_for_genesis}, platform="master-system", caps='"frame.vdp"'), "E_CAPABILITY_UNSUPPORTED")
-refused("master-system declaring memory.write", project("sms-cap2", {"src/provider.c": sms_for_genesis}, platform="master-system", caps='"memory.write.z80.work_ram"'), "E_CAPABILITY_UNSUPPORTED")
+refused("master-system declaring function hooks (no Z80 hook implementation)", project("sms-cap2", {"src/provider.c": sms_for_genesis}, platform="master-system", caps='"hook.function"'), "E_CAPABILITY_UNSUPPORTED")
 def with_abi(name, value):
     root = project(name, {"src/provider.c": (FIXTURES / "provider_genesis.c").read_bytes()})
     write(root / "mod.toml", (root / "mod.toml").read_text().replace("native = 2", f"native = {value}"))

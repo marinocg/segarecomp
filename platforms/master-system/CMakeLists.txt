@@ -2,6 +2,7 @@
 # generated programs (runtime). The runtime is a plain C11 library; the machine library depends on it only for the
 # shared contract headers (mapper contract table, typed error surface).
 add_subdirectory(runtime)
+add_subdirectory(mod)
 add_subdirectory(machine)
 add_subdirectory(headless)
 add_subdirectory(viewer)

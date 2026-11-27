@@ -20,6 +20,7 @@ struct PhaseProvider::Impl {
   std::string scene;
   SpriteSubmission sprites;   // SEG-140-T008: the virtual-sprite submission of the last successful `render`
   FaultSink sink = nullptr;
+  PhaseProvider::ServiceFill fill = nullptr;
 };
 
 namespace {
@@ -83,6 +84,7 @@ void phase_entry(void *state, const SegaModHost *host) {
   services.input_set = svc_input_set;
   services.audio_command = svc_audio_command;
   services.audio_event = svc_audio_event;
+  if (impl->fill != nullptr) impl->fill(services);
   FrameInput in;
   in.number = host->frame;
   in.services = &services;
@@ -145,7 +147,7 @@ std::unique_ptr<PhaseProvider> PhaseProvider::create(std::string_view identity, 
   impl->table.size = sizeof(SegaModProvider);
   impl->table.abi_major = SEGA_MOD_ABI_MAJOR;
   impl->table.required_minor = 0;
-  impl->table.platform = SEGA_MOD_PLATFORM_GENESIS;
+  impl->table.platform = host.platform == "master-system" ? SEGA_MOD_PLATFORM_MASTER_SYSTEM : SEGA_MOD_PLATFORM_GENESIS;
   impl->table.name = "luau";
   impl->table.implementation_version = 1;
   impl->table.phase = phase_entry;
@@ -154,6 +156,7 @@ std::unique_ptr<PhaseProvider> PhaseProvider::create(std::string_view identity, 
   return std::unique_ptr<PhaseProvider>(new PhaseProvider(std::move(impl)));
 }
 
+void PhaseProvider::set_service_fill(ServiceFill fill) { impl_->fill = fill; }
 const SegaModProvider *PhaseProvider::provider() const { return &impl_->table; }
 void *PhaseProvider::state() { return impl_.get(); }
 std::uint32_t PhaseProvider::phase_mask() const { return impl_->mask; }

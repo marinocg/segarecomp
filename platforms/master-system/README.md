@@ -21,6 +21,10 @@ library `libs/device/sega/psg` (ADR 0063).
 
 **Milestone:** SEG-009.
 
+## Mods (ADR 0325)
+
+`mod/` holds the mod layer a build links only with `--luau-package` / `--native-package`: the phase scheduler, the presentation-only compositor, the program host and the Luau provider shim; `sdk/` the public ABI 2 header and examples. A Vanilla program links none of it. User guide: [Master System mods](../../docs/product/master-system-mods.md).
+
 ## Widescreen (Level 2, SEG-120)
 
 The viewer's Widescreen Mode *Extended Backgrounds* (shared `video.widescreen` setting, ADR 0263) is presentation only and **always Partial**. The Mode 4 background name table is 32 columns = 256 pixels and

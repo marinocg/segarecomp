@@ -34,6 +34,7 @@ struct SmsSdl3Viewer {
   uint16_t script_pad;
   uint64_t polls;
   SvWidescreenSupport l3_support; /* SEG-121: whether the latest Level 3 request produced the sprite spill (never Available) */
+  SmsSdl3Composer composer; /* SEG-147-T006: a scheduled mod's presentation, or NULL */
 };
 
 #define EXT_SURFACE_W (SMS_FB_WIDTH + 2u * SMS_EXT_MAX_SIDE)
@@ -188,6 +189,10 @@ static int build_extension(SmsSdl3Viewer *v, const uint8_t *rgb, uint32_t height
   return 1;
 }
 
+void sms_sdl3_viewer_set_composer(SmsSdl3Viewer *viewer, SmsSdl3Composer composer) {
+  if (viewer != NULL) viewer->composer = composer;
+}
+
 static int sdl_present(void *ctx, const uint8_t *fb, uint32_t height) {
   SmsSdl3Viewer *v = (SmsSdl3Viewer *)ctx;
   static uint8_t rgb[SMS_FB_WIDTH * SMS_FB_MAX_HEIGHT * 3];
@@ -195,6 +200,8 @@ static int sdl_present(void *ctx, const uint8_t *fb, uint32_t height) {
   if (height == 0u || height > SMS_FB_MAX_HEIGHT) return -1;
   for (i = 0; i < SMS_FB_WIDTH * height; ++i) put_rgb(&rgb[i * 3u], fb[i]);
   v->frames++;
+  if (v->composer != NULL && v->composer(fb, height, rgb) != 0) /* the mod's presented picture replaces ours for this frame; a declined frame leaves `rgb` as converted above */
+    return sv_host_present(v->host, rgb, (int)SMS_FB_WIDTH, (int)height, (int)SMS_FB_WIDTH * 3);
   /* The picture is 256 x 192 or 256 x 224 lines; the shared presenter fits the active height with the right aspect. */
   if (v->ext_attached) {
     SvExtendedSurface surface;
