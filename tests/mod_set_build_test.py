@@ -268,7 +268,9 @@ write(victim / "set-members" / "keep.txt", b"user data")
 args, _ = build("keeps user files", [watcher], name="keeps-user-files")
 ok("a user folder named set-members is left alone", *args)
 cli.check((victim / "set-members" / "keep.txt").read_bytes() == b"user data" and not list(victim.glob(".set-members-*")), "the user's set-members folder survives and this build's staging is gone")
-ok("rebuilding into the same folder reuses its own marked staging", *args)
+write(victim / "input" / "effective.rom", b"a stale generated image of an earlier, interrupted build")
+ok("rebuilding into the same folder reuses its own marked staging and replaces a stale generated image", *args)
+cli.check(not (victim / "input").exists() and (victim / "game").is_file() and ROM_PATH.read_bytes() == ROM, "the generated image is removed again and the original is untouched")
 occupied = tmp / "build-occupied"
 write(occupied / "set-mod" / "keep.txt", b"user data")
 args, _ = build("occupied", [watcher], name="occupied")
@@ -300,6 +302,48 @@ resumed_t, resumed_frames = observation(out_t, PAD, {"SEGARECOMP_MOD_LOAD": str(
 by_t = members_of(base_t)
 cli.check(by_t["watcher"]["write_digest"] != by_t["watcher-twin"]["write_digest"] and {n: m["write_digest"] for n, m in members_of(resumed_t).items()} == {n: m["write_digest"] for n, m in by_t.items()},
           f"two mods with the same saved key keep separate values across save and load: {by_t}")
+
+# ---------------------------------------------------------------- headless recordings carry the program's embedded set identity (never the environment's)
+def headless_session(program, image, variable, recording, variant="e" * 64, pad=PAD):
+    frames_dir = program / "session-frames"
+    shutil.rmtree(frames_dir, ignore_errors=True)
+    frames_dir.mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SEGARECOMP_")}
+    env.update({"SEGARECOMP_CAPTURE_DIR": str(frames_dir), "SEGARECOMP_CAPTURE_FIRST": "1", "SEGARECOMP_CAPTURE_COUNT": "30", "SEGARECOMP_CAPTURE_SLICE": "16", "SEGARECOMP_CAPTURE_STRIDE": "1",
+                "SEGARECOMP_PAD_SCRIPT": pad if variable == "SEGARECOMP_RECORD" else "", "SEGARECOMP_ROM_SHA256": image, "SEGARECOMP_SAVE_VARIANT": variant, variable: str(recording)})
+    p = subprocess.run([str(program / "game"), "--instruction-budget", "20000000"], capture_output=True, text=True, env=env, timeout=300)
+    return p.returncode, p.stdout + p.stderr
+
+
+def recorded_variant(recording):
+    lines = recording.read_text().splitlines() if recording.is_file() else []
+    return next((line.split()[1] for line in lines if line.startswith("variant ")), None)
+
+
+def check_headless_sessions(label, program, other_programs, identity, image):
+    recording = tmp / f"{label}.rec"
+    rc, log = headless_session(program, image, "SEGARECOMP_RECORD", recording)
+    cli.check(rc in (0, 1) and recorded_variant(recording) == identity, f"{label}: the headless recording carries the set identity although the environment names another variant: {recorded_variant(recording)} {log[-500:]}")
+    rc, log = headless_session(program, image, "SEGARECOMP_REPLAY", recording, variant="d" * 64)
+    cli.check(rc in (0, 1) and "VERIFIED, all" in log and "NOT VERIFIED" not in log, f"{label}: the same set replays it verified under any environment variant: {log[-600:]}")
+    for other_label, other in other_programs:
+        rc, log = headless_session(other, image, "SEGARECOMP_REPLAY", recording, variant=identity)   # even an environment that NAMES the recorded identity changes nothing
+        cli.check("different image or version" in log and "VERIFIED, all" not in log, f"{label}: {other_label} rejects the recording: rc={rc} {log[-600:]}")
+    return recording
+
+
+_, out_c = built("a set with another membership", [assist, watcher, edit], approve=(ids["assist"],), name="membership")
+image_sha = doc.get("effective_sha256", "")
+set_recording = check_headless_sessions("provider set", out, [("another order", out_rev), ("another membership", out_c)], doc.get("set_identity", ""), image_sha)
+
+data_two = tmp / "edit-second"
+write(data_two / "edits" / "main.edits", f"fixture u16 0x{EDIT_AT - 2:08x} 0x{ROM[EDIT_AT - 2:EDIT_AT].hex()} 0x1357\n".encode())
+write(data_two / "mod.toml", manifest("second-edit", ROM, '\n[[source]]\nkind = "rom-edit-set"\npath = "edits/main.edits"\n'))
+doc_data, out_data = built("a data-only set", [edit, data_two], name="data-ab")
+doc_data_rev, out_data_rev = built("the data-only set reordered", [data_two, edit], name="data-ba")
+_, out_data_one = built("a data-only set with another membership of the same kind", [edit], name="data-one")
+cli.check(doc_data.get("running") == 0 and doc_data.get("effective_sha256") == doc_data_rev.get("effective_sha256") and doc_data.get("set_identity") != doc_data_rev.get("set_identity"), "two data-only sets of one image")
+data_recording = check_headless_sessions("data-only set", out_data, [("another order", out_data_rev)], doc_data.get("set_identity", ""), doc_data.get("effective_sha256", ""))
 
 # ---------------------------------------------------------------- failure isolation in the built program
 FAULTY = """local n = 0
@@ -403,6 +447,90 @@ if sdl is not None and (sdl / "include").is_dir():
     p, events = played(out_v, "reload-a", "10 M\n60 Q\n", shared)
     cli.check(bool(events) and events[0]["event"] == "load" and events[0]["status"] == "ok", f"the first set still loads its own save: {events}")
     print("mod_set_build_test: SDL3 viewer section ran")
+
+    # ---- a recording of one set is compatible between the headless and the played program of that set, in both directions
+    def played_session(program, image, variable, recording):
+        env = h.env(SEGARECOMP_ROM_SHA256=image, SEGARECOMP_SAVE_VARIANT="c" * 64, **{variable: str(recording)})
+        if variable == "SEGARECOMP_RECORD":
+            script = tmp / "session-pad.txt"
+            script.write_text("40 Q\n")
+            env["SEGARECOMP_VIEWER_PAD_SCRIPT"] = str(script)
+        p = subprocess.run([str(program / "game"), "--instruction-budget", "60000000"], capture_output=True, text=True, env=env, timeout=300, cwd=tmp)
+        return p.returncode, p.stderr
+
+    args, data_played = build("the played data-only set", [edit, data_two], name="data-ab-viewer")
+    ok("the played data-only set builds", *args, "--sdl3-include", sdl / "include", "--sdl3-lib", sdl / "lib", "--test-frame-seam", "1")
+    for label, headless_recording, played_program, headless_program, identity_, image_ in (("provider set", set_recording, out_v, out, doc.get("set_identity", ""), image_sha),
+                                                                                         ("data-only set", data_recording, data_played, out_data, doc_data.get("set_identity", ""), doc_data.get("effective_sha256", ""))):
+        rc, log = played_session(played_program, image_, "SEGARECOMP_REPLAY", headless_recording)
+        cli.check("VERIFIED, all" in log and "NOT VERIFIED" not in log, f"{label}: the played program verifies the headless recording: rc={rc} {log[-700:]}")
+        recording = tmp / f"{label.split()[0]}-played.rec"
+        rc, log = played_session(played_program, image_, "SEGARECOMP_RECORD", recording)
+        cli.check(recorded_variant(recording) == identity_, f"{label}: the played recording carries the set identity: {recorded_variant(recording)} {log[-500:]}")
+        rc, log = headless_session(headless_program, image_, "SEGARECOMP_REPLAY", recording)
+        cli.check("VERIFIED, all" in log and "NOT VERIFIED" not in log, f"{label}: the headless program verifies the played recording: rc={rc} {log[-700:]}")
+    rc, log = played_session(out_w, image_sha, "SEGARECOMP_REPLAY", set_recording)
+    cli.check("different image or version" in log and "VERIFIED, all" not in log, f"the played program of another order rejects the recording: {log[-600:]}")
+    print("mod_set_build_test: SDL3 session section ran")
+
+    # ---- battery-backed SRAM (SEG-141-T005): the synthetic SRAM cartridge of the persistence tests. It copies its SAVED bytes to work RAM $FF0000 first, then writes a 16-byte pattern; typed edits give
+    # each set its own first pattern byte, so what a set reads back says whose save it was given
+    sys.path.insert(0, str(ROOT / "tests"))
+    import genesis_cartridge_sram_generated_test as sram  # noqa: E402
+    import genesis_persistence_test as persistence  # noqa: E402
+    sram_rom = sram.build_rom(persistence.sram_guest())   # the cartridge of genesis_production_states_test, unchanged
+    sram_path = write(tmp / "sram.rom", sram_rom)
+    at = sram_rom.index(bytes.fromhex(sram.move_b_imm_abs(persistence.PATTERN[0], sram.SRAM_START)))
+    assert sram_rom[at + 3] == persistence.PATTERN[0]
+
+    def sram_edit(name, value):
+        d = tmp / name
+        write(d / "edits" / "main.edits", f"fixture u8 0x{at + 3:08x} 0x{persistence.PATTERN[0]:02x} 0x{value:02x}\n".encode())
+        write(d / "mod.toml", manifest(name, sram_rom, '\n[[source]]\nkind = "rom-edit-set"\npath = "edits/main.edits"\n'))
+        return d
+
+    quiet = luau_mod("sram-script", "function reset() end\n", ["host.log"], image=sram_rom)
+    one_, two_ = sram_edit("sram-one", 0xA1), sram_edit("sram-two", 0xB2)
+    saves = tmp / "sram-saves"
+    programs = {}
+    for label, members_ in (("A", [one_, quiet]), ("B", [two_])):   # a set with a provider and a data-only set
+        args, program = build(f"the SRAM set {label}", members_, rom=sram_path, name=f"sram-{label}")
+        d = ok(f"the SRAM set {label} builds", *args, "--sdl3-include", sdl / "include", "--sdl3-lib", sdl / "lib", "--test-frame-seam", "1")
+        programs[label] = (program, saves / "sets" / d.get("set_identity", "missing") / "cartridge.srm", d.get("effective_sha256", ""))
+    vanilla_sram = tmp / "sram-vanilla"
+    cli.check(h.build(sram_path, vanilla_sram).returncode == 0, "the Vanilla SRAM program builds")
+    single_sram = tmp / "sram-single"
+    single_package = tmp / "sram-single.segapatch"
+    packed_ = ok("pack the single SRAM mod", "mod", "pack", one_, "--out", single_package)
+    cli.check(h.build(sram_path, single_sram, extra=("--data-package", single_package, "--data-identity", packed_["package_identity"])).returncode == 0, "the single-mod SRAM program builds")
+
+    def sram_play(program, folder, image):
+        p, _, _, ram = h.play(program, "sram-" + program.name, pad="20 Q\n", save=folder, rom_sha=image, budget=60_000_000)
+        events = [json.loads(x.split(" ", 1)[1]) for x in p.stderr.splitlines() if x.startswith("VIEWER_PERSIST ")]
+        return [e["status"] for e in events], (ram.read_bytes()[0:16] if ram.is_file() else b""), p.stderr
+
+    a_program, a_file, a_image = programs["A"]
+    b_program, b_file, b_image = programs["B"]
+    statuses, read, log = sram_play(a_program, saves, a_image)
+    cli.check(statuses == ["fresh", "stored"] and read == b"\xff" * 16 and a_file.is_file() and a_file.read_bytes()[0] == 0xA1, f"set A starts fresh and stores its own value: {statuses} {read.hex()} {log[-500:]}")
+    a_bytes = a_file.read_bytes() if a_file.is_file() else b""
+    statuses, read, log = sram_play(b_program, saves, b_image)
+    cli.check(statuses == ["fresh", "stored"] and read == b"\xff" * 16 and b_file.is_file() and b_file.read_bytes()[0] == 0xB2 and a_file.read_bytes() == a_bytes,
+              f"set B, given the same save folder, starts fresh, stores its own value and leaves A's file unchanged: {statuses} {read.hex()}")
+    b_bytes = b_file.read_bytes() if b_file.is_file() else b""
+    statuses, read, _ = sram_play(a_program, saves, a_image)
+    cli.check(statuses == ["loaded", "stored"] and read[:1] == b"\xa1" and b_file.read_bytes() == b_bytes, f"reopening A retrieves A's value and leaves B's file unchanged: {statuses} {read.hex()}")
+    a_bytes = a_file.read_bytes()
+    statuses, read, _ = sram_play(b_program, saves, b_image)
+    cli.check(statuses == ["loaded", "stored"] and read[:1] == b"\xb2" and a_file.read_bytes() == a_bytes, f"reopening B retrieves B's value and leaves A's file unchanged: {statuses} {read.hex()}")
+    cli.check(not (saves / "cartridge.srm").exists(), "no set wrote the un-namespaced save")
+    for label, program, value in (("Vanilla", vanilla_sram, persistence.PATTERN[0]), ("the single-mod program", single_sram, 0xA1)):
+        folder = tmp / ("sram-plain-" + program.name)
+        statuses, _, log = sram_play(program, folder, sha(sram_rom))
+        cli.check(statuses == ["fresh", "stored"] and (folder / "cartridge.srm").is_file() and (folder / "cartridge.srm").read_bytes()[0] == value and not (folder / "sets").exists(),
+                  f"{label} keeps its save directly in the given folder, as before: {statuses} {log[-400:]}")
+    cli.check(a_file.read_bytes() == a_bytes, "the other programs did not touch a set's save")
+    print("mod_set_build_test: SDL3 battery SRAM section ran")
 
 shutil.rmtree(tmp, ignore_errors=True)
 cli.done("mod_set_build_test")

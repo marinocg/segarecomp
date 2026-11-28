@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -650,6 +651,109 @@ packed_edit = tmp / "direct-member.segapatch"
 ok("pack the direct member", "mod", "pack", edit_a, "--out", packed_edit)
 direct_build_refused("a member that is not the pinned package", "E_PACKAGE_CHANGED", packed_edit, "0" * 64)
 direct_build_refused("a member that cannot be read", "E_ARCHIVE_ENTRY", tmp / "no-such.segapatch", "0" * 64)
+
+# two mods' hook ids that cannot be told apart even with the member suffix
+def hook_text(hook_id, symbol):
+    return f'\n[[hook]]\nid = "{hook_id}"\nsymbol = "{symbol}"\nmode = "before"\nreads = ["d0"]\n'
+
+
+taken = project("ids-taken", native=True, hooks=hook_text("x", "fn-a") + hook_text("x-m1", "fn-b"), symbols=(("fn-a", "0x00000600"), ("fn-b", "0x00000700")))
+clashing = project("ids-clash", native=True, hooks=hook_text("x", "fn-c"), symbols=(("fn-c", "0x00000800"),))
+build_refused("hook ids that cannot be made unique", "E_SET_HOOK_SITE_ID", [taken, clashing], identity_of(taken), identity_of(clashing))
+
+# a set-mod folder the build did not create is never deleted; the refusal's class and message are pinned
+occupied = tmp / ("setbuild-" + str(len(GOLDEN.get("E_SET_ARTIFACT_WRITE", []))) + "E_SET_ARTIFACT_WRITE")
+write(occupied / "set-mod" / "keep.txt", b"user data")
+build_refused("a user folder where the build stages", "E_SET_ARTIFACT_WRITE", [edit_a, project("runs", luau=True)])
+cli.check((occupied / "set-mod" / "keep.txt").read_bytes() == b"user data" and sorted(p.name for p in (occupied / "set-mod").iterdir()) == ["keep.txt"], "the user's set-mod folder is untouched")
+
+# ------------------------------------------------------------------ no output of a package build may be an input: the composed image <out>/input/effective.rom first of all (it is removed and rewritten)
+GUARD = tmp / "guard"
+guard_members = [edit_a, edit_b]
+member_packages = []
+for i, d in enumerate(guard_members):
+    package = GUARD / f"member-{i}.segapatch"
+    package.parent.mkdir(parents=True, exist_ok=True)
+    ok("pack a guard member", "mod", "pack", d, "--out", package)
+    member_packages.append(package)
+member_ids = [identity_of(d) for d in guard_members]
+
+
+def tree(root):
+    return {str(p.relative_to(root)): (os.readlink(p) if p.is_symlink() else p.read_bytes() if p.is_file() else "dir") for p in sorted(root.rglob("*"))}
+
+
+def direct_args(out, rom, packages):
+    argv = [sys.argv[1], "build", "--rom", str(rom), "--output", str(out), "--cc", CC, "--runtime-dir", str(Path(PLATFORMS) / "genesis")]
+    for package, identity in zip(packages, member_ids):
+        argv += ["--set-package", str(package), "--set-identity", identity]
+    return argv
+
+
+def guarded(what, area, out, rom, packages=None, cwd=None):
+    """Both routes refuse with E_OUTPUT_IS_INPUT and change nothing under `area` (inputs, links and the output folder)."""
+    before = tree(area)
+    p = subprocess.run(direct_args(out, rom, packages or member_packages), text=True, capture_output=True, timeout=600, cwd=cwd)
+    cli.check(p.returncode == 1 and "class=E_OUTPUT_IS_INPUT" in p.stdout and tree(area) == before, f"{what} (build --set-package): rc={p.returncode} {p.stdout[-300:]} changed={sorted(set(tree(area).items()) ^ set(before.items()))[:4] if tree(area) != before else []}")
+    rc, doc, _ = cli.run("mod", "set", "build", *(packages or member_packages), "--rom", rom, "--out", out, "--cc", CC, "--sdk-dir", PLATFORMS, cwd=cwd)
+    cli.check(rc == 1 and doc and doc.get("class") == "E_OUTPUT_IS_INPUT" and tree(area) == before, f"{what} (mod set build): rc={rc} {doc}")
+
+
+def area(name):
+    d = GUARD / name
+    (d / "out" / "input").mkdir(parents=True)
+    return d
+
+
+a = area("direct")
+original = write(a / "out" / "input" / "effective.rom", ROM)
+guarded("the original at the generated image path", a, a / "out", original)
+guarded("an equivalent spelling of the same path", a, a / "out" / "input" / ".." , original)
+guarded("relative paths", a, Path("out"), Path("out/./input/../input/effective.rom"), cwd=a)
+a = area("status-file")
+status_rom = write(a / "out" / "status.json", ROM)
+guarded("the original at another fixed build output", a, a / "out", status_rom)
+a = area("generated-tree")
+tree_rom = write(a / "out" / "obj" / "game.bin", ROM)
+guarded("the original inside a folder the build replaces", a, a / "out", tree_rom)
+a = area("member-at-image")
+shutil.copy(member_packages[0], a / "out" / "input" / "effective.rom")
+image = write(a / "game.bin", ROM)
+guarded("a member package at the generated image path", a, a / "out", image, [a / "out" / "input" / "effective.rom", member_packages[1]])
+try:
+    a = area("symlink-destination")
+    image = write(a / "game.bin", ROM)
+    (a / "out" / "input" / "effective.rom").symlink_to(image)
+    guarded("a link at the generated image path pointing to the original", a, a / "out", image)
+    a = area("symlink-original")
+    real = write(a / "out" / "input" / "effective.rom", ROM)
+    (a / "game.bin").symlink_to(real)
+    guarded("the original named through a link to the generated image path", a, a / "out", a / "game.bin")
+    a = GUARD / "symlink-folder"
+    (a / "out").mkdir(parents=True)
+    real = write(a / "mine" / "effective.rom", ROM)
+    (a / "out" / "input").symlink_to(a / "mine", target_is_directory=True)
+    guarded("a linked input folder that holds the original", a, a / "out", real)
+    a = area("symlink-log")
+    image = write(a / "game.bin", ROM)
+    (a / "out" / "build.log").symlink_to(image)
+    guarded("a link at the build log pointing to the original", a, a / "out", image)
+except OSError:
+    print("mod_set_test: symbolic links are not available here; link collisions not exercised")
+try:
+    a = area("hardlink")
+    image = write(a / "game.bin", ROM)
+    os.link(image, a / "out" / "input" / "effective.rom")
+    guarded("a hard link of the original at the generated image path", a, a / "out", image)
+except OSError:
+    print("mod_set_test: hard links are not available here")
+# a single-mod package route shares the same generated image path and the same guard
+a = area("single-route")
+single = write(a / "out" / "input" / "effective.rom", ROM)
+before = tree(a)
+p = subprocess.run([sys.argv[1], "build", "--rom", str(single), "--output", str(a / "out"), "--cc", CC, "--runtime-dir", str(Path(PLATFORMS) / "genesis"), "--data-package", str(member_packages[0]), "--data-identity", member_ids[0]],
+                   text=True, capture_output=True, timeout=600)
+cli.check(p.returncode == 1 and "class=E_OUTPUT_IS_INPUT" in p.stdout and tree(a) == before, f"the single data-package route refuses too: {p.returncode} {p.stdout[-300:]}")
 
 if os.environ.get("SEGARECOMP_UPDATE_GOLDEN") == "1":
     write(GOLDEN_PATH, (json.dumps(GOLDEN, indent=1, sort_keys=True) + "\n").encode())

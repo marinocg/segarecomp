@@ -168,6 +168,14 @@
    ]
   }
  ],
+ "E_SET_ARTIFACT_WRITE": [
+  {
+   "case": "a user folder where the build stages",
+   "class": "E_SET_ARTIFACT_WRITE",
+   "error": "The native sources could not be staged: the output folder may already hold a set-mod folder this build did not create (it is never deleted), or it cannot be written.",
+   "violations": []
+  }
+ ],
  "E_SET_AUDIO_UNSUPPORTED": [
   {
    "case": "the audio API in a set",
@@ -570,6 +578,20 @@
       "edit-hook",
       "hooker"
      ]
+    }
+   ]
+  }
+ ],
+ "E_SET_HOOK_SITE_ID": [
+  {
+   "case": "hook ids that cannot be made unique",
+   "class": "E_SET_HOOK_SITE_ID",
+   "error": "the hook ids of the set cannot be made unique",
+   "violations": [
+    {
+     "class": "E_SET_HOOK_SITE_ID",
+     "message": "the hook ids of the set cannot be made unique",
+     "mods": []
     }
    ]
   }

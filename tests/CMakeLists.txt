@@ -2616,7 +2616,7 @@ set_property(TEST mod_set_build_test APPEND PROPERTY LABELS full)   # many gener
 set_property(TEST mod_set_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST mod_set_build_test PROPERTY TIMEOUT 1500)
 # SEG-141-T007 (ADR 0327): built Master System mod sets on the shared engine and set dispatcher; the played section needs SDL3.
-add_test(NAME mod_set_sms_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_set_sms_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME mod_set_sms_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_set_sms_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
 set_property(TEST mod_set_sms_test APPEND PROPERTY LABELS full)
 set_property(TEST mod_set_sms_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST mod_set_sms_test PROPERTY TIMEOUT 1500)

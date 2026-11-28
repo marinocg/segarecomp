@@ -6,7 +6,7 @@ derivation: with the native mod FIRST it sees button 2 and presses button 1, so 
 
 Also: composite identity changes with membership and order and equals `mod set variant`'s (an identical set reuses it); overlapping bank-qualified edits are rejected naming both mods; replay is
 deterministic; a saved state restores only with the same set; another mapper or source image is rejected; a faulting member is disabled alone; hooks are refused.
-usage: mod_set_sms_test.py <segarecomp-cli> <platforms-dir> <C compiler> <repo-root>"""
+usage: mod_set_sms_test.py <segarecomp-cli> <platforms-dir> <C compiler> <repo-root> [<SDL3 prefix>]"""
 import importlib.util
 import json
 import shutil
@@ -217,8 +217,12 @@ import os  # noqa: E402
 sys.path.insert(0, str(ROOT / "tools"))
 import genesis_startup_bridge as bridge  # noqa: E402
 
-if sys.platform == "linux" and bridge.find_sdl3() is not None:
-    include, lib = bridge.find_sdl3()[0][1], bridge.find_sdl3()[1][1]
+given = Path(sys.argv[5]) if len(sys.argv) > 5 else None
+found = (str(given / "include"), str(given / "lib")) if given is not None and (given / "include").is_dir() else None
+if found is None and bridge.find_sdl3() is not None:
+    found = (bridge.find_sdl3()[0][1], bridge.find_sdl3()[1][1])
+if sys.platform == "linux" and found is not None:
+    include, lib = found
     args, played = build_args([turbo, runner, edit], "played", (ids["turbo"],))
     doc_play = ok("the played set builds", *args, "--sdl3-include", include, "--sdl3-lib", lib)
     work = tmp / "viewer-work"

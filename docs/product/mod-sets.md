@@ -14,7 +14,7 @@ segarecomp mod set build (<dir|package.segapatch>... | --library <dir> --name <s
 
 ## Building and running a set
 
-`mod set build` writes one program to `<build-dir>`. Each native member needs `--approve <its package identity>` (a stored set uses the library's recorded approvals): native code is host code and is **not sandboxed**. Run the headless program with an explicit bound (Genesis: `--instruction-budget`; Master System: `--frames` and `--cycle-budget`).
+`mod set build` writes one program to `<build-dir>`. No file the build writes or removes there may be an input: if the original image or a mod file is one of those files (under any path or link) or sits in a folder the build replaces, the build refuses with `E_OUTPUT_IS_INPUT` and changes nothing. Each native member needs `--approve <its package identity>` (a stored set uses the library's recorded approvals): native code is host code and is **not sandboxed**. Run the headless program with an explicit bound (Genesis: `--instruction-budget`; Master System: `--frames` and `--cycle-budget`).
 
 **What a built set supports** — anything else is refused before a program exists:
 
@@ -29,7 +29,7 @@ segarecomp mod set build (<dir|package.segapatch>... | --library <dir> --name <s
 
 **Order.** Every phase runs for all mods in set order before the next phase. A mod sees the guest memory earlier mods committed. Controller input is sampled once and passed from mod to mod; from `post-input` on, every mod sees the final pad. A mod that faults is disabled **alone**; what it committed earlier remains.
 
-**Saves.** A state restores only into the same set (same members, order, builds and image); another is refused. The played program keeps its battery memory and state slots in `<save folder>/sets/<set identity>/`, whatever `SEGARECOMP_SAVE_VARIANT` says, so sets never share or overwrite each other's files. Each mod's saved values are its own: two mods may use the same keys. Mods have no separate user settings in this release.
+**Saves.** A state restores only into the same set (same members, order, builds and image); another is refused. The played program keeps its battery memory and state slots in `<save folder>/sets/<set identity>/`, whatever `SEGARECOMP_SAVE_VARIANT` says, so sets never share or overwrite each other's files. Genesis recordings (`--record` / `--replay`), headless or played, carry the set's identity too: a recording replays verified in either mode of the same set and is refused by another set. Each mod's saved values are its own: two mods may use the same keys. Mods have no separate user settings in this release.
 
 **Outputs stay outside the inputs.** `mod set apply --out` (like `mod apply` and `mod bps`) refuses with `E_OUTPUT_IS_INPUT` an output, or its `<out>.partial` staging file, that is the original image or a package file, lies inside a member's project folder, or links to a file there. Nothing is written.
 

@@ -4,6 +4,7 @@
 #include "luau_build.hpp"
 #include "mod_run.hpp"
 #include "mod_set_build.hpp"
+#include "output_guard.hpp"
 #include "process_run.hpp"
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/luau_host.hpp"
@@ -56,6 +57,7 @@ std::string json_list(const std::vector<std::string> &v) {
 // The trusted compile step for a package with Luau is shared with `segarecomp build` (luau_build.cpp).
 using segarecomp_cli::LuauBuild;
 using segarecomp_cli::build_luau;
+using segarecomp_cli::lies_inside;
 using segarecomp_cli::prepare_mod_set;
 using segarecomp_cli::run_process;
 using segarecomp_cli::self_executable;
@@ -307,24 +309,6 @@ int install(const fs::path &package_path, const fs::path &rom, const fs::path &l
 
 // Is the directory entry `path`, or what it resolves to, inside the directory `project`? Directories are compared as filesystem objects (links, `..` and case-insensitive volumes included), never as
 // strings. A path that cannot be resolved counts as inside.
-bool lies_inside(const fs::path &path, const fs::path &project) {
-  std::error_code ec;
-  const fs::path absolute = fs::absolute(path, ec);
-  if (ec) return true;
-  const fs::path parent = fs::weakly_canonical(absolute.parent_path(), ec);   // where the entry itself is created, removed or renamed over
-  if (ec) return true;
-  const fs::path resolved = fs::weakly_canonical(absolute, ec);               // where a final link points
-  if (ec) return true;
-  for (const fs::path &entry : {parent / absolute.filename(), resolved})
-    for (fs::path at = entry.parent_path(); !at.empty(); at = at.parent_path()) {
-      std::error_code same;
-      if (fs::equivalent(at, project, same) && !same) return true;
-      if (at == at.parent_path()) break;
-    }
-  return false;
-}
-
-// Is the existing file `path` a hard link of a file somewhere in `project`? Only a file with another name can be one; a project that cannot be listed counts as holding it.
 bool linked_into(const fs::path &path, const fs::path &project) {
   std::error_code ec;
   if (!fs::is_regular_file(path, ec)) return false;
@@ -866,10 +850,26 @@ int set_build(const SetBuildOptions &o) {
       return refuse_set({{"E_NOT_APPROVED", {p.manifest.id}, "the mod \"" + p.manifest.id + "\" carries native code and needs the approval of its exact identity (--approve " + p.identity + ")"}});
   std::vector<std::uint8_t> image;
   if (!read_all(o.rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
+  const fs::path out(o.out);
   std::vector<fs::path> inputs = o.targets;
   inputs.push_back(o.rom);
-  if (const auto g = output_clobbers_input(o.out, inputs)) return refuse(*g);
-  const fs::path out(o.out);
+  if (!o.library.empty())   // the installed packages are the verified member inputs of a stored set
+    for (const mod::Package &p : packages) inputs.push_back(fs::path(o.library) / "mods" / (p.identity + ".segapatch"));
+  if (const auto g = output_clobbers_input(out, inputs)) return refuse(*g);
+  // every file the build writes under --out, the composed image first: never an input, and never inside (or a link into) a member's project folder
+  for (const fs::path &file : segarecomp_cli::build_output_files(out))
+    if (const auto g = output_clobbers_input(file, inputs)) return refuse(*g);
+  std::vector<fs::path> files_in;
+  for (const fs::path &input : inputs) {
+    std::error_code kind;
+    if (fs::is_directory(input, kind)) {
+      for (fs::recursive_directory_iterator it(input, kind), end; !kind && it != end; it.increment(kind))
+        if (it->is_regular_file(kind)) files_in.push_back(it->path());
+    } else {
+      files_in.push_back(input);
+    }
+  }
+  if (const auto conflict = segarecomp_cli::build_output_conflict(out, files_in)) return refuse({"E_OUTPUT_IS_INPUT", *conflict});
   std::error_code ec;
   fs::create_directories(out, ec);
   // the pinned member copies go into a folder this run CREATES (create_directory is false for an existing one), so only that folder is ever removed: nothing of the user's is touched

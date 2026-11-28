@@ -1,6 +1,7 @@
 #include "build_command.hpp"
 #include "luau_build.hpp"
 #include "mod_set_build.hpp"
+#include "output_guard.hpp"
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/mod.hpp"
 #include "segarecomp/mod_set.hpp"
@@ -1323,7 +1324,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (build.play)
     build.c_base.insert(build.c_base.end(), {"-I", build.viewer.string(), "-I", (build.root / "libs" / "viewer" / "include").string(), "-I",
                                              (build.root / "libs" / "viewer" / "src").string(), "-I", options.sdl3_include->string()});
-  if (build.play && !options.set_save_identity.empty()) build.c_base.push_back("-DSEGARECOMP_SET_IDENTITY=\"" + options.set_save_identity + "\"");
+  if (!options.set_save_identity.empty()) build.c_base.push_back("-DSEGARECOMP_SET_IDENTITY=\"" + options.set_save_identity + "\"");
   if (!options.native_source.empty()) {
     build.c_isolated = {options.cc};
     build.c_isolated.insert(build.c_isolated.end(), options.cc_args.begin(), options.cc_args.end());
@@ -1920,6 +1921,21 @@ int segarecomp_build_command(int argc, char **argv) {
   const auto parsed = parse_options(argc, argv);
   if (!parsed) { std::cerr << "usage:\n" << segarecomp_build_usage; return 2; }
   Options options = *parsed;
+  if (!options.set_packages.empty() || !options.data_package.empty() || !options.luau_package.empty() || !options.native_package.empty()) {
+    // A package route writes <out>/input/effective.rom (and removes a stale one before anything else): no output of this build may be the original image or a package file. Nothing has been written yet,
+    // and nothing is written on a refusal (not even build.log or status.json, which may be the very file at risk).
+    std::vector<fs::path> inputs{options.rom, options.data_package, options.luau_package, options.native_package, options.patch_package};
+    inputs.insert(inputs.end(), options.set_packages.begin(), options.set_packages.end());
+    if (options.mapper_manifest) inputs.push_back(*options.mapper_manifest);
+    if (options.admission_plan) inputs.push_back(*options.admission_plan);
+    std::vector<fs::path> extra;
+    if (!options.performance_report.empty()) extra.push_back(options.performance_report);
+    if (const auto conflict = segarecomp_cli::build_output_conflict(options.output, inputs, extra)) {
+      std::cerr << "segarecomp: E_OUTPUT_IS_INPUT: " << *conflict << '\n';
+      std::cout << "@result failed stage=analyze class=E_OUTPUT_IS_INPUT message=" << *conflict << std::endl;
+      return 1;
+    }
+  }
   if (options.performance_report.empty()) return run_build(std::move(options));   // profiling off: exactly the unprofiled pipeline
   // SEG-125: profiling on. The report is written on every exit of the pipeline, marked complete / failed; a report that could not be written never changes the build's result.
   std::error_code mkdir_ec;
