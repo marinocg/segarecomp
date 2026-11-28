@@ -138,6 +138,7 @@ typedef struct GenesisModScheduler {
   char fault_cause_store[32]; /* backing storage of fault.cause after a restore (the live value otherwise points at a static string) */
   /* ---- session ---- */
   uint8_t started, disabled;
+  uint8_t in_set; /* SEG-141-T003: a member of a GenesisModSet. The set owns the runtime hooks and the pad latch; the member keeps everything else (grants, ranges, staged effects, fault, witness, state). */
   uint64_t callbacks_run;
   struct {
     uint8_t faulted;
@@ -225,6 +226,44 @@ void genesis_mod_write_log_digest(const GenesisModScheduler *scheduler, uint8_t 
  * (`save_state`, <= 64 KiB). A guest-affecting mod (memory.write, input.intercept, hook.function, audio.command.send) without `state.mod` makes capture fail with
  * GENESIS_SNAPSHOT_MOD_UNAVAILABLE (E_STATE_UNAVAILABLE). Restore fails closed with MOD_MISMATCH (other identity/schema/capabilities/phases) or MOD_REJECTED (malformed or refused state). */
 void genesis_mod_snapshot_state(GenesisModScheduler *scheduler, GenesisSnapshotModState *out);
+
+/*
+ * SEG-141-T003 (ADR 0327): several mods on ONE runtime. A set is not a second scheduler: every member is an ordinary GenesisModScheduler (its own capabilities, declared ranges, staged effects, budgets,
+ * fault, replay witness and state), and the set only owns the runtime seams and decides the order. MEMBER INDEX IS THE COMPOSITE ORDER.
+ *
+ *  - Every phase runs for all members in index order before the next phase starts. A callback commits atomically when it returns, so a later member observes an earlier member's committed guest writes
+ *    (guest memory is the only channel between members; no other state is shared).
+ *  - `input`: one physical sample per frame, then a chain: member i sees the pad as members 0..i-1 left it. A member without the phase passes it through. `post-input` and the next `frame-begin` see
+ *    the final composed pad in every member.
+ *  - Failure isolation: a faulted member is disabled alone. Its faulting callback commits nothing (its input change is not chained); its earlier committed effects stay. The pad latch stays while any
+ *    live member has the `input` phase, and is released (physical pad) when none is left.
+ *  - `render` runs for each live member in order, each from its own copy taken after every `frame-end`. Presenting several members' output is the host adapter's concern, not decided here.
+ *  - Function hooks: ONE call-frame stack. At a boundary the members that bind the site run in index order, for `hook-entry` and for `hook-exit`. A `replace` site has exactly ONE owner: attach refuses
+ *    (E_SET_HOOK_OWNER) a replace-capable site bound by more than one member. `before`/`after` sites may be shared. Every hooking member must be given the same generated site table.
+ */
+#define GENESIS_MOD_SET_MEMBERS_MAX 16U /* the engine's set size (segarecomp/mod_set.hpp kMaxSetMembers) */
+
+typedef struct GenesisModSet {
+  GenesisModScheduler *members[GENESIS_MOD_SET_MEMBERS_MAX]; /* caller storage; must outlive the set */
+  uint32_t count;
+  GenesisRuntime *runtime;
+  GenesisFrameHooks hooks;
+  GenesisFunctionHooks function_hooks;
+  const GenesisHookSiteInfo *sites;
+  uint32_t site_count;
+  uint8_t identity[32]; /* the composite variant identity: a saved state restores only into a set with exactly this identity */
+} GenesisModSet;
+
+/* Attaches `count` members in composite order: schedulers[i] is attached with configs[i] (every rule of genesis_mod_scheduler_attach applies to each). `identity` is the composite identity and must not be all
+ * zero. Returns 0, or 1 with *rejection a stable class and *member the index concerned (`count` for a set-level refusal): E_SET_SIZE, E_SET_IDENTITY, E_SET_DUPLICATE_MOD (one mod id twice),
+ * E_SET_HOOK_SITES (hooking members given different site tables), E_SET_HOOK_OWNER, or a member's own class. Nothing stays attached on rejection. */
+int genesis_mod_set_attach(GenesisModSet *set, GenesisRuntime *runtime, GenesisModScheduler *const *schedulers, const GenesisModConfig *configs, uint32_t count, const uint8_t identity[32],
+                           const char **rejection, uint32_t *member);
+void genesis_mod_set_detach(GenesisModSet *set);
+/* The set's snapshot seam: ONE MODSTATE section bound to the composite identity, holding every member's state in composite order plus the shared hook call frames. Capture fails if any member cannot be
+ * captured; the members' blobs share the section's one bound. Restore is all-or-nothing for the guest: if a member refuses its blob, the members already loaded are put back (or disabled, cause
+ * `state`) and the guest is not touched. A state of another membership, order, member version, grant, range or schema is MOD_MISMATCH. */
+void genesis_mod_set_snapshot_state(GenesisModSet *set, GenesisSnapshotModState *out);
 
 #ifdef __cplusplus
 }

@@ -107,7 +107,8 @@ struct SetComposition {
 // Verifies the ordered set against one exact original image and composes the members' image changes. Every member is first built ALONE against the unmodified original (so every expected-value
 // assertion is evaluated against the pre-composition bytes); the writes must then be disjoint; the platform's header repair runs once over the composed image. Nothing is merged or reordered:
 // E_SET_SOURCE (a member does not declare this image, or declares another mapper), E_SET_EDIT_OVERLAP, E_SET_BPS_CONFLICT (a bps-image declares no write ranges, so it composes only with members
-// that neither change the image nor declare hook sites), E_SET_HOOK_SITE (a write covers another member's hooked entry), E_SET_GUEST_ADMISSION (Master System: the injected code of two members is
+// that neither change the image nor declare hook sites), E_SET_HOOK_SITE (a write covers another member's hooked entry), E_SET_HOOK_OWNER (two members hook one function of one CPU and one of them
+// replaces it), E_SET_GUEST_ADMISSION (Master System: the injected code of two members is
 // not admitted together), E_SET_HEADER_POLICY, E_HEADER_FIELD_COLLISION, plus every relation rule above and each member's own refusal class. `members` come from read_package.
 [[nodiscard]] SetComposition compose_set(std::span<const Package *const> members, std::span<const std::uint8_t> original, GuestAdmitter admit = nullptr);
 

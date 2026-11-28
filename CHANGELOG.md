@@ -7,6 +7,10 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Mod sets: Genesis callback dispatch and hook ownership groundwork (ADR 0327)
+
+* Two mods that hook one function, where either replaces it, are now refused by `mod set check` / `mod set apply` (`E_SET_HOOK_OWNER`); observing hooks may share a function. The Genesis runtime can dispatch several mods in set order with per-mod failure isolation and one combined saved state. No built game runs more than one mod yet, so multiple-mod composition stays unsupported.
+
 ### Master System mods: gameplay scripting, saved state, presentation and PSG sound mods (ADR 0325)
 
 * Developer preview: Luau and native C11 (ABI 2 minor 5) mods now run in Master System programs built with `segarecomp build --luau-package` / `--native-package`: frame and input phases, pad interception, declared work-RAM reads and writes, and presentation-only HUD, palette mapping, picture offset and authored sprites. Mod state is part of save states and rewind. `mod test` runs Master System scenarios. A redistributable gameplay example (with a C11 twin) and a PSG sound-mod example are included ([guide](docs/product/master-system-mods.md)). The launcher does not install Master System mods yet; the FM unit stays unsupported.

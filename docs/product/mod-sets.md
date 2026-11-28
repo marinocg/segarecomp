@@ -39,13 +39,15 @@ A range is 1 to 4 comparators (`=`, `>=`, `>`, `<=`, `<`) separated by one space
 | A `bps-image` mod with any other image-changing or hooking mod | `E_SET_BPS_CONFLICT` |
 | A `bps-image` mod with mods that change no bytes and declare no hook | composed (the BPS target) |
 | A write over another mod's hooked function entry | `E_SET_HOOK_SITE` |
+| Two mods hooking one function where either replaces it | `E_SET_HOOK_OWNER` |
+| Two mods with `before`/`after` hooks on one function | composed |
 | Master System injected code that is admitted alone but not together | `E_SET_GUEST_ADMISSION` |
 | `header_repair = "none"` with an image-changing mod that does not say `none` | `E_SET_HEADER_POLICY` |
 | Another image or mapper declaration; two platforms; one mod id twice | `E_SET_SOURCE`, `E_SET_PLATFORM`, `E_SET_DUPLICATE_MOD` |
 
 **BPS-only packages** are treated conservatively because a BPS patch does not say which bytes it owns. To make a mod composable, express its changes as [typed ROM edits](mod-projects.md#rom-edits-and-symbols).
 
-Composition proves that the writes do not collide. It does **not** prove that the mods work together: two mods with disjoint bytes can still break each other's behaviour. Two mods hooking the same function are not judged yet.
+Composition proves that the writes do not collide. It does **not** prove that the mods work together: two mods with disjoint bytes can still break each other's behaviour.
 
 ## Identity and reuse
 

@@ -200,6 +200,18 @@ HOOK = '\n[[hook]]\nid = "watch"\nsymbol = "fn"\nmode = "before"\nreads = ["d0"]
 hooker = project("hooker", native=True, hooks=HOOK, symbols=(("fn", "0x00000600"),))
 rejected_composition("a write over a hooked entry", "E_SET_HOOK_SITE", [project("edit-hook", edits=f"rev-a u8 0x00000601 0x{ROM[0x601]:02x} 0x00\n"), hooker], says=('"edit-hook"', '"hooker"'), mods=["edit-hook", "hooker"])
 composed("a write next to a hooked entry", [project("edit-near", edits=f"rev-a u8 0x00000602 0x{ROM[0x602]:02x} 0x00\n"), hooker])
+# exclusive ownership (SEG-141-T003, ADR 0327): two observers share a site; a replacement owns its function alone, in either order
+observer = project("observer", native=True, hooks=HOOK, symbols=(("fn", "0x00000600"),))
+doc = ok("two observing mods share a site", "mod", "set", "check", hooker, observer, "--rom", ROM_PATH)
+cli.check(doc.get("composed") is True, f"two before hooks on one function compose: {doc}")
+REPLACE = '\n[[hook]]\nid = "swap"\nsymbol = "fn"\nmode = "replace"\nreads = ["d0"]\nwrites = ["d0", "ccr"]\ncost = 24\n'
+swapper = project("swapper", native=True, hooks=REPLACE, symbols=(("fn", "0x00000600"),))
+other_swapper = project("swapper-two", native=True, hooks=REPLACE, symbols=(("fn", "0x00000600"),))
+for members, names in (([swapper, other_swapper], ["swapper", "swapper-two"]), ([hooker, swapper], ["hooker", "swapper"]), ([swapper, hooker], ["swapper", "hooker"])):
+    rejected_composition("an exclusive-hook conflict " + "/".join(names), "E_SET_HOOK_OWNER", members, says=(f'"{names[0]}"', f'"{names[1]}"', "exclusively"), mods=names)
+elsewhere = project("swapper-else", native=True, hooks=REPLACE, symbols=(("fn", "0x00000700"),))
+composed("replacements of different functions", [swapper, elsewhere])
+
 rejected_composition("BPS with a hooking mod", "E_SET_BPS_CONFLICT", [bps_a, hooker], says=("hook sites",), mods=["bps-a", "hooker"])
 
 # header policy: one image, one policy
