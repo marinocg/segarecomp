@@ -375,7 +375,9 @@ def main():
         wram_pkg, wram_doc = pack(project("wram", caps=("frame.work_ram", "host.log", "overlay.rgba")))
         refused("capability", "E_LIVE_CAPABILITY", wram_pkg, wram_doc["package_identity"])
         ms_pkg, ms_doc = pack(project("ms", template="luau", platform_id="master-system"))
-        refused("platform", "E_LIVE_PLATFORM", ms_pkg, ms_doc["package_identity"])
+        # ADR 0325: the verified package's platform selects the route. This Master System package names the Genesis image, so the Master System route refuses it (that image fits no declared mapper): no
+        # Genesis program ever runs another platform's script.
+        refused("platform", "E_MAPPER_UNSUPPORTED", ms_pkg, ms_doc["package_identity"])
         asset_dir = project("asset-mod")
         (asset_dir / "mod.toml").write_text((asset_dir / "mod.toml").read_text() + '\n[[source]]\nkind = "asset"\npath = "assets/d.bin"\nasset_class = "data"\nformat = "blob"\n')
         (asset_dir / "assets").mkdir()

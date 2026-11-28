@@ -459,7 +459,7 @@ build_refused("a conflicting mapper declaration", "MOD_MAPPER_MISMATCH", packed,
 build_refused("a changed package", "LUAU_IDENTITY_CHANGED", packed, "0" * 64)
 
 for name, expected in (("gameplay", ["README.md", "fixture_rom.py", "mod.toml", "scripts/main.luau", "tests.toml"]), ("gameplay-native", ["README.md", "mod.toml", "src/main.c"])):
-    tree = sorted(str(f.relative_to(EXAMPLES / name)) for f in (EXAMPLES / name).rglob("*") if f.is_file() and "__pycache__" not in f.parts)
+    tree = sorted(f.relative_to(EXAMPLES / name).as_posix() for f in (EXAMPLES / name).rglob("*") if f.is_file() and "__pycache__" not in f.parts)
     cli.check(tree == expected, f"the {name} example tree is the published set of files: {tree}")
 
 shutil.rmtree(tmp, ignore_errors=True)

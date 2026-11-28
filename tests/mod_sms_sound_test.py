@@ -127,7 +127,7 @@ if sys.platform != "win32":
     rc, doc, p = cli.run("mod", "test", t_dir, "--rom", rom, "--cc", CC, "--sdk-dir", SDK)
     cli.check(rc == 0 and doc and doc.get("ok") and doc["scenarios"][0]["observed"]["pcm_sha256"] == PINNED_MODDED_PCM, f"mod test verifies the pinned PCM digest: {doc}")
 
-tree = sorted(str(f.relative_to(EXAMPLE)) for f in EXAMPLE.rglob("*") if f.is_file() and "__pycache__" not in f.parts)
+tree = sorted(f.relative_to(EXAMPLE).as_posix() for f in EXAMPLE.rglob("*") if f.is_file() and "__pycache__" not in f.parts)
 cli.check(tree == ["README.md", "asm/main.asm", "edits/main.edits", "fixture_rom.py", "mod.toml", "tests.toml"], f"the sound example is the published set of files: {tree}")
 shutil.rmtree(tmp, ignore_errors=True)
 cli.done("mod_sms_sound_test")
