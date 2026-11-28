@@ -60,6 +60,7 @@ struct Options {
   unsigned jobs = 0, pass_timeout = 900, compile_timeout = 1800;
   std::uint64_t budget = 300000000ULL, until_tick = 0;
   std::string optimize = "1";
+  std::string variant_identity;   // SEG-148-T002 (ADR 0328): the variant key of a Patched build ("" = Vanilla)
   std::string aot_policy = "compatibility";   // SEG-097-T003 (ADR 0208): `optimized` (experimental) selects the frozen gen2 M3 + B35 proposal
   bool aot_model_given = false;
   bool aot_all_images = false;
@@ -313,7 +314,7 @@ class Builder {
       if (const auto f = pass_run(exe, o_.output / "confirm", confirm_report, confirm_capture)) return fail(*f);
       if (confirm_report != report || confirm_capture != capture_text) return fail({"confirm", "materialization_nondeterministic"});   // SEG-111: the evidence itself (streams included) must reproduce, not only its presence
       stage("confirm", "done");
-      return finish(exe, program_identity, report, round + 1U);
+      return finish(exe, program_identity, report, round + 1U, admits);
     }
     return fail({"build", "round_bound_exceeded"});
   }
@@ -334,7 +335,7 @@ class Builder {
     return 3;
   }
 
-  int finish(const fs::path &exe, const std::string &program_identity, const std::string &report, unsigned rounds) {
+  int finish(const fs::path &exe, const std::string &program_identity, const std::string &report, unsigned rounds, const std::vector<std::string> &admits) {
     std::string viewer_path;
     if (o_.viewer) {
       stage("viewer", "running");
@@ -348,12 +349,50 @@ class Builder {
         << ",\"program_identity\":\"" << program_identity << "\",\"bios_sha256\":\"" << bios_sha_ << "\",\"rounds\":" << rounds << ",\"extents\":[";
     for (std::size_t i = 0; i < extents_.size(); ++i) out << (i ? "," : "") << "\"" << extents_[i] << "\"";
     out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"inventory\":" << inventory_json(report) << ",\"final_stop\":" << final_stop_json(report) << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"file_first\":" << (file_first_json_.empty() ? "null" : file_first_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
+        << ",\"disc_sources\":" << disc_sources_json(admits)
         << ",\"reconstruction\":" << reconstruction_json() << ",\"static_boot\":" << static_boot_json() << ",\"z80\":" << z80_json()
         << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
         << "\",\"viewer\":" << (o_.viewer ? "true" : "false") << ",\"history\":[" << history_ << "]}\n";
     std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << out.str();
     std::cout << "@result ok" << std::endl;
     return 0;
+  }
+
+  // SEG-148-T003 (ADR 0328): the build's disc-source evidence. `extents` are the admitted images that are exact copies of track-1 disc bytes ("<cpu>:<offset>:<base>:<length>" lists, by
+  // origin: the verified boot images, the static loader proofs, and the resolved/relocated copies of delivered blocks). `dynamic` are the admitted images whose bytes are NOT disc bytes
+  // (produced or proven by evaluation, or observed operand templates and runnable epochs). Manual `--emit-arg` extents are never evidence.
+  std::string disc_sources_json(const std::vector<std::string> &admits) const {
+    std::string out = "{\"extents\":[";
+    bool first = true;
+    const auto add = [&](const std::vector<std::string> &list, const char *origin) {
+      for (const auto &e : list) {
+        const auto f = split_spec(e);
+        if (f.size() != 4U) continue;
+        out += std::string(first ? "" : ",") + "{\"cpu\":\"" + f[0] + "\",\"offset\":" + std::to_string(std::stoull(f[1], nullptr, 0)) + ",\"base\":" + std::to_string(std::stoull(f[2], nullptr, 0)) +
+               ",\"length\":" + std::to_string(std::stoull(f[3], nullptr, 0)) + ",\"origin\":\"" + origin + "\"}";
+        first = false;
+      }
+    };
+    add(boot_extents_, boot_contradictions_ != 0U ? "boot_contradicted" : "boot");   // a contradicted boot contract never authorizes a patch
+    add(static_extents_, "static");
+    add(extents_, "resolved");
+    out += "],\"dynamic\":[";
+    first = true;
+    const auto dynamic = [&](const std::string &cpu, std::uint64_t base, std::uint64_t length, const char *kind) {
+      out += std::string(first ? "" : ",") + "{\"cpu\":\"" + cpu + "\",\"base\":" + std::to_string(base) + ",\"length\":" + std::to_string(length) + ",\"kind\":\"" + kind + "\"}";
+      first = false;
+    };
+    for (const auto &key : produced_) {   // "<cpu>:<base>:<hex bytes>"
+      const auto f = split_spec(key);
+      if (f.size() == 3U) dynamic(f[0], std::stoull(f[1], nullptr, 0), f[2].size() / 2U, "produced");
+    }
+    for (const auto &a : admits) {
+      const auto f = split_spec(a);
+      if (f.size() == 5U && f[0] == "static-fragment") dynamic(f[1], std::stoull(f[2], nullptr, 0), std::stoull(f[3], nullptr, 0), "static_fragment");
+      else if (f.size() >= 5U && f[0] == "template") dynamic(f[2], std::stoull(f[3], nullptr, 0), f[4].size() / 2U, "operand_template");
+      else if (!f.empty() && f[0] == "epoch") dynamic("sub", 0, 0x80000, "epoch");
+    }
+    return out + "]}";
   }
 
   // SEG-098-T004 (ADR 0213): where the final stop's program counter lies relative to what is admitted - the classes the next step depends on:
@@ -644,6 +683,7 @@ class Builder {
     }
     for (const auto &a : admits) { cmd.push_back("--admit"); cmd.push_back(a); }
     if (o_.main_z80) cmd.insert(cmd.end(), {"--main-z80", "1"});   // SEG-114
+    if (!o_.variant_identity.empty()) cmd.insert(cmd.end(), {"--variant-identity", o_.variant_identity});
     cmd.insert(cmd.end(), o_.emit_args.begin(), o_.emit_args.end());
     if (o_.boot_fixtures) cmd.insert(cmd.end(), {"--boot-fixture-profiles", "1"});
     const fs::path out = o_.output / "emit.json";
@@ -1189,6 +1229,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--static-recursion" && (value == "0" || value == "1")) o.static_recursion = value == "1";
     else if (key == "--static-range" && (value == "hull" || value == "loaded")) o.static_range = value;
     else if (key == "--cc") o.cc = value;
+    else if (key == "--variant-identity" && value.size() == 64 && value.find_first_not_of("0123456789abcdef") == std::string::npos) o.variant_identity = value;
     else if (key == "--cc-arg") o.cc_args.push_back(value);
     else if (key == "--cxx") o.cxx = value;   // SEG-115: the C++ driver for the vendored YM2612 core (derived from --cc when absent)
     else if (key == "--cxx-arg") { o.cxx_args.push_back(value); o.cxx_args_given = true; }

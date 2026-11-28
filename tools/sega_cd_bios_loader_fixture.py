@@ -33,6 +33,10 @@ Cases (each builds its own image and disc):
   relocated_staged  the fragment is copied through a data register (read and write are different instructions): equal bytes, no causal read
   decoded_corrupt   one byte of the encoded payload is flipped on the disc (the producer is intact, its input is not)
   jump_unwritten    the sub jumps into PRG RAM nothing ever wrote (no producer at all)
+  main_patch   SEG-148-T003 (ADR 0328): the disc-patching target. The sub loads a MAIN module (blocks 40-41, Word RAM offset 0), a data block (60, offset $4000) and a SUB module (50, offset
+               $2000), which it runs; the main processor then runs the main module from Word RAM: it writes a marker, copies the data block's first word to the result block and passes a NOP
+               sled (a patch site) before it returns. The module has a zero-filled area (an injection target).
+  main_decoded SEG-148-T003: the main processor's module XOR-decodes 64 of its own loaded bytes into main Work RAM and runs them there (a main-side produced image: no disc bytes)
 
 usage: sega_cd_bios_loader_fixture.py build --case NAME --out DIR   ->   DIR/bios.bin, DIR/disc/{disc.cue,track01.bin}, DIR/expected.json
 """
@@ -63,7 +67,7 @@ FIRST_MODULE_LBA = 40
 BLOB_AT = 0x1000
 CASES = ("direct", "siblings", "duplicates", "overlay", "late_flip", "generated", "transformed", "undelivered",
          "relocated", "relocated_short", "relocated_patched", "relocated_duplicate",
-         "decoded", "decoded_add", "decoded_partial", "decoded_patched", "decoded_volatile", "decoded_large", "decoded_corrupt", "decoded_input", "relocated_staged", "relocated_main", "jump_unwritten", "static_copy", "static_xor", "static_add", "static_sub")
+         "decoded", "decoded_add", "decoded_partial", "decoded_patched", "decoded_volatile", "decoded_large", "decoded_corrupt", "decoded_input", "relocated_staged", "relocated_main", "jump_unwritten", "static_copy", "static_xor", "static_add", "static_sub", "main_patch", "main_decoded")
 IP_ROM = 0x3800              # SEG-112: the IP's copy in the fixture BIOS ROM (the real BIOS reads it from the disc's system area)
 IP_FRAG_AT = 0x100           # the fragment's offset inside the IP image
 PRODUCED_LEN = 64
@@ -121,6 +125,49 @@ def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=Fal
     if duplicate:
         body[RELOC_AT + 0x200:RELOC_AT + 0x200 + RELOC_LEN] = fragment
     return bytes(body), fragment
+
+
+# SEG-148-T003: layout of the `main_patch` module (offsets inside it) and the disc blocks of the case.
+PATCH_SLED_AT = 18           # the first NOP: after move.w #imm,abs.l (8) and move.w abs.l,abs.l (10)
+PATCH_FREE_AT, PATCH_FREE_LEN = 0x800, 0x100
+PATCH_SUB_LBA, PATCH_DATA_LBA = FIRST_MODULE_LBA + 10, FIRST_MODULE_LBA + 20
+PATCH_DATA_WORD = 0x1234
+DECODE_AT = 0x400
+
+
+def main_patch_module():
+    m = F.Asm(WORD_RAM_MAIN)
+    m.move("w", F.imm(0xA001), F.absl(MAIN_MARK))
+    m.move("w", F.absl(WORD_RAM_MAIN + 0x4000), F.absl(MAIN_MARK + 4))
+    for _ in range(8):
+        m.nop()
+    m.rts()
+    code = m.assemble()
+    rng = random.Random(51)
+    body = bytearray(code + bytes(rng.randrange(1, 256) for _ in range(4096 - len(code))))
+    body[PATCH_FREE_AT:PATCH_FREE_AT + PATCH_FREE_LEN] = bytes(PATCH_FREE_LEN)
+    assert body[PATCH_SLED_AT:PATCH_SLED_AT + 2] == b"\x4e\x71"
+    return bytes(body)
+
+
+def main_decoding_module(key=0x5A):
+    plain = module_bytes(MAIN_DEST, MAIN_MARK, 0xA001, 24, PRODUCED_LEN, 52)
+    m = F.Asm(WORD_RAM_MAIN)
+    m.move("l", F.imm(WORD_RAM_MAIN + DECODE_AT), F.a(0))
+    m.move("l", F.imm(MAIN_DEST), F.a(1))
+    m.move("w", F.imm(PRODUCED_LEN - 1), F.d(1))
+    m.label("x")
+    m.move("b", ("inc", 0), F.d(2))
+    m.immop("eor", "b", key, F.d(2))
+    m.move("b", F.d(2), ("inc", 1))
+    m.dbra(1, "x")
+    m.jsr(F.absl(MAIN_DEST))
+    m.rts()
+    code = m.assemble()
+    rng = random.Random(53)
+    body = bytearray(code + bytes(rng.randrange(1, 256) for _ in range(4096 - len(code))))
+    body[DECODE_AT:DECODE_AT + PRODUCED_LEN] = bytes(b ^ key for b in plain)
+    return bytes(body)
 
 
 class Sub:
@@ -447,6 +494,30 @@ def plan(case):
         truth["static_fragment"] = fragment.hex()
         truth["markers"] = [0, 0, 0]
         truth["main_marker"] = 0xA001
+    elif case == "main_patch":
+        module = main_patch_module()
+        sub_module = module_bytes(base + 0x2000, MARK, 0xA001, 24, 2048, 54)
+        data = bytes([PATCH_DATA_WORD >> 8, PATCH_DATA_WORD & 0xFF]) + bytes(random.Random(55).randrange(256) for _ in range(2046))
+        put(L, module)
+        put(PATCH_SUB_LBA, sub_module)
+        put(PATCH_DATA_LBA, data)
+        sub.load(L, 2, 0)
+        sub.load(PATCH_DATA_LBA, 1, 0x4000)
+        sub.load(PATCH_SUB_LBA, 1, 0x2000)
+        sub.run(base + 0x2000)
+        truth["extents"] = [{"processor": "main", "offset": L * 2048, "base": WORD_RAM_MAIN, "length": 4096},
+                            {"processor": "sub", "offset": PATCH_SUB_LBA * 2048, "base": base + 0x2000, "length": 2048}]
+        truth["patch"] = {"module_offset": L * 2048, "sled_at": PATCH_SLED_AT, "free_at": PATCH_FREE_AT, "free_len": PATCH_FREE_LEN, "main_base": WORD_RAM_MAIN,
+                          "sub_offset": PATCH_SUB_LBA * 2048, "sub_base": base + 0x2000, "data_offset": PATCH_DATA_LBA * 2048, "data_word": PATCH_DATA_WORD, "main_mark": MAIN_MARK}
+        truth["markers"] = [0xA001, 0, 0]
+        truth["main_marker"] = 0xA001
+    elif case == "main_decoded":
+        put(L, main_decoding_module())
+        sub.load(L, 2, 0)
+        truth["extents"] = [{"processor": "main", "offset": L * 2048, "base": WORD_RAM_MAIN, "length": 4096}]
+        truth["patch"] = {"module_offset": L * 2048, "decode_at": DECODE_AT, "main_base": WORD_RAM_MAIN, "produced_base": MAIN_DEST, "produced_len": PRODUCED_LEN}
+        truth["markers"] = [0, 0, 0]
+        truth["main_marker"] = 0xA001
     elif case == "relocated_main":
         data, fragment = relocating_module(WORD_RAM_MAIN, 21, dest=MAIN_DEST, mark=MAIN_MARK)
         put(L, data)
@@ -498,7 +569,7 @@ def build(case, out):
     for v in range(2, 64):
         struct.pack_into(">I", rom, 4 * v, FAULT)
     rom[0x100:0x120] = b"SEGA BIOS-IMAGE LOADER FIXTURE  "
-    main = main_program(sub_len, run_word_ram=case == "relocated_main", ip_len=len(ip) if ip else 0)
+    main = main_program(sub_len, run_word_ram=case in ("relocated_main", "main_patch", "main_decoded"), ip_len=len(ip) if ip else 0)
     rom[MAIN:MAIN + len(main)] = main
     fault = F.Asm(FAULT)
     fault.move("w", F.imm(0xDEAD), F.absl(RESULT + 0xF0))

@@ -134,7 +134,7 @@ struct KindRow {
 };
 constexpr KindRow kKinds[] = {
     {"bps-image", false, KindClass::data}, {"rom-edit-set", false, KindClass::data}, {"guest-code", false, KindClass::data}, {"native-c11", false, KindClass::native},
-    {"luau-source", false, KindClass::luau}, {"asset", false, KindClass::data}, {"disc-extent-edit", true, KindClass::data}, {"disc-track-replace", true, KindClass::data},
+    {"luau-source", false, KindClass::luau}, {"asset", false, KindClass::data}, {"disc-extent-edit", false, KindClass::data}, {"disc-track-replace", true, KindClass::data},
     {"guest-asm", false, KindClass::data},
 };
 
@@ -173,8 +173,11 @@ Payload parse_payload(const Value &v, const std::string &platform) {
   if (version != 1) fail("E_PAYLOAD_VERSION_UNKNOWN", "the payload kind \"" + p.kind + "\" has no version " + std::to_string(version));
   p.kind_version = 1;
   if (row->reserved) fail("E_PAYLOAD_KIND_RESERVED", "the payload kind \"" + p.kind + "\" is reserved and not implemented");
-  const bool cartridge_only = p.kind == "bps-image" || p.kind == "rom-edit-set" || p.kind == "guest-code" || p.kind == "guest-asm";
+  const bool cartridge_only = p.kind == "bps-image" || p.kind == "rom-edit-set" || p.kind == "guest-code";
   if (cartridge_only && platform == "sega-cd") fail("E_PAYLOAD_PLATFORM", "the payload kind \"" + p.kind + "\" does not exist on sega-cd");
+  if (p.kind == "disc-extent-edit" && platform != "sega-cd") fail("E_PAYLOAD_PLATFORM", "the payload kind \"disc-extent-edit\" exists only on sega-cd");
+  // The Sega CD adapter consumes disc edits and main-M68K guest code only. A payload with no consumer is refused, never ignored (runtime code is SEG-148-T005/T006, audio SEG-145).
+  if (platform == "sega-cd" && p.kind != "disc-extent-edit" && p.kind != "guest-asm") fail("E_PAYLOAD_KIND_RESERVED", "the payload kind \"" + p.kind + "\" is not implemented on sega-cd");
   if (p.kind == "bps-image") {
     only(v, {"kind", "kind_version", "path", "size", "sha256", "target_sha256"}, "a bps-image payload");
     p.target_sha256 = str(v, "target_sha256");
@@ -191,7 +194,18 @@ Payload parse_payload(const Value &v, const std::string &platform) {
     only(v, {"kind", "kind_version", "path", "size", "sha256", "cpu"}, "a guest-asm payload");
     p.cpu = str(v, "cpu");
     if (p.cpu != "m68k" && p.cpu != "z80") fail("E_FIELD_VALUE", "guest-asm cpu must be m68k or z80");
-    if (p.cpu == "m68k" && platform != "genesis") fail("E_PAYLOAD_PLATFORM", "m68k guest code exists only on genesis");
+    if (p.cpu == "m68k" && platform != "genesis" && platform != "sega-cd") fail("E_PAYLOAD_PLATFORM", "m68k guest code exists only on genesis and sega-cd (main CPU)");
+    if (p.cpu == "z80" && platform == "sega-cd") fail("unsupported_code_class:z80", "Sega CD Z80 driver code cannot be patched");
+  } else if (p.kind == "disc-extent-edit") {   // ADR 0287 section 3 envelope; the kind's own fields are ADR 0328
+    only(v, {"kind", "kind_version", "path", "size", "sha256", "target", "track", "iso_file", "start", "length", "original_sha256", "replacement", "code_cpu", "load_address"}, "a disc-extent-edit payload");
+    p.disc_target = num32(v, "target");
+    if (v.find("track") != nullptr) { p.has_disc_track = true; p.disc_track = num32(v, "track"); }
+    if (v.find("iso_file") != nullptr) p.iso_file = str(v, "iso_file");
+    p.disc_start = num(v, "start"); p.disc_length = num(v, "length");
+    p.original_sha256 = str(v, "original_sha256"); p.replacement = str(v, "replacement");
+    if (v.find("code_cpu") != nullptr) p.code_cpu = str(v, "code_cpu");
+    if (v.find("load_address") != nullptr) p.load_address = num32(v, "load_address");
+    if (auto r = check_disc_payload(p, v.find("code_cpu") != nullptr, v.find("load_address") != nullptr, v.find("iso_file") != nullptr)) fail(r->code, r->message);
   } else if (p.kind == "native-c11" || p.kind == "luau-source") {
     only(v, {"kind", "kind_version", "path", "size", "sha256", "role"}, "a source payload");
     p.role = str(v, "role");
@@ -311,11 +325,25 @@ Manifest parse_manifest(const Value &root) {
     only(source, {"kind", "disc_identity"}, "a disc-image source");
     m.disc_identity = str(source, "disc_identity");
     if (!hex64(m.disc_identity)) fail("E_SOURCE_DIGEST", "disc_identity is not 64 lowercase hex digits");
-    fail("E_SOURCE_KIND_RESERVED", "the disc-image source kind is reserved and not implemented");
+    const Value &bios = object(need(root, "bios"), "bios");
+    m.bios_requirement = str(bios, "requirement");
+    if (m.bios_requirement == "digest") {
+      only(bios, {"requirement", "sha256s"}, "a digest bios requirement");
+      m.bios_sha256s = string_list(need(bios, "sha256s"), "sha256s");
+    } else if (m.bios_requirement == "class") {
+      only(bios, {"requirement", "class"}, "a class bios requirement");
+      m.bios_class = str(bios, "class");
+    } else {
+      fail("E_FIELD_VALUE", "the bios requirement must be digest or class");
+    }
+    if (auto r = check_bios_requirement(m)) fail(r->code, r->message);
+  } else {
+    only(source, {"kind", "revisions"}, "a cartridge-image source");
   }
-  only(source, {"kind", "revisions"}, "a cartridge-image source");
-  const Value &revs = array(need(source, "revisions"), "revisions");
-  if (revs.items.empty() || revs.items.size() > kMaxRevisions) fail("E_SOURCE_DIGEST", "a source declares 1 to 16 revisions");
+  const bool disc = m.source_kind == "disc-image";
+  static const Value kNoRevisions = [] { Value v; v.kind = Value::Kind::array; return v; }();
+  const Value &revs = disc ? kNoRevisions : array(need(source, "revisions"), "revisions");
+  if (!disc && (revs.items.empty() || revs.items.size() > kMaxRevisions)) fail("E_SOURCE_DIGEST", "a source declares 1 to 16 revisions");
   std::set<std::string> labels, digests;
   for (const Value &rv : revs.items) {
     object(rv, "a revision");
@@ -333,7 +361,7 @@ Manifest parse_manifest(const Value &root) {
     }
     m.revisions.push_back(std::move(r));
   }
-  if (root.find("bios") != nullptr) fail("E_FIELD_UNKNOWN", "bios is forbidden for a cartridge-image source");
+  if (!disc && root.find("bios") != nullptr) fail("E_FIELD_UNKNOWN", "bios is forbidden for a cartridge-image source");
 
   // capabilities (section 6)
   const auto caps = [&](const char *key, std::vector<std::string> &out) {
@@ -490,13 +518,16 @@ Manifest parse_manifest(const Value &root) {
     if (sv->items.empty() || sv->items.size() > kMaxSymbols) fail("E_FIELD_VALUE", "symbols holds 1 to 255 entries");
     for (const Value &e : sv->items) {
       object(e, "a symbol");
-      only(e, {"name", "revision", "address", "provenance"}, "a symbol");
+      if (disc) only(e, {"name", "address", "provenance", "cpu", "module"}, "a disc symbol");
+      else only(e, {"name", "revision", "address", "provenance"}, "a symbol");
       Symbol sym;
-      sym.name = str(e, "name"); sym.revision = str(e, "revision"); sym.provenance = str(e, "provenance");
+      sym.name = str(e, "name"); sym.provenance = str(e, "provenance");
+      if (disc) { sym.cpu = str(e, "cpu"); sym.module = str(e, "module"); } else sym.revision = str(e, "revision");
       sym.address = static_cast<std::uint32_t>(num(e, "address"));
       if (sym.address >= kMaxImageBytes) fail("E_FIELD_VALUE", "a symbol address must lie inside the largest supported image");
       if (!symbol_name_ok(sym.name)) fail("E_FIELD_VALUE", "a symbol name must be a token of 1 to 64 characters");
-      if (labels.count(sym.revision) == 0) fail("E_SYMBOL_REVISION", "a symbol names a revision that is not declared");
+      if (!disc && labels.count(sym.revision) == 0) fail("E_SYMBOL_REVISION", "a symbol names a revision that is not declared");
+      if (disc) if (auto r = check_disc_symbol(sym)) fail(r->code, r->message);
       if (std::none_of(std::begin(kSymbolProvenance), std::end(kSymbolProvenance), [&](std::string_view v) { return v == sym.provenance; })) fail("E_FIELD_VALUE", "the symbol provenance is not manual, verified or imported-hint");
       if (!m.symbols.empty()) {
         const Symbol &prev = m.symbols.back();
@@ -597,7 +628,14 @@ void emit_payload(std::string &out, const Payload &p) {
   else if (p.kind == "rom-edit-set") kn(out, "edits", p.edits);
   else if (p.kind == "guest-code" || p.kind == "guest-asm") kv(out, "cpu", p.cpu);
   else if (p.kind == "native-c11" || p.kind == "luau-source") kv(out, "role", p.role);
-  else {
+  else if (p.kind == "disc-extent-edit") {
+    kn(out, "target", p.disc_target);
+    if (p.has_disc_track) kn(out, "track", p.disc_track);
+    if (!p.iso_file.empty()) kv(out, "iso_file", p.iso_file);
+    kn(out, "start", p.disc_start); kn(out, "length", p.disc_length);
+    kv(out, "original_sha256", p.original_sha256); kv(out, "replacement", p.replacement);
+    if (!p.code_cpu.empty()) { kv(out, "code_cpu", p.code_cpu); kn(out, "load_address", p.load_address); }
+  } else {
     kv(out, "asset_class", p.asset_class);
     if (p.asset_class == "image") { kn(out, "width", p.width); kn(out, "height", p.height); kv(out, "format", p.format); }
     else if (p.asset_class == "data") kv(out, "format", p.format);
@@ -634,6 +672,26 @@ void emit_mapping(std::string &out, const Mapping &m) {
 std::uint32_t crc(std::span<const std::uint8_t> b) { return patch::crc32(b); }
 void le16(std::vector<std::uint8_t> &o, std::uint32_t v) { o.push_back(static_cast<std::uint8_t>(v)); o.push_back(static_cast<std::uint8_t>(v >> 8U)); }
 void le32(std::vector<std::uint8_t> &o, std::uint32_t v) { le16(o, v & 0xFFFFU); le16(o, v >> 16U); }
+
+JsonLimits manifest_limits() {
+  JsonLimits limits;
+  limits.max_items = kMaxPayloads; limits.max_members = 32; limits.max_depth = 5; limits.max_number = 2147483647U;
+  limits.allow_slash_escape = false; limits.allow_whitespace = false;
+  return limits;
+}
+
+// The gate of an archive over 32 MiB: a well-formed manifest whose payloads are all disc kinds. Everything else about it is judged by the one reader afterwards.
+bool only_disc_payloads(const std::vector<std::uint8_t> &manifest) {
+  Value root;
+  std::string error;
+  if (manifest.size() > kMaxManifestBytes || !patch::detail::parse_json(std::string_view(reinterpret_cast<const char *>(manifest.data()), manifest.size()), manifest_limits(), root, error)) return false;
+  const Value *payloads = root.kind == Value::Kind::object ? root.find("payloads") : nullptr;
+  if (payloads == nullptr || payloads->kind != Value::Kind::array) return false;
+  return std::all_of(payloads->items.begin(), payloads->items.end(), [](const Value &p) {
+    const Value *kind = p.kind == Value::Kind::object ? p.find("kind") : nullptr;
+    return kind != nullptr && kind->text == "disc-extent-edit";
+  });
+}
 
 Package rejected(std::string code, std::string message) {
   Package p;
@@ -734,6 +792,12 @@ std::string serialize_manifest(const Manifest &m) {
     o += ']';
   }
   o += '}';
+  if (m.source_kind == "disc-image") {
+    o += ','; key(o, "bios"); o += '{'; kv(o, "requirement", m.bios_requirement, true);
+    if (m.bios_requirement == "class") kv(o, "class", m.bios_class);
+    else { o += ','; key(o, "sha256s"); string_array(o, m.bios_sha256s); }
+    o += '}';
+  }
   if (!m.capabilities.empty()) { o += ','; key(o, "capabilities"); string_array(o, m.capabilities); }
   if (!m.capabilities_optional.empty()) { o += ','; key(o, "capabilities_optional"); string_array(o, m.capabilities_optional); }
   if (m.abi_native != 0) { o += ','; key(o, "abi"); o += "{\"native\":" + std::to_string(m.abi_native) + (m.abi_minor != 0 ? ",\"minor\":" + std::to_string(m.abi_minor) : std::string()) + "}"; }
@@ -776,7 +840,11 @@ std::string serialize_manifest(const Manifest &m) {
     for (std::size_t i = 0; i < m.symbols.size(); ++i) {
       const Symbol &y = m.symbols[i];
       if (i) o += ',';
-      o += '{'; kv(o, "name", y.name, true); kv(o, "revision", y.revision); kn(o, "address", y.address); o += ','; key(o, "provenance"); put_string(o, y.provenance); o += '}';
+      o += '{'; kv(o, "name", y.name, true);
+      if (m.source_kind != "disc-image") kv(o, "revision", y.revision);
+      kn(o, "address", y.address); o += ','; key(o, "provenance"); put_string(o, y.provenance);
+      if (m.source_kind == "disc-image") { kv(o, "cpu", y.cpu); kv(o, "module", y.module); }
+      o += '}';
     }
     o += ']';
   }
@@ -834,6 +902,11 @@ std::string content_digest(const Manifest &m) {
   std::string text = "segarecomp.mod.content.v1\nplatform " + m.platform + "\n";
   for (const Payload *p : sorted)
     text += "payload " + p->kind + " " + std::to_string(p->kind_version) + " " + p->path + " size " + std::to_string(p->size) + " sha256 " + p->sha256 + "\n";
+  for (const Payload *p : sorted) {   // ADR 0328: these fields decide which disc bytes the build writes
+    if (p->kind != "disc-extent-edit") continue;
+    text += "disc " + p->path + " " + std::to_string(p->disc_target) + " " + (p->has_disc_track ? std::to_string(p->disc_track) : std::string("-")) + " " + (p->iso_file.empty() ? std::string("-") : p->iso_file) + " " +
+            std::to_string(p->disc_start) + " " + std::to_string(p->disc_length) + " " + p->original_sha256 + " " + p->replacement + " " + (p->code_cpu.empty() ? std::string("-") : p->code_cpu) + " " + std::to_string(p->load_address) + "\n";
+  }
   if (!m.header_repair.empty()) text += "header_repair " + m.header_repair + "\n";   // decides which bytes the build writes
   for (const Hook &h : m.hooks) {   // hooks decide which generated code runs
     text += "hook " + h.id + " " + h.symbol + " " + h.revision + " " + (h.cpu.empty() ? "m68k" : h.cpu) + " " + h.mode + " reads";
@@ -851,31 +924,32 @@ std::string content_digest(const Manifest &m) {
     for (const auto &v : mp.values) text += " " + v.first + "=" + std::to_string(v.second);
     text += "\n";
   }
-  for (const Symbol &y : m.symbols) text += "symbol " + y.name + " " + y.revision + " " + std::to_string(y.address) + " " + y.provenance + "\n";   // symbols decide where edits land
+  for (const Symbol &y : m.symbols) text += "symbol " + y.name + " " + y.revision + " " + std::to_string(y.address) + " " + y.provenance + (y.cpu.empty() ? std::string() : " " + y.cpu + " " + y.module) + "\n";   // symbols decide where edits land
   return sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(text.data()), text.size()));
 }
 
 Package read_package(std::span<const std::uint8_t> zip) {
   try {
     patch::detail::ZipPolicy policy;
+    const bool large = zip.size() > kMaxArchiveBytes;   // legal only for a package of disc payloads (checked once the manifest is known); a smaller archive keeps the cartridge limits
     policy.max_entries = kMaxArchiveEntries;
+    policy.archive_limit = large ? kMaxDiscArchiveBytes : kMaxArchiveBytes;
     policy.manifest_limit = kMaxImageBytes;   // the 64 KiB manifest cap is E_MANIFEST_SYNTAX below; the archive layer only bounds memory
-    policy.entry_limit = kMaxImageBytes;
-    policy.total_limit = 48U << 20U;
+    policy.entry_limit = kMaxDiscPayloadBytes;   // the largest kind cap (total_limit still bounds memory); the cartridge entry limit is applied per kind once the manifest is known
+    if (large) policy.manifest_gate = only_disc_payloads;
+    policy.total_limit = large ? kMaxDiscArchiveBytes : 48U << 20U;
     policy.max_ratio = 256;
     policy.fold_case_duplicates = true;
     policy.name_ok = [](const std::string &n) { return v3_path_ok(n); };
     std::map<std::string, patch::detail::ZipEntry> entries;
     std::string error;
     const char *code = "E_ARCHIVE_ENTRY";
-    if (zip.size() > kMaxArchiveBytes) return rejected("E_ARCHIVE_SIZE", "the archive is larger than allowed");
+    if (zip.size() > kMaxDiscArchiveBytes) return rejected("E_ARCHIVE_SIZE", "the archive is larger than allowed");
     if (!patch::detail::read_zip(zip, policy, entries, error, &code)) return rejected(code, error);
     const auto man = entries.find("manifest.json");
     if (man == entries.end()) return rejected("E_ARCHIVE_ENTRY", "the package has no manifest.json");
     if (man->second.data.size() > kMaxManifestBytes) return rejected("E_MANIFEST_SYNTAX", "the manifest is larger than allowed");
-    JsonLimits limits;
-    limits.max_items = kMaxPayloads; limits.max_members = 32; limits.max_depth = 5; limits.max_number = 2147483647U;
-    limits.allow_slash_escape = false; limits.allow_whitespace = false;
+    const JsonLimits limits = manifest_limits();
     Value root;
     std::string json_error;
     if (!patch::detail::parse_json(std::string_view(reinterpret_cast<const char *>(man->second.data.data()), man->second.data.size()), limits, root, json_error))
@@ -883,13 +957,17 @@ Package read_package(std::span<const std::uint8_t> zip) {
     Package out;
     out.manifest = parse_manifest(root);
     const Manifest &m = out.manifest;
+    for (const auto &e : entries) {
+      const bool disc_payload = std::any_of(m.payloads.begin(), m.payloads.end(), [&](const Payload &p) { return p.path == e.first && p.kind == "disc-extent-edit"; });
+      if (!disc_payload && e.second.data.size() > kMaxImageBytes) return rejected("E_ARCHIVE_SIZE", "an archive entry is larger than allowed");
+    }
 
     // archive entries must be exactly the manifest plus the declared payloads
     std::set<std::string> declared;
     for (const Payload &p : m.payloads) declared.insert(p.path);
     for (const auto &e : entries) if (e.first != "manifest.json" && declared.count(e.first) == 0) return rejected("E_ARCHIVE_ENTRY", "the archive holds an entry the manifest does not name");
     // per-kind caps and verification of every payload
-    std::size_t native_n = 0, native_total = 0, luau_n = 0, luau_total = 0, asset_n = 0, guest_total = 0;
+    std::size_t native_n = 0, native_total = 0, luau_n = 0, luau_total = 0, asset_n = 0, guest_total = 0, disc_total = 0;
     for (const Payload &p : m.payloads) {
       const auto it = entries.find(p.path);
       if (it == entries.end()) return rejected("E_ARCHIVE_ENTRY", "a payload named by the manifest is missing from the archive");
@@ -903,6 +981,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
         if (auto r = check_rom_edit_set(m, it->second.data, p.edits)) fail(r->code, r->message);   // syntax, count, per-revision symbols and overlap
       }
       else if (p.kind == "guest-code" || p.kind == "guest-asm") { guest_total += n; cap(guest_total <= kMaxGuestCodeBytes); }
+      else if (p.kind == "disc-extent-edit") { disc_total += n; cap(n <= kMaxDiscPayloadBytes && disc_total <= kMaxDiscPackageBytes); }
       else if (p.kind == "native-c11") { native_total += n; cap(++native_n <= kMaxNativeFiles && n <= kMaxNativeFileBytes && native_total <= kMaxNativeTotalBytes); }
       else if (p.kind == "luau-source") {
         luau_total += n; cap(++luau_n <= kMaxLuauFiles && n <= kMaxLuauFileBytes && luau_total <= kMaxLuauTotalBytes);
@@ -915,6 +994,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
       }
       out.files.emplace(p.path, it->second.data);
     }
+    if (auto r = check_disc_overlap(m)) return rejected(r->code, r->message);
     for (const Payload &p : m.payloads) {   // guest assembly: syntax, assembly, static validation, placement and collisions for EVERY declared revision (ADR 0292)
       if (p.kind != "guest-asm") continue;
       const auto edit = std::find_if(m.payloads.begin(), m.payloads.end(), [](const Payload &q) { return q.kind == "rom-edit-set"; });
@@ -935,7 +1015,7 @@ Package read_package_file(const std::filesystem::path &path) {
   std::error_code ec;
   if (!std::filesystem::is_regular_file(path, ec)) return rejected("E_ARCHIVE_ENTRY", "the package is not a regular file");
   const std::uintmax_t size = std::filesystem::file_size(path, ec);
-  if (ec || size > kMaxArchiveBytes) return rejected("E_ARCHIVE_SIZE", "the package is unreadable or larger than allowed");
+  if (ec || size > kMaxDiscArchiveBytes) return rejected("E_ARCHIVE_SIZE", "the package is unreadable or larger than allowed");
   std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
   std::ifstream in(path, std::ios::binary);
   if (!in.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) return rejected("E_ARCHIVE_ENTRY", "the package cannot be read");

@@ -1,4 +1,4 @@
-add_executable(segarecomp main.cpp build_command.cpp mod_set_build.cpp output_guard.cpp sega_cd_command.cpp sega_cd_build.cpp sega_cd_aot.cpp process_run.cpp patch_command.cpp mod_command.cpp mod_run.cpp sound_gate.cpp luau_build.cpp)
+add_executable(segarecomp main.cpp build_command.cpp mod_set_build.cpp output_guard.cpp sega_cd_command.cpp sega_cd_build.cpp sega_cd_aot.cpp process_run.cpp patch_command.cpp mod_command.cpp mod_disc_command.cpp mod_run.cpp sound_gate.cpp luau_build.cpp)
 find_package(Threads REQUIRED)
 target_include_directories(segarecomp PRIVATE ${PROJECT_SOURCE_DIR}/libs/media/src)   # sound_gate.cpp reads the product's own status and run summaries with the strict closed-JSON reader
 target_link_libraries(segarecomp PRIVATE segarecomp::media segarecomp::luau_host segarecomp::machine_genesis segarecomp::machine_genesis_z80 segarecomp::machine_genesis_z80_static segarecomp::machine_master_system segarecomp::machine_sega_cd

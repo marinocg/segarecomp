@@ -41,6 +41,11 @@ inline constexpr std::size_t kMaxHooks = 64;      // manifest `hooks` entries (A
 inline constexpr std::size_t kMaxRelations = 16, kMaxComparators = 4;   // manifest `dependencies` / `incompatibilities` entries and comparators of one version range (ADR 0326)
 inline constexpr std::uint32_t kMaxAudioSeconds = 600;
 inline constexpr std::uint64_t kLuauMemoryPolicyMax = 4194304, kLuauBudgetPolicyMax = 100000;
+// Sega CD disc payload caps (sega-cd-mod-sources.md section 5), independent of the cartridge (16 MiB) and archive (32 MiB) caps. An archive over 32 MiB is legal only when every payload is a disc kind.
+inline constexpr std::size_t kMaxDiscPayloadBytes = 128U << 20U, kMaxDiscPackageBytes = 512U << 20U;
+inline constexpr std::size_t kMaxDiscArchiveBytes = kMaxDiscPackageBytes + (1U << 20U);
+inline constexpr std::size_t kMaxBiosDigests = 8;
+inline constexpr std::uint64_t kMaxDiscOffset = 0x7FFFFFFFU;   // the manifest's integer limit; every CD image lies below it
 inline constexpr unsigned kNativeAbiMajor = 2;
 inline constexpr unsigned kNativeAbiMinor = 5;   // ADR 0320 decision 10: equals SEGA_MOD_ABI_MINOR; a manifest `abi.minor` above it is E_ABI_MINOR_TOO_NEW
 
@@ -96,6 +101,13 @@ struct Payload {
   std::string audio_format;         // asset audio: "wav-pcm-s16le"
   unsigned sample_rate = 0, channels = 0, frames = 0, loop_start = 0, loop_end = 0;
   bool has_loop = false;
+  // disc-extent-edit (kind_version 1, ADR 0328). `disc_target` is the 0-based CUE FILE index. Without `iso_file`, `disc_start` is a byte offset in that file; with it, an offset in the
+  // logical data of that ISO9660 file of track 1. `code_cpu` ("" = a data edit) declares a CODE patch: "main" is the only patchable class; `load_address` is where the guest runs the first byte.
+  unsigned disc_target = 0, disc_track = 0;
+  bool has_disc_track = false;
+  std::string iso_file, original_sha256, replacement, code_cpu;
+  std::uint64_t disc_start = 0, disc_length = 0;
+  std::uint32_t load_address = 0;
   bool operator==(const Payload &) const = default;
 };
 
@@ -117,6 +129,8 @@ struct Mapping {                    // modding-audio-architecture.md section 5 (
 struct Symbol {
   std::string name, revision, provenance;   // provenance in kSymbolProvenance
   std::uint32_t address = 0;
+  // sega-cd only (a disc has no revisions, so `revision` is empty there): the CPU that runs the symbol ("main" | "sub" | "z80") and its module context ("boot" or an absolute ISO9660 path of track 1).
+  std::string cpu{}, module{};
   bool operator==(const Symbol &) const = default;
 };
 inline constexpr std::string_view kSymbolProvenance[] = {"manual", "verified", "imported-hint"};
@@ -172,6 +186,8 @@ struct Manifest {
   std::string source_kind;                       // cartridge-image | disc-image (reserved)
   std::vector<Revision> revisions;
   std::string disc_identity;                     // disc-image only
+  std::string bios_requirement, bios_class;      // disc-image only: "digest" (bios_sha256s) | "class" (a runtime BIOS profile name); declared, never packaged
+  std::vector<std::string> bios_sha256s;         // strictly ascending
   std::vector<std::string> capabilities, capabilities_optional;
   unsigned abi_native = 0;                       // 0 = none
   unsigned abi_minor = 0;                        // ADR 0320: the declared minimum ABI minor (absent = 0; serialized only when non-zero so existing manifests keep their canonical bytes)
@@ -228,6 +244,14 @@ inline constexpr std::size_t kMaxAudioRows = 128;   // GENESIS_MOD_AUDIO_ENTRIES
 [[nodiscard]] std::optional<Rejection> check_adapter(const Manifest &manifest);
 // Canonical stored ZIP (schema 3 section 2): path order, manifest first, fixed times and attributes. Deterministic for equal inputs.
 [[nodiscard]] std::vector<std::uint8_t> pack_package(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files);
+
+// ---- Sega CD disc declarations (ADR 0328): the image-independent checks of the `disc-image` source, `disc-extent-edit` payloads and disc symbols; run by the reader and `mod check`. ----
+// E_FIELD_VALUE, E_DISC_PAYLOAD_SIZE, unsupported_code_class:sub_m68k | z80 | layout_changing.
+[[nodiscard]] std::optional<Rejection> check_disc_payload(const Payload &payload, bool has_code_cpu, bool has_load_address, bool has_iso_file);
+[[nodiscard]] std::optional<Rejection> check_bios_requirement(const Manifest &manifest);
+[[nodiscard]] std::optional<Rejection> check_disc_symbol(const Symbol &symbol);
+// Two edits of the same target and address space may not overlap (E_DISC_OVERLAP). Overlap across address spaces is found when the disc resolves them.
+[[nodiscard]] std::optional<Rejection> check_disc_overlap(const Manifest &manifest);
 
 // ---- typed ROM edits (SEG-136-T001) and symbol resolution (SEG-136-T002) ----
 // A `rom-edit-set` payload is ASCII text, LF-separated, one edit per line (blank lines and `#` comment lines allowed):
@@ -354,6 +378,8 @@ struct GuestListing {
   std::string revision;
   std::vector<GuestBlock> blocks;
   std::vector<Range> free_ranges;         // image offsets of the revision's declared free ranges: padding, never existing cartridge code
+  std::vector<std::uint8_t> free_fills;   // the declared fill byte of each free range (same order)
+  std::vector<std::string> symbols;       // the @symbols the assembler actually resolved for this revision (ascending): the one record of what the code names
   std::uint32_t code_limit = 0;           // the first CPU address that can never be cartridge code under the declared mapper (rom_only 0x8000, sega 0xC000); 0 admits no control target
 };
 using GuestAdmitter = std::optional<Rejection> (*)(const GuestListing &);

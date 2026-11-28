@@ -122,6 +122,7 @@ struct Variant {
 std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs, std::size_t admissions) {
   std::ostringstream t;
   t << kSegaCdBiosGeneratorVersion << "\ndisc " << disc.identity() << "\nbios " << inputs.bios.sha256 << "\n";
+  if (!inputs.variant_identity.empty()) t << "variant " << inputs.variant_identity << "\n";  // SEG-148-T002: absent for Vanilla, whose identity is unchanged
   if (!inputs.aot_policy.empty()) t << "aot experimental_m3 " << inputs.aot_policy << "\n";  // absent for Compatibility: its identity is unchanged
   for (const auto &c : inputs.copies)
     t << "copy " << processor_name(c.processor) << " " << c.base << " " << c.rom_offset << " " << c.length << "\n";

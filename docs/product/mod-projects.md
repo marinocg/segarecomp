@@ -47,7 +47,7 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | Table | Keys |
 | --- | --- |
 | `[mod]` | `id`, `version` (`MAJOR.MINOR.PATCH`), `name`, `author` (required with native sources), `license` (required with audio assets), `purpose` |
-| `[target]` | `platform` (mandatory, never guessed), `kind` (optional, must match the platform), `disc_identity` (Sega CD; reserved) |
+| `[target]` | `platform` (mandatory, never guessed), `kind` (optional, must match the platform), `disc_identity` (Sega CD; see [Sega CD disc mods](#sega-cd-disc-mods)) |
 | `[[target.revision]]` | `label`, `sha256` (the exact original image), `mapper` (Master System: `sega` or `rom_only`, declared never inferred); repeat per supported revision (1 to 16) |
 | `[capabilities]` | `required`, `optional` (names from `mod inspect --json`) |
 | `[abi]` | `native = 2` (required with native sources) |
@@ -138,6 +138,52 @@ segarecomp build --rom <original> --output <dir> --cc <compiler> --runtime-dir <
 
 Asset replacement (tiles, palettes, text, tables) is a mod-owned adapter that turns declared `asset` sources into typed edits; the product ships no universal decoder. See the [asset replacement example](../../platforms/master-system/sdk/examples/asset-replace/README.md). The launcher does not yet install Master System mods.
 
+## Sega CD disc mods
+
+A Sega CD mod edits **your own disc** into a new, separate image set; the originals are only read and nothing derived from them is ever packaged ([ADR 0328](../decisions/0328-sega-cd-disc-extent-edits-and-main-m68k-patching.md), [source contract](../architecture/sega-cd-mod-sources.md)). The package names the exact disc and the BIOS it needs:
+
+```toml
+[target]
+platform = "sega-cd"
+disc_identity = "<the identity `segarecomp sega-cd inspect --cue <disc.cue>` reports>"
+
+[bios]                      # declared, never packaged
+requirement = "digest"      # or: requirement = "class", class = "<a BIOS profile the runtime knows>"
+sha256s = ["<sha256 of your BIOS image>"]
+
+[[source]]
+kind = "disc-extent-edit"
+path = "disc/title-text.bin"   # your replacement bytes (or a BPS delta with replacement = "bps" and length = <n>)
+target = 0                     # 0-based CUE FILE index
+iso_file = "/DATA.BIN;1"       # optional: `start` is then an offset in this ISO9660 file; without it, in the CUE FILE
+start = 4096
+original_sha256 = "<sha256 of the original bytes of that range>"
+```
+
+Edits never change a file size, a track or the layout. Layout metadata cannot be edited (`E_DISC_METADATA`: the boot header identifier and IP/SP descriptors, ISO9660 volume descriptors, path tables and directories; a disc with a supplementary/Joliet volume cannot be edited yet); raw sector headers cannot be edited, and EDC/ECC bytes are not recomputed. Every digest is checked before anything is written.
+
+```text
+segarecomp mod apply <dir|package> --cue <original.cue> --out <new-dir> [--bios <image>]        # data edits only
+segarecomp mod verify-disc <dir|package> --cue <original.cue> --patched <patched.cue>
+segarecomp mod disc-build <dir|package> --cue <original.cue> --bios <image> --out <new-dir> --runtime-dir <source-root> --cc <compiler> --budget <instructions>
+segarecomp mod disc-diff-run <build-dir> --cue <original.cue> --bios <image> --budget <instructions> --timeout <seconds>
+```
+
+`disc-build` builds the original disc, checks your writes against what that build proved, writes the patched disc under `<new-dir>/disc` and builds it as its own variant. It accepts the host and machine options of `sega-cd build` (`--jobs`, `--cache-dir`, `--viewer`, ...), never `--emit-arg` or an option that turns off a proof source.
+
+### Patching main-CPU code
+
+Only **main-M68K code that the build proved to be a copy of bytes on your disc** can be patched. Declare it: add `code_cpu = "main"` and `load_address = "0x..."` (where the program runs the first byte) to an edit, or inject a routine with a `guest-asm` source (`cpu = "m68k"`). In Sega CD assembly, `free` and `org` offsets are offsets in the user data of track 1, `org` needs `at <execution address>`, the revision is always `*`, and the free range must hold its declared fill on the original disc. A symbol used by injected code states `cpu = "main"` and `module = "boot"` or the ISO9660 path of its file.
+
+```text
+free * 0x14800 0x100 0x00
+org * 0x14800 at 0x200800
+  move.w #0xc0de,0xffc022
+  rts
+```
+
+Everything else is refused with an exact class: `unsupported_code_class:sub_m68k`, `:z80`, `:dynamic` (code made in RAM), `:not_disc_proven` (including code the bounded build did not reach), `:unrecognized_module`, `:layout_changing` and `:undeclared_code` (a plain edit over proven code). This is not multi-CPU modding: patching sub-CPU or Z80 code is not supported. The refusals cover what you declare and what the build proved. They are not a scan of your replacement bytes: a plain data edit of bytes the build never saw run is applied as data, and Z80 driver bytes on the disc cannot be identified at all.
+
 ## Native sources
 
 `native-c11` sources (`.c` and `.h`, at most 64 files, 256 KiB each, 2 MiB total) may include only `<segarecomp_mod.h>`, the platform's own SDK header, `<stdint.h>`, `<stddef.h>` and package files by their package path. Anything else is refused. `mod build` compiles every `.c` unit in path order with
@@ -145,7 +191,7 @@ strict C11 flags the **host** owns (`-std=c11 -Wall -Wextra -pedantic -Werror`) 
 
 ## Support today
 
-Genesis is the supported adapter. Master System also supports data-only packages (typed edits, BPS, Z80 injection, assets; above) and scheduled Luau / C11 mods ([Master System mods](master-system-mods.md)). Sega CD's only runtime capability is `host.log`; a package that needs a capability its platform lacks, or a Sega CD disc source, is refused (`E_CAPABILITY_UNSUPPORTED`, `E_SOURCE_KIND_RESERVED`). Commercial ROMs, discs, BIOS images and game audio never belong in a project that is committed or shared.
+Genesis is the supported adapter. Master System also supports data-only packages (typed edits, BPS, Z80 injection, assets; above) and scheduled Luau / C11 mods ([Master System mods](master-system-mods.md)). Sega CD supports verified disc data edits and main-CPU code patches ([Sega CD disc mods](#sega-cd-disc-mods)); its only registered runtime capability is `host.log`, and a Sega CD package with a Luau or C11 payload is refused (`E_PAYLOAD_KIND_RESERVED`). A package that needs a capability its platform lacks is refused (`E_CAPABILITY_UNSUPPORTED`). Commercial ROMs, discs, BIOS images and game audio never belong in a project that is committed or shared.
 
 ## Linking a native ABI 2 package into a program (SEG-138-T011, ADR 0305)
 

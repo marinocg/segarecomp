@@ -37,8 +37,8 @@ def project(name, files, platform="genesis", natives=None, extra="", caps=""):
     root = tmp / name
     mapper = 'mapper = "sega"\n' if platform == "master-system" else ""
     toml = HEAD % (platform, SRC_SHA, mapper) + (caps and f"\n[capabilities]\nrequired = [{caps}]\n") + extra
-    if platform == "sega-cd":   # a disc-image target (reserved): no revisions, a disc identity instead
-        toml = toml.replace(f'[[target.revision]]\nlabel = "rev-a"\nsha256 = "{SRC_SHA}"\n', f'disc_identity = "{SRC_SHA}"\n')
+    if platform == "sega-cd":   # a disc-image target: no revisions, a disc identity and a BIOS requirement instead
+        toml = toml.replace(f'[[target.revision]]\nlabel = "rev-a"\nsha256 = "{SRC_SHA}"\n', f'disc_identity = "{SRC_SHA}"\n\n[bios]\nrequirement = "digest"\nsha256s = ["{SRC_SHA}"]\n')
     for path in natives if natives is not None else sorted(p for p in files if p.endswith((".c", ".h"))):
         toml += f'\n[[source]]\nkind = "native-c11"\npath = "{path}"\n'
     write(root / "mod.toml", toml)
@@ -172,8 +172,8 @@ for platform, (directory, header, features, pid, provider) in platforms.items():
         cli.check(run.returncode == 0 and run.stdout.strip() == "ok", f"{platform}: negotiation harness: {run.stdout}")
     # the same provider builds through the CLI for its platform (no behaviour: lifecycle and capability reporting only)
     src = (FIXTURES / provider).read_bytes()
-    if platform == "sega-cd":   # compiled and negotiated above; packaging a disc target stays reserved until SEG-148
-        refused("sega-cd: the disc-image source is reserved", project(f"sdk-{pid}", {"src/provider.c": src}, platform=platform, caps='"host.log"'), "E_SOURCE_KIND_RESERVED")
+    if platform == "sega-cd":   # compiled and negotiated above; packaging Sega CD runtime code stays reserved until SEG-148-T005/T006
+        refused("sega-cd: native runtime code is reserved", project(f"sdk-{pid}", {"src/provider.c": src}, platform=platform, caps='"host.log"'), "E_PAYLOAD_KIND_RESERVED")
     else:
         doc = ok(f"{platform}: provider builds through mod build", project(f"sdk-{pid}", {"src/provider.c": src}, platform=platform, caps='"host.log"'))
         cli.check(doc["platform"] == platform and doc["abi_native"] == 2, f"{platform}: package declares platform and ABI 2")

@@ -2,6 +2,7 @@
 // implementation. `check` and `build` never execute a payload; `build` runs the HOST's C compiler (flags owned by the host, kNativeCompileFlags) over the package's own C11 units only, and the pinned
 // trusted Luau compiler over its Luau sources (SEG-137-T003; the bytecode is never packaged and never run by `build`).
 #include "luau_build.hpp"
+#include "mod_disc_command.hpp"
 #include "mod_run.hpp"
 #include "mod_set_build.hpp"
 #include "output_guard.hpp"
@@ -284,9 +285,13 @@ std::string consent_text(const mod::Manifest &m) {
   return "includes native code that can do anything on your computer; install only from a source you trust";
 }
 
+// ADR 0328: the cartridge commands (one ROM image in, one image out) refuse a disc package by name instead of failing on a missing revision.
+mod::Rejection cartridge_only() { return {"E_SOURCE_PLATFORM", "this command works on one cartridge image; a sega-cd package uses `mod apply --cue`, `mod verify-disc`, `mod disc-build` or `mod disc-diff-run`"}; }
+
 int install(const fs::path &package_path, const fs::path &rom, const fs::path &library, const std::string &approve) {
   const mod::Package p = mod::read_package_file(package_path);
   if (!p.ok) return refuse(p.rejection);
+  if (p.manifest.platform == "sega-cd") return refuse(cartridge_only());
   std::vector<std::uint8_t> image, raw;
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
   const mod::EffectiveImage e = mod::effective_image(p, image, kAdmit);
@@ -349,6 +354,7 @@ std::optional<mod::Rejection> load_package(const fs::path &target, mod::Package 
     p = mod::read_package_file(target);
     if (!p.ok) return p.rejection;
   }
+  if (p.manifest.platform == "sega-cd") return cartridge_only();
   return mod::check_guest_admission(p.manifest, p.files, kAdmit);
 }
 
@@ -1002,7 +1008,8 @@ int usage() {
                "       segarecomp mod import-hints <dir> --revision <label> --from <hint-file>\n"
                "       segarecomp mod set <check|apply|save|show|variant|build> ...   (ordered mod sets; `segarecomp mod set` prints the forms)\n"
                "       segarecomp mod api [--declarations]\n"
-               "       segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <last-frame.bmp>]   (DIAGNOSTIC: synthetic picture, not the Genesis machine)\n";
+               "       segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <last-frame.bmp>]   (DIAGNOSTIC: synthetic picture, not the Genesis machine)\n"
+            << segarecomp_cli::kModDiscUsage;
   return 2;
 }
 
@@ -1012,6 +1019,9 @@ int segarecomp_mod_command(int argc, char **argv) {
   segarecomp_cli::set_self_path(argc > 0 ? argv[0] : "");
   const std::string_view sub = argc >= 3 ? argv[2] : "";
   if (sub == "set") return set_command(argc, argv);   // ADR 0326: its own argument forms (several members in order)
+  // ADR 0328: the Sega CD disc commands have their own argument forms; `apply` is the disc form when it names a CUE.
+  if (sub == "verify-disc" || sub == "disc-build" || sub == "disc-diff-run" || (sub == "apply" && std::any_of(argv + 3, argv + argc, [](const char *a) { return std::string_view(a) == "--cue"; })))
+    return segarecomp_cli::run_mod_disc_command(argc, argv);
   std::string cc, platform, id, tmpl, rom_sha, approve, identity, revision;
   fs::path hints;
   fs::path out, sdk, rom, library, bps;
@@ -1162,7 +1172,8 @@ int segarecomp_mod_command(int argc, char **argv) {
     if (!c.ok) return refuse(c.rejection);
     const mod::Manifest &m = c.reread.manifest;
     if (const auto r = mod::check_guest_admission(m, c.reread.files, kAdmit)) return refuse(*r);
-    if (c.package.size() > mod::kMaxArchiveBytes) return refuse({"E_ARCHIVE_SIZE", "the package would exceed the archive limit"});
+    const bool disc_only = std::all_of(m.payloads.begin(), m.payloads.end(), [](const mod::Payload &p) { return p.kind == "disc-extent-edit"; });
+    if (c.package.size() > (disc_only ? mod::kMaxDiscArchiveBytes : mod::kMaxArchiveBytes)) return refuse({"E_ARCHIVE_SIZE", "the package would exceed the archive limit"});
     bool native = false;
     for (const mod::Payload &p : m.payloads) native = native || p.kind == "native-c11";
     if (const std::vector<luau::AnalysisIssue> issues = luau::analyze_mod(c.reread); !issues.empty()) return refuse_analysis(issues);

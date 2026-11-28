@@ -164,7 +164,42 @@ reject("platform saturn", mutate(lambda m: m.__setitem__("platform", "saturn")),
 reject("platform case variation", mutate(lambda m: m.__setitem__("platform", "Genesis")), "E_PLATFORM_UNKNOWN")
 reject("disc-image on genesis", mutate(lambda m: m.__setitem__("source", {"kind": "disc-image", "disc_identity": "0" * 64})), "E_SOURCE_PLATFORM")
 reject("cartridge-image on sega-cd", mutate(lambda m: None, platform="sega-cd"), "E_SOURCE_PLATFORM")
-reject("disc-image on sega-cd", mutate(lambda m: m.__setitem__("source", {"kind": "disc-image", "disc_identity": "0" * 64}), platform="sega-cd"), "E_SOURCE_KIND_RESERVED")
+reject("disc-image on sega-cd without its bios requirement", mutate(lambda m: m.__setitem__("source", {"kind": "disc-image", "disc_identity": "0" * 64}), platform="sega-cd"), "E_FIELD_MISSING")
+
+
+def disc(change=lambda m, e: None, data=b"DISC", **fields):
+    """A sega-cd package built by the independent builder (ADR 0328): one disc-extent-edit over a disc-image source."""
+    entry = payload("disc-extent-edit", "disc/e.bin", data, target=0, start=4096, length=len(data), original_sha256=sha(b"orig"), replacement="inline")
+    entry.update(fields)
+
+    def apply(m):
+        m["source"] = {"kind": "disc-image", "disc_identity": "0" * 64}
+        m["bios"] = {"requirement": "digest", "sha256s": [sha(b"bios")]}
+        ordered = {k: m[k] for k in ("format", "schema_version", "id", "version", "name", "platform", "source", "bios")}
+        ordered["payloads"] = m["payloads"]
+        m.clear()
+        m.update(ordered)
+        change(m, m["payloads"][0])
+    return mutate(apply, platform="sega-cd", payloads=[(entry, ("disc/e.bin", data))])
+
+
+accept("a disc-extent-edit package", disc())
+accept("a declared main-code patch", disc(code_cpu="main", load_address=0xFF0100))
+accept("a class bios requirement", disc(lambda m, e: m.__setitem__("bios", {"requirement": "class", "class": "sega_cd_model1_v110_us"})))
+reject("unknown disc kind", disc(lambda m, e: e.__setitem__("kind", "disc-rewrite")), "E_PAYLOAD_KIND_UNKNOWN")
+reject("disc kind_version 2", disc(lambda m, e: e.__setitem__("kind_version", 2)), "E_PAYLOAD_VERSION_UNKNOWN")
+reject("length that is not the payload size", disc(length=5), "E_DISC_PAYLOAD_SIZE")
+reject("code patch whose length changes", disc(length=5, code_cpu="main", load_address=0xFF0100), "unsupported_code_class:layout_changing")
+reject("sub-CPU code", disc(code_cpu="sub", load_address=0x6000), "unsupported_code_class:sub_m68k")
+reject("Z80 code", disc(code_cpu="z80", load_address=0), "unsupported_code_class:z80")
+reject("code_cpu without load_address", disc(code_cpu="main"), "E_FIELD_VALUE")
+reject("unknown replacement", disc(replacement="xor"), "E_FIELD_VALUE")
+reject("bad original digest", disc(original_sha256="z" * 64), "E_FIELD_VALUE")
+reject("unknown disc field", disc(resize=1), "E_FIELD_UNKNOWN")
+reject("relative iso_file", disc(iso_file="DATA.BIN;1"), "E_FIELD_VALUE")
+reject("revisions on a disc source", disc(lambda m, e: m["source"].__setitem__("revisions", [])), "E_FIELD_UNKNOWN")
+reject("unsorted bios digests", disc(lambda m, e: m["bios"].__setitem__("sha256s", ["f" * 64, "0" * 64])), "E_SOURCE_DIGEST")
+reject("a disc symbol with a revision", disc(lambda m, e: m.__setitem__("symbols", [{"name": "a", "revision": "r", "address": 1, "provenance": "verified", "cpu": "main", "module": "boot"}])), "E_FIELD_UNKNOWN")
 reject("unknown source kind", mutate(lambda m: m.__setitem__("source", {"kind": "tape", "revisions": []})), "E_FIELD_VALUE")
 reject("source with zero revisions", mutate(lambda m: m["source"].__setitem__("revisions", [])), "E_SOURCE_DIGEST")
 reject("duplicate revision digest", mutate(lambda m: m["source"]["revisions"].append({"label": "rev-b", "sha256": SRC_SHA})), "E_SOURCE_DIGEST")
@@ -217,9 +252,8 @@ reject("native with abi 1", mutate(lambda m: m.update(author="A", abi={"native":
 reject("native with abi 3", mutate(lambda m: m.update(author="A", abi={"native": 3}), payloads=[n_good]), "E_ABI_UNSUPPORTED")
 reject("abi without native", mutate(lambda m: m.__setitem__("abi", {"native": 2})), "E_FIELD_UNKNOWN")
 reject("native kind_version 2", mutate(lambda m: (m["payloads"][0].__setitem__("kind_version", 2), m.update(author="A", abi={"native": 2})), payloads=[n_good]), "E_PAYLOAD_VERSION_UNKNOWN")
-for kind in ("disc-extent-edit", "disc-track-replace"):   # guest-asm became a real kind in ADR 0292 (tests/mod_guest_test.py)
-    d = b"reserved"
-    reject(f"reserved kind {kind}", mutate(lambda m: None, payloads=[(payload(kind, "x/r.bin", d), ("x/r.bin", d))]), "E_PAYLOAD_KIND_RESERVED")
+reject("reserved kind disc-track-replace", mutate(lambda m: None, payloads=[(payload("disc-track-replace", "x/r.bin", b"reserved"), ("x/r.bin", b"reserved"))]), "E_PAYLOAD_KIND_RESERVED")
+reject("disc-extent-edit on a cartridge platform", mutate(lambda m: None, payloads=[(payload("disc-extent-edit", "x/r.bin", b"r"), ("x/r.bin", b"r"))]), "E_PAYLOAD_PLATFORM")
 reject("guest-asm needs its cpu field", mutate(lambda m: None, payloads=[(payload("guest-asm", "x/g.asm", b"org"), ("x/g.asm", b"org"))]), "E_FIELD_MISSING")
 reject("reserved kind with an unknown version", mutate(lambda m: None, payloads=[(dict(payload("disc-extent-edit", "x/r.bin", b"r"), kind_version=9), ("x/r.bin", b"r"))]), "E_PAYLOAD_VERSION_UNKNOWN")
 reject("unknown kind", mutate(lambda m: None, payloads=[(payload("firmware", "x/f.bin", b"r"), ("x/f.bin", b"r"))]), "E_PAYLOAD_KIND_UNKNOWN")

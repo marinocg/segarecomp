@@ -47,6 +47,9 @@ struct Source {
   std::vector<Block> blocks;
 };
 
+// A disc has no revisions (its identity is the one disc), so a sega-cd payload is assembled once for this unnamed revision; only `*` may be written.
+std::vector<Revision> guest_revisions(const Manifest &m) { return m.platform == "sega-cd" ? std::vector<Revision>{Revision{}} : m.revisions; }
+
 std::string hex(std::uint64_t v) {
   std::string out;
   do { out.insert(out.begin(), "0123456789abcdef"[v & 15U]); v >>= 4U; } while (v != 0);
@@ -137,7 +140,7 @@ Source parse_source(std::span<const std::uint8_t> text, const Manifest &m) {
       if (!declared(f.rev)) fail("E_GUEST_REVISION", at(line_no) + "the revision \"" + f.rev + "\" is not declared");
       if (!hex_lit(words[2], f.start) || !hex_lit(words[3], f.length) || f.length == 0 || !hex_lit(words[4], fill) || fill > 0xFF) fail("E_GUEST_SYNTAX", at(line_no) + "free needs 0x hex start, length and a one-byte fill");
       f.fill = static_cast<std::uint8_t>(fill);
-      if (f.start + f.length > kMaxImageBytes) fail("E_GUEST_RANGE", at(line_no) + "the free range lies beyond the largest supported image");
+      if (f.start + f.length > (m.platform == "sega-cd" ? kMaxDiscOffset : kMaxImageBytes)) fail("E_GUEST_RANGE", at(line_no) + "the free range lies beyond the largest supported image");
       if (src.frees.size() >= kMaxGuestFreeRanges) fail("E_GUEST_SYNTAX", "a guest-asm file declares at most 64 free ranges");
       src.frees.push_back(f);
       cur = nullptr;
@@ -205,6 +208,7 @@ struct Ctx {
   const Block *banked = nullptr;                                    // set on the Master System `sega` mapper only
   const std::map<std::string, const Block *> *label_blocks = nullptr;
   const std::set<std::string> *code_labels = nullptr;               // set on master-system: labels bound to an instruction
+  std::set<std::string> *used_symbols = nullptr;                    // every @symbol resolved
 };
 
 struct Ev {
@@ -233,9 +237,13 @@ Ev eval(const Ctx &c, std::string_view expr) {
   r.symbolic = true;
   if (base[0] == '@') {
     const std::string name(base.substr(1));
+    if (c.m.platform == "sega-cd")   // ADR 0328: main-M68K code may name only main-CPU symbols
+      for (const Symbol &y : c.m.symbols)
+        if (y.name == name && y.cpu != "main") fail(y.cpu == "z80" ? "unsupported_code_class:z80" : "unsupported_code_class:sub_m68k", at(c.line) + "the @symbol \"" + name + "\" belongs to the " + y.cpu + " CPU, which injected main-M68K code cannot patch or call");
     Rejection why;
     const auto a = verified_symbol(c.m, name, c.rev, why);
     if (!a) fail(why.code, at(c.line) + why.message);
+    if (c.used_symbols != nullptr) c.used_symbols->insert(name);
     r.value = static_cast<std::int64_t>(*a) + addend;
     if (c.banked != nullptr && c.final) {   // a symbol is an IMAGE offset: translate it into the window the running block sees, or refuse
       const auto offset = static_cast<std::uint64_t>(r.value);
@@ -751,6 +759,7 @@ struct OutBlock {
 struct Assembled {
   std::vector<Free> frees;
   std::vector<OutBlock> blocks;
+  std::set<std::string> symbols;
 };
 
 bool is_data_op(const std::string &op) { return op == "dc" || op == "db" || op == "dw"; }
@@ -782,7 +791,7 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
       std::size_t last_args = 0;
       for (const Stmt &s : b->stmts) {
         const auto pc = static_cast<std::int64_t>(b->address + ob.bytes.size());
-        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line, banked ? b : nullptr, &label_blocks, sms ? &code_labels : nullptr};
+        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line, banked ? b : nullptr, &label_blocks, sms ? &code_labels : nullptr, &out.symbols};
         if (!s.label.empty()) {
           if (!final && !labels.emplace(s.label, pc).second) fail("E_GUEST_LABEL_DUPLICATE", at(s.line) + "the label \"" + s.label + "\" is defined twice for the revision \"" + rev.label + "\"");
           if (!final) label_blocks.emplace(s.label, b);
@@ -888,7 +897,14 @@ void check_placement(const Manifest &m, Cpu cpu, const Revision &rev, const Asse
       fail("E_GUEST_OUTSIDE_FREE_RANGE", at(b.line) + "the injected block does not lie wholly inside one declared free range of the revision \"" + rev.label + "\"");
     for (const Range &e : edits) if (e.start < end && b.offset < e.end) fail("E_GUEST_COLLISION", at(b.line) + "a ROM edit overlaps the injected block in the revision \"" + rev.label + "\"");
     // CPU address model (a per-platform table, mod-platform-adapters.md): the injected bytes must be executable at the address the code was assembled for
-    if (cpu == Cpu::m68k) {
+    if (m.platform == "sega-cd") {   // ADR 0328: `org` is a track-1 user-data offset; the code runs where the disc's loader places it, which `at` states and the build evidence proves
+      if (!b.has_at) fail("E_GUEST_ADDRESS", at(b.line) + "Sega CD code needs `at <main execution address>` (its disc offset is not where it runs)");
+      if (b.address >= 0xA00000 && b.address < 0xA10000) fail("unsupported_code_class:z80", at(b.line) + "the execution address lies in the Z80 area; Z80 driver code cannot be patched");
+      const std::uint64_t last = b.address + b.bytes.size();
+      if (!((b.address >= 0xFF0000 && last <= 0x1000000) || (b.address >= 0x200000 && last <= 0x240000)))
+        fail("E_GUEST_ADDRESS", at(b.line) + "main-M68K code runs in main Work RAM (0xff0000-0xffffff) or the 2M Word RAM view (0x200000-0x23ffff)");
+      if ((b.offset & 1) != 0 || (b.address & 1) != 0) fail("E_GUEST_ALIGN", at(b.line) + "an M68K block starts at an even offset and address");
+    } else if (cpu == Cpu::m68k) {
       if (m.platform != "genesis") fail("E_GUEST_ADDRESS", "M68K guest code exists only on genesis");
       if (b.address != b.offset) fail("E_GUEST_ADDRESS", at(b.line) + "M68K code is placed at its cartridge address; `at` is not allowed");
       if ((b.offset & 1) != 0) fail("E_GUEST_ALIGN", at(b.line) + "an M68K block starts at an even offset");
@@ -914,7 +930,8 @@ void check_placement(const Manifest &m, Cpu cpu, const Revision &rev, const Asse
 }
 
 Cpu cpu_of(const Manifest &m, std::string_view cpu) {
-  if (cpu == "m68k") { if (m.platform != "genesis") fail("E_PAYLOAD_PLATFORM", "m68k guest code exists only on genesis"); return Cpu::m68k; }
+  if (cpu == "m68k") { if (m.platform != "genesis" && m.platform != "sega-cd") fail("E_PAYLOAD_PLATFORM", "m68k guest code exists only on genesis and sega-cd"); return Cpu::m68k; }
+  if (cpu == "z80" && m.platform == "sega-cd") fail("unsupported_code_class:z80", "Sega CD Z80 driver code cannot be patched");
   if (cpu == "z80") return Cpu::z80;
   fail("E_FIELD_VALUE", "guest-asm cpu must be m68k or z80");
 }
@@ -942,7 +959,11 @@ GuestListing listing_of(const Assembled &a, const Revision &revision) {
   GuestListing out;
   out.revision = revision.label;
   out.code_limit = static_cast<std::uint32_t>(revision.mapper == "rom_only" ? kSmsRomOnly : kSmsCodeLimit);
-  for (const Free &f : a.frees) out.free_ranges.push_back({f.start, f.start + f.length});
+  for (const Free &f : a.frees) {
+    out.free_ranges.push_back({f.start, f.start + f.length});
+    out.free_fills.push_back(f.fill);
+  }
+  out.symbols.assign(a.symbols.begin(), a.symbols.end());
   for (const OutBlock &b : a.blocks) {
     GuestBlock g;
     g.image_offset = b.offset;
@@ -1047,7 +1068,7 @@ std::optional<Rejection> check_guest_asm(const Manifest &m, std::string_view cpu
     const Cpu cpu = cpu_of(m, cpu_name);
     const Source src = parse_source(text, m);
     if (src.blocks.empty()) fail("E_GUEST_SYNTAX", "a guest-asm file holds no org block");
-    for (const Revision &rev : m.revisions) {
+    for (const Revision &rev : guest_revisions(m)) {
       const Assembled a = assemble_revision(m, cpu, src, rev);
       for (const OutBlock &b : a.blocks) validate_block(m, cpu, b);
       std::vector<Range> edits;
@@ -1121,8 +1142,9 @@ HeaderRepair repair_header(std::string_view platform, std::string_view policy, s
 GuestListingResult guest_listing(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, std::string_view revision) {
   GuestListingResult out;
   const Payload *gp = payload_of(m, "guest-asm");
-  const auto rev = std::find_if(m.revisions.begin(), m.revisions.end(), [&](const Revision &r) { return r.label == revision; });
-  if (gp == nullptr || rev == m.revisions.end()) { out.rejection = {"E_FIELD_MISSING", "no guest-asm payload for that revision"}; return out; }
+  const std::vector<Revision> revisions = guest_revisions(m);
+  const auto rev = std::find_if(revisions.begin(), revisions.end(), [&](const Revision &r) { return r.label == revision; });
+  if (gp == nullptr || rev == revisions.end()) { out.rejection = {"E_FIELD_MISSING", "no guest-asm payload for that revision"}; return out; }
   try {
     const Cpu cpu = cpu_of(m, gp->cpu);
     const Source src = parse_source(file_of(files, gp), m);

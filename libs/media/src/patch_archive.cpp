@@ -167,7 +167,7 @@ bool read_zip(std::span<const std::uint8_t> z, const ZipPolicy &policy, std::map
   const char *sink = nullptr;
   if (code == nullptr) code = &sink;
   *code = "E_ARCHIVE_ENTRY";
-  if (z.size() < 22 || z.size() > kMaxPackageBytes) { error = "the package is not a valid archive"; return false; }
+  if (z.size() < 22 || z.size() > policy.archive_limit) { error = "the package is not a valid archive"; return false; }
   std::size_t eocd = std::string::npos;
   const std::size_t lowest = z.size() > 22 + 65535 ? z.size() - 22 - 65535 : 0;
   for (std::size_t p = z.size() - 22 + 1; p-- > lowest;) {
@@ -209,7 +209,16 @@ bool read_zip(std::span<const std::uint8_t> z, const ZipPolicy &policy, std::map
   }
   if (at != eocd) { error = "the archive directory has unexpected trailing bytes"; return false; }
   std::size_t total_uncompressed = 0;
-  for (auto &[name, e] : entries) {
+  std::vector<std::pair<const std::string, ZipEntry> *> order;
+  for (auto &item : entries) order.push_back(&item);
+  if (policy.manifest_gate != nullptr) {
+    const auto manifest = std::find_if(order.begin(), order.end(), [](const auto *item) { return item->first == "manifest.json"; });
+    if (manifest == order.end()) { error = "the package has no manifest.json"; return false; }
+    std::rotate(order.begin(), manifest, manifest + 1);
+  }
+  for (auto *item : order) {
+    const std::string &name = item->first;
+    ZipEntry &e = item->second;
     const std::size_t limit = name == "manifest.json" ? policy.manifest_limit : policy.entry_limit;
     if (e.usize > limit) { *code = "E_ARCHIVE_SIZE"; error = "an archive entry is larger than allowed"; return false; }
     total_uncompressed += e.usize;
@@ -233,6 +242,11 @@ bool read_zip(std::span<const std::uint8_t> z, const ZipPolicy &policy, std::map
       return false;
     }
     if (crc32(e.data) != e.crc) { error = "an archive entry fails its CRC-32 check"; return false; }
+    if (policy.manifest_gate != nullptr && name == "manifest.json" && !policy.manifest_gate(e.data)) {
+      *code = "E_ARCHIVE_SIZE";
+      error = "an archive over 32 MiB is legal only when every payload is a disc kind";
+      return false;
+    }
   }
   std::sort(ranges.begin(), ranges.end());
   for (std::size_t i = 1; i < ranges.size(); ++i)
