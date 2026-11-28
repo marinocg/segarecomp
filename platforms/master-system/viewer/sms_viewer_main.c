@@ -147,6 +147,13 @@ static void state_setup(SmsSdl3Viewer *viewer, const SmsViewerOptions *options) 
   const char *variant = getenv("SEGARECOMP_SAVE_VARIANT");
   const char *off = getenv("SEGARECOMP_REWIND");
   const char *slots_reason = NULL;
+#ifdef SEGARECOMP_SET_IDENTITY
+  char set_save_dir[1100];   /* SEG-141-T005 (ADR 0327): a mod-set program keeps its state slots in its own namespace */
+  if (save_dir != NULL && *save_dir != '\0') {
+    const int n = snprintf(set_save_dir, sizeof set_save_dir, "%s/sets/%s", save_dir, SEGARECOMP_SET_IDENTITY);
+    save_dir = n > 0 && (size_t)n < sizeof set_save_dir ? set_save_dir : NULL;
+  }
+#endif
   memset(&cfg, 0, sizeof cfg);
   cfg.rig = &rig;
   cfg.rewind_budget_bytes = SV_STATE_REWIND_BUDGET_BYTES;
@@ -163,6 +170,10 @@ static void state_setup(SmsSdl3Viewer *viewer, const SmsViewerOptions *options) 
   {  /* the identity is the same whether or not a save folder exists: a state taken in memory (rewind) and one on disk describe the same game */
     int have_source = parse_hex32(getenv("SEGARECOMP_ROM_SHA256"), cfg.identity.source_sha256);
     int have_variant = variant == NULL || *variant == '\0' || strcmp(variant, "vanilla") == 0 || parse_hex32(variant, cfg.identity.variant_sha256);
+#if defined(SEGARECOMP_SET_IDENTITY) && !defined(SEGARECOMP_SMS_MOD)
+    /* A set without a script or native member carries no mod identity of its own: the set's composite identity is the variant, whatever SEGARECOMP_SAVE_VARIANT says. */
+    have_variant = parse_hex32(SEGARECOMP_SET_IDENTITY, cfg.identity.variant_sha256);
+#endif
 #if defined(SEGARECOMP_SMS_MOD)
     /* A program with a mod knows its own identity (the effective image it was built from and the package it links), and that identity is authoritative: external SEGARECOMP_ROM_SHA256 and
      * SEGARECOMP_SAVE_VARIANT values are ignored, so no environment can record this program's states as another game or version. */

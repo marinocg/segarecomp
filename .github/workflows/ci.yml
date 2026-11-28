@@ -209,13 +209,17 @@ jobs:
             gui)  ctest --test-dir build/sdl3 -j 4 -R "$heavy" --no-tests=error --output-on-failure --timeout 1500 ;;
             rest) ctest --test-dir build/sdl3 -j 4 -R "$selection" -E "$heavy" --no-tests=error --output-on-failure --timeout 1500 ;;
             f28)
-              # F28 acceptance (SEG-138-T010/T011, SEG-140-T008/T009/T010): the generated-native SDL3 viewer suites (dummy video/audio, explicit instruction budgets). All eight (the six F28 suites, SEG-138-T012's hook suite and F16's optional-audio suite) MUST exist and run on Linux:
+              # F28 acceptance (SEG-138-T010/T011, SEG-140-T008/T009/T010): the generated-native SDL3 viewer suites (dummy video/audio, explicit instruction budgets). All ten (the six F28 suites, SEG-138-T012's hook suite, F16's optional-audio suite and F20's Genesis and Master System mod-set suites) MUST exist and run on Linux:
               # a missing registration or a test that reports itself skipped fails the job, never passes silently.
-              f28='^(mod_viewer_gameplay_test|mod_native_viewer_test|mod_vsprite_viewer_test|mod_vsprite_wide_test|mod_vsprite_abi2_test|mod_f28_integration_test|mod_hooks_build_test|mod_audio_optional_test)$'
+              f28='^(mod_viewer_gameplay_test|mod_native_viewer_test|mod_vsprite_viewer_test|mod_vsprite_wide_test|mod_vsprite_abi2_test|mod_f28_integration_test|mod_hooks_build_test|mod_audio_optional_test|mod_set_build_test|mod_set_sms_test)$'
               count=$(ctest --test-dir build/sdl3 -N -R "$f28" | sed -n 's/^Total Tests: //p')
-              [ "$count" = "8" ] || { echo "expected 8 F28/T012/F16 acceptance tests, found $count"; exit 1; }
+              [ "$count" = "10" ] || { echo "expected 10 F28/T012/F16/F20 acceptance tests, found $count"; exit 1; }
               ctest --test-dir build/sdl3 -j 2 -R "$f28" --no-tests=error --output-on-failure --timeout 1500 -V | tee f28.log
-              grep -q 'tests passed, 0 tests failed out of 8' f28.log || { echo "the eight F28/T012/F16 tests did not all pass"; exit 1; }
+              grep -q 'tests passed, 0 tests failed out of 10' f28.log || { echo "the ten F28/T012/F16/F20 tests did not all pass"; exit 1; }
+              grep -q 'mod_set_sms_test: SDL3 viewer section ran' f28.log || { echo "the SDL3 section of mod_set_sms_test did not run"; exit 1; }
+              grep -q 'mod_set_build_test: SDL3 battery SRAM section ran' f28.log || { echo "the SDL3 battery SRAM section of mod_set_build_test did not run"; exit 1; }
+              grep -q 'mod_set_build_test: SDL3 session section ran' f28.log || { echo "the SDL3 recording/replay section of mod_set_build_test did not run"; exit 1; }
+              grep -q 'mod_set_build_test: SDL3 viewer section ran' f28.log || { echo "the SDL3 section of mod_set_build_test did not run"; exit 1; }
               grep -q 'mod_audio_optional_test: SDL3 viewer section ran' f28.log || { echo "the SDL3 optional-audio section of mod_audio_optional_test did not run"; exit 1; }
               grep -q 'mod_hooks_build_test: SDL3 viewer section ran' f28.log || { echo "the SDL3 hook-execution section of mod_hooks_build_test did not run"; exit 1; }
               if grep -Eiq '(mod_[a-z0-9_]+_test): skipped' f28.log; then echo "an F28 test skipped itself"; exit 1; fi ;;

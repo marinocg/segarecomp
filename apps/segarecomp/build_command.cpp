@@ -1,5 +1,7 @@
 #include "build_command.hpp"
 #include "luau_build.hpp"
+#include "mod_set_build.hpp"
+#include "output_guard.hpp"
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/mod.hpp"
 #include "segarecomp/mod_set.hpp"
@@ -152,9 +154,19 @@ struct Options {
   // and driven by the same scheduler. `--native-identity` is the exact identity the user approved; a package whose identity differs is refused (`NATIVE_IDENTITY_CHANGED`). Native code is host code: approval is the boundary.
   fs::path native_package;
   std::string native_identity;
+  // SEG-141 (ADR 0327): an ordered mod set. `--set-package` / `--set-identity` are repeated in SET ORDER; each identity is the exact package the user selected (and, for native code, approved). `--rom` stays
+  // the original image. Exclusive with every other package option.
+  std::vector<fs::path> set_packages;
+  std::vector<std::string> set_identities;
   bool frame_seam = false;   // `--test-frame-seam`: compiles the final-frame automation seam into the viewer program (tests only; never set by the launcher)
   // resolved by the verification step
   bool luau = false;
+  bool mod_set = false;              // a program that runs a mod set (at least one member has a provider)
+  struct SetUnit { fs::path source; std::string digest; unsigned abi_minor; std::size_t member; fs::path include; };
+  std::vector<SetUnit> set_units;    // every native member's staged .c units
+  fs::path set_artifact;             // the generated member table
+  std::string set_status;            // its status.json member
+  std::string set_save_identity;     // the composite identity of ANY set build (with or without a provider): the played program's save namespace (SEG-141-T005)
   bool native_mod = false;           // SEG-138-T011: the scheduled mod is a native ABI 2 provider (no Luau VM)
   bool native_frame_state = false;   // W04 gap B: the provider was granted frame.work_ram (the producer then verifies the frame's state epoch and may admit game-art virtual sprites)
   bool native_frame_vdp = false;     // SEG-152-T003 (ADR 0320): the provider REQUIRED frame.vdp: its render callback runs at the producer seam with an immutable frame view
@@ -280,6 +292,8 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--test-hook-binding") options.test_hook_binding = value;
     else if (key == "--data-package") { if (!options.data_package.empty()) return std::nullopt; options.data_package = fs::path(value); }
     else if (key == "--data-identity") { if (!options.data_identity.empty()) return std::nullopt; options.data_identity = value; }
+    else if (key == "--set-package" && options.set_packages.size() < 16) options.set_packages.emplace_back(value);
+    else if (key == "--set-identity" && options.set_identities.size() < 16) options.set_identities.push_back(value);
     else if (key == "--luau-package") { if (!options.luau_package.empty()) return std::nullopt; options.luau_package = fs::path(value); }
     else if (key == "--luau-identity") { if (!options.luau_identity.empty()) return std::nullopt; options.luau_identity = value; }
     else if (key == "--native-package") { if (!options.native_package.empty()) return std::nullopt; options.native_package = fs::path(value); }
@@ -300,6 +314,12 @@ std::optional<Options> parse_options(int argc, char **argv) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
     if (!hex64(options.patch_identity) || options.platform == "master-system" || !options.sdl3_include.has_value()) return std::nullopt;   // a presentation provider needs the Genesis viewer build
   }
+  if (options.set_packages.size() != options.set_identities.size()) return std::nullopt;
+  if (!options.set_packages.empty()) {
+    const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
+    if (!std::all_of(options.set_identities.begin(), options.set_identities.end(), hex64) || !options.data_package.empty() || !options.luau_package.empty() || !options.native_package.empty() || !options.patch_package.empty() ||
+        !options.test_hook_binding.empty() || options.mapper_manifest) return std::nullopt;
+  }
   if (options.data_package.empty() != options.data_identity.empty()) return std::nullopt;   // a package reference and its identity travel together
   if (!options.data_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
@@ -316,6 +336,16 @@ std::optional<Options> parse_options(int argc, char **argv) {
     if (!hex64(options.native_identity) || !options.luau_package.empty() || !options.patch_package.empty()) return std::nullopt;   // one mod; the verified package's platform selects the route
   }
   return options;
+}
+
+// ADR 0327: E_SET_NATIVE_LINK names ONE cause: two native members define the same symbol. Any other link failure keeps the ordinary diagnostic.
+bool set_symbol_collision(const Options &options, const fs::path &link_log) {
+  std::set<std::size_t> native_members;
+  for (const auto &unit : options.set_units) native_members.insert(unit.member);
+  if (!options.mod_set || native_members.size() < 2U) return false;
+  std::ifstream in(link_log, std::ios::binary);
+  const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  return text.find("multiple definition") != std::string::npos || text.find("duplicate symbol") != std::string::npos || text.find("already defined") != std::string::npos;
 }
 
 // Runs every compile job with a small worker pool; returns the first failing job index or -1.
@@ -1294,10 +1324,18 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (build.play)
     build.c_base.insert(build.c_base.end(), {"-I", build.viewer.string(), "-I", (build.root / "libs" / "viewer" / "include").string(), "-I",
                                              (build.root / "libs" / "viewer" / "src").string(), "-I", options.sdl3_include->string()});
+  if (!options.set_save_identity.empty()) build.c_base.push_back("-DSEGARECOMP_SET_IDENTITY=\"" + options.set_save_identity + "\"");
   if (!options.native_source.empty()) {
     build.c_isolated = {options.cc};
     build.c_isolated.insert(build.c_isolated.end(), options.cc_args.begin(), options.cc_args.end());
     build.c_isolated.insert(build.c_isolated.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", opt, "-I", (options.runtime_dir / "sdk").string()});
+  }
+  if (options.mod_set) {   // ADR 0327: the same host-owned flags; the ABI minor and the include path are each member's own (per job)
+    build.c_native_mod = {options.cc};
+    build.c_native_mod.insert(build.c_native_mod.end(), options.cc_args.begin(), options.cc_args.end());
+    for (const std::string_view flag : segarecomp::mod::kNativeCompileFlags)
+      if (flag != "-c") build.c_native_mod.emplace_back(flag);
+    build.c_native_mod.insert(build.c_native_mod.end(), {"-DSEGA_MOD_TARGET_PLATFORM=1", "-DSEGA_MOD_TARGET_ABI_MAJOR=2U", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
   }
   if (options.native_mod) {   // SEG-138-T011: the SAME host-owned flags `mod check` / `mod build` validate with (-c is added per job), the target defines of the package's platform, the SDK headers and the package's own tree
     build.c_native_mod = {options.cc};
@@ -1394,6 +1432,33 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       final_only.push_back(job.object);
     }
   };
+  // ADR 0327: what a mod-set program links: the Luau VM and phase adapter, the ONE scheduler and the multi-member host adapter, the generated member table and every native member's own units, each compiled with
+  // its entry symbol renamed to the member's (two members whose other external symbols collide do not link).
+  const auto add_mod_set = [&](const std::string &viewer_define) {
+    const std::vector<std::string> flags = add_luau_runtime();
+    add(final_only, build.root / "libs" / "luau_host" / "src" / "luau_phase_provider.cpp", "luau-phase-provider", flags, true);
+    add(final_only, build.root / "libs" / "media" / "src" / "mod_adapter.cpp", "luau-mod-adapter", flags, true);
+    add(final_only, build.viewer / "mod_capture.cpp", "mod-set-host", [&] {
+      auto f = flags;
+      f.insert(f.end(), {"-DSEGARECOMP_MOD_SET=1", "-I", build.runtime.string(), "-I", build.viewer.string(), "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
+      if (!viewer_define.empty()) f.push_back(viewer_define);
+      if (!options.hook_plan_file.empty()) f.push_back("-DSEGARECOMP_MOD_HOOKS=1");
+      return f;
+    }(), true);
+    add(final_only, build.runtime / "mod_scheduler.c", "mod-scheduler", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
+    add(final_only, options.set_artifact, "mod-set-artifact", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
+    std::size_t index = 0;
+    for (const auto &unit : options.set_units) {
+      CompileJob job;
+      job.source = unit.source;
+      job.object = build.object_dir / ("set-mod-unit" + std::to_string(index++) + ".o");
+      job.native_mod = true;
+      job.verify_sha256 = unit.digest;
+      job.extra = {"-DSEGA_MOD_TARGET_ABI_MINOR=" + std::to_string(unit.abi_minor) + "U", "-I", unit.include.string(), "-Dsegarecomp_mod_provider=segarecomp_mod_provider_m" + std::to_string(unit.member)};
+      stable.push_back(job);
+      final_only.push_back(job.object);
+    }
+  };
   if (build.play) {
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
     add(final_only, build.runtime / "virtual_sprite.c", "virtual-sprite");   // SEG-140-T008: the F14 compositor the played program's viewer adapter runs for a provider's virtual sprites
@@ -1406,7 +1471,10 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
     for (const char *name : kViewerFoundationSources)
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);
-    if (options.native_mod) {
+    if (options.mod_set) {
+      add_mod_set("-DSEGARECOMP_MOD_VIEWER=1");
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::to_string(8U | (options.native_frame_state ? 1U : 0U) | (options.native_frame_vdp ? 2U : 0U) | (options.native_scenery ? 4U : 0U)) + "U", "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
+    } else if (options.native_mod) {
       // SEG-138-T011 (ADR 0305): the played program drives a native ABI 2 provider through the SAME scheduler and presenter seam; no Luau VM is linked, only the overlay rasterizer and rules it shares.
       const std::vector<std::string> flags = native_mod_cxx_flags();
       add_native_mod_common(flags, "-DSEGARECOMP_MOD_VIEWER=1");
@@ -1437,12 +1505,18 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   } else {
     // SEG-146-T006: --record/--replay checkpoints hash the whole machine (the snapshot container, which also carries a scheduled mod's state when one is attached).
     add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound",
-        options.native_mod || options.luau ? std::vector<std::string>{"-DSEGARECOMP_SESSION_MACHINE_DIGEST", "-DSEGARECOMP_SESSION_MACHINE_MOD"} : std::vector<std::string>{"-DSEGARECOMP_SESSION_MACHINE_DIGEST"});
+        options.native_mod || options.luau || options.mod_set ? std::vector<std::string>{"-DSEGARECOMP_SESSION_MACHINE_DIGEST", "-DSEGARECOMP_SESSION_MACHINE_MOD"} : std::vector<std::string>{"-DSEGARECOMP_SESSION_MACHINE_DIGEST"});
     // SEG-068-T007: the sound hook delegates its run loop to the existing headless frame capture when SEGARECOMP_CAPTURE_DIR is
     // set (one guest execution for frames and the sound summary), so the existing renderer/exporter/capture objects are linked.
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
     add(final_only, build.runtime / "frame_export.c", "frame-export");
-    if (options.native_mod) {
+    if (options.mod_set) {
+      add_mod_set("");
+      for (const char *name : {"sv_font.c", "sv_font_data.c"})
+        add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name, {"-I", (build.root / "libs" / "viewer" / "src").string()});
+      add(final_only, build.runtime / "genesis_snapshot.c", "genesis-snapshot", {"-DSEGARECOMP_GENESIS_SOUND"});
+      add(final_only, build.viewer / "frame_capture.c", "frame-capture", {"-DSEGARECOMP_CAPTURE_MOD=1"});
+    } else if (options.native_mod) {
       // SEG-138-T011: the headless program drives the native provider through the same capture seam as a Luau mod.
       const std::vector<std::string> flags = native_mod_cxx_flags();
       add_native_mod_common(flags, "");
@@ -1747,7 +1821,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   objects.insert(objects.end(), common.begin(), common.end());
   objects.insert(objects.end(), final_only.begin(), final_only.end());
   objects.insert(objects.end(), build.z80_current.begin(), build.z80_current.end());
-  if (options.luau || options.native_mod)   // the final program links the platform's C++ runtime (the Luau VM needs it), which defines operator new itself: the shim of the C-driver pass links must not be there too
+  if (options.luau || options.native_mod || options.mod_set)   // the final program links the platform's C++ runtime (the Luau VM needs it), which defines operator new itself: the shim of the C-driver pass links must not be there too
     objects.erase(std::remove(objects.begin(), objects.end(), build.object_dir / "ym-shim.o"), objects.end());
   stage("compile", "done");
   stage("link", "begin");
@@ -1756,8 +1830,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
 #else
   executable = options.output / "game";
 #endif
-  build.cxx_link = options.luau || options.native_mod;
-  if (!build.link(executable, objects, build.play)) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
+  build.cxx_link = options.luau || options.native_mod || options.mod_set;
+  if (!build.link(executable, objects, build.play))
+    return set_symbol_collision(options, build.object_dir / (executable.filename().string() + ".link.log"))
+               ? fail(options, log, sha, "link", 3, "The mod set program could not be linked: two native mods may define the same external symbol (see build.log).", "E_SET_NATIVE_LINK")
+               : fail(options, log, sha, "link", 3, "The native program could not be linked.");
   const std::uint64_t exe_bytes = fs::file_size(executable, ec);
   if (g_profile.enabled()) {
     std::vector<std::string> final_set, pass_set;
@@ -1844,6 +1921,21 @@ int segarecomp_build_command(int argc, char **argv) {
   const auto parsed = parse_options(argc, argv);
   if (!parsed) { std::cerr << "usage:\n" << segarecomp_build_usage; return 2; }
   Options options = *parsed;
+  if (!options.set_packages.empty() || !options.data_package.empty() || !options.luau_package.empty() || !options.native_package.empty()) {
+    // A package route writes <out>/input/effective.rom (and removes a stale one before anything else): no output of this build may be the original image or a package file. Nothing has been written yet,
+    // and nothing is written on a refusal (not even build.log or status.json, which may be the very file at risk).
+    std::vector<fs::path> inputs{options.rom, options.data_package, options.luau_package, options.native_package, options.patch_package};
+    inputs.insert(inputs.end(), options.set_packages.begin(), options.set_packages.end());
+    if (options.mapper_manifest) inputs.push_back(*options.mapper_manifest);
+    if (options.admission_plan) inputs.push_back(*options.admission_plan);
+    std::vector<fs::path> extra;
+    if (!options.performance_report.empty()) extra.push_back(options.performance_report);
+    if (const auto conflict = segarecomp_cli::build_output_conflict(options.output, inputs, extra)) {
+      std::cerr << "segarecomp: E_OUTPUT_IS_INPUT: " << *conflict << '\n';
+      std::cout << "@result failed stage=analyze class=E_OUTPUT_IS_INPUT message=" << *conflict << std::endl;
+      return 1;
+    }
+  }
   if (options.performance_report.empty()) return run_build(std::move(options));   // profiling off: exactly the unprofiled pipeline
   // SEG-125: profiling on. The report is written on every exit of the pipeline, marked complete / failed; a report that could not be written never changes the build's result.
   std::error_code mkdir_ec;
@@ -1979,6 +2071,76 @@ std::optional<SmsModRefusal> prepare_sms_mod(Options &options, Log &log, const s
   return std::nullopt;
 }
 
+// ADR 0327: verifies and prepares a mod set; `--rom` becomes the composed image. A set without any provider is an ordinary program of the composed image.
+std::optional<SmsModRefusal> prepare_set_route(Options &options, Log &log, const std::vector<std::uint8_t> &original, const std::string &original_sha) {
+  segarecomp_cli::SetBuild set = segarecomp_cli::prepare_mod_set(options.set_packages, options.set_identities, original);
+  if (!set.ok) {
+    for (const auto &v : set.violations) log.line("mod set violation: " + v.code + " " + v.message);
+    return SmsModRefusal{"The mod set cannot be built: " + set.message, set.code};
+  }
+  if (!options.platform.empty() && options.platform != set.platform) return SmsModRefusal{"The mod set targets another platform than --platform names.", "E_SET_PLATFORM"};
+  const bool sms_set = set.platform == "master-system";
+  if (sms_set && (options.admission_plan || (!options.mapper.empty() && options.mapper != set.mapper)))
+    return SmsModRefusal{"The mod set declares the cartridge mapper \"" + set.mapper + "\" for this image; another declaration conflicts with it.", "E_SET_SOURCE"};
+  std::error_code ec;
+  const fs::path input = options.output / "input";
+  fs::create_directories(input, ec);
+  std::ofstream image_out(input / "effective.rom", std::ios::binary | std::ios::trunc);
+  image_out.write(reinterpret_cast<const char *>(set.image.data()), static_cast<std::streamsize>(set.image.size()));
+  image_out.close();
+  if (ec || !image_out) return SmsModRefusal{"The composed image could not be written.", "E_SET_ARTIFACT_WRITE"};
+  options.rom = input / "effective.rom";
+  if (sms_set) { options.platform = "master-system"; options.mapper = set.mapper; }
+  options.set_status = segarecomp_cli::set_status_json(set);
+  options.set_save_identity = set.identity;
+  log.line("mod set: identity=" + set.identity + " original_sha256=" + original_sha + " effective_sha256=" + set.effective_sha256 + " members=" + std::to_string(set.packages.size()) + " running=" + std::to_string(set.runtime.size()));
+  if (set.runtime.empty()) return std::nullopt;
+  for (const auto &r : set.runtime)
+    if (r.native && std::find(r.granted.begin(), r.granted.end(), "frame.vdp") != r.granted.end() && set.packages[r.index].manifest.abi_minor < (sms_set ? 0U : 1U))
+      return SmsModRefusal{"A package that requires frame.vdp must declare abi.minor 1.", "E_CAPABILITY_INCONSISTENT"};
+  const fs::path dir = options.output / "set-mod";
+  if (!segarecomp_cli::stage_set_sources(set, dir))
+    return SmsModRefusal{"The native sources could not be staged: the output folder may already hold a set-mod folder this build did not create (it is never deleted), or it cannot be written.", "E_SET_ARTIFACT_WRITE"};
+  options.mod_set = true;
+  options.set_units.clear();
+  options.native_mod_units.clear();
+  for (const auto &r : set.runtime)
+    for (const auto &[path, digest] : r.units) {
+      options.native_mod_units.emplace_back(path, digest);   // every staged file is re-hashed immediately before the compiles
+      if (path.extension() == ".c") options.set_units.push_back({path, digest, static_cast<unsigned>(set.packages[r.index].manifest.abi_minor), r.index, r.source_dir});
+    }
+  options.set_artifact = dir / (sms_set ? "sms_mod_set_artifact.c" : "mod_set_artifact.c");
+  std::ofstream artifact(options.set_artifact, std::ios::binary | std::ios::trunc);
+  artifact << segarecomp_cli::set_artifact_source(set);
+  artifact.close();
+  if (!artifact) return SmsModRefusal{"The mod artifact could not be written.", "E_SET_ARTIFACT_WRITE"};
+  if (sms_set) {
+    options.sms_mod = true;
+    options.native_mod_dir = dir;
+  } else {
+    options.luau_scheduled = true;
+    if (set.drawing >= 0) {
+      const auto &r = set.runtime[static_cast<std::size_t>(set.drawing)];
+      const auto granted = [&](const char *name) { return std::find(r.granted.begin(), r.granted.end(), name) != r.granted.end(); };
+      options.native_scenery = granted("scenery.words");
+      options.native_frame_state = granted("frame.work_ram");
+      options.native_frame_vdp = granted("frame.vdp");
+      options.geometry_declaration = segarecomp::mod::geometry_declaration_text(set.packages[r.index].manifest);
+    }
+    if (!set.hook_plan.empty()) {
+      fs::create_directories(options.output / "hooks", ec);
+      options.hook_plan_file = options.output / "hooks" / "function_hooks.plan";
+      std::ofstream plan_out(options.hook_plan_file, std::ios::binary | std::ios::trunc);
+      plan_out << set.hook_plan;
+      plan_out.close();
+      if (ec || !plan_out) return SmsModRefusal{"The function-hook plan could not be written.", "E_SET_ARTIFACT_WRITE"};
+      for (const auto &r : set.runtime)
+        for (const auto &h : r.hooks) options.hook_bindings.emplace_back(h.id, h.hook_id);   // cross-checked against the generated site table
+    }
+  }
+  return std::nullopt;
+}
+
 int run_build(Options options) {
   std::error_code ec;
   fs::create_directories(options.output, ec);
@@ -1986,7 +2148,7 @@ int run_build(Options options) {
   Log log;
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
   // The effective image is derivative game data: removed when the build ends (and a stale one of a killed attempt is removed at the start). Only the file this build writes is removed, then the folder if empty.
-  struct InputCleanup { fs::path file; ~InputCleanup() { if (file.empty()) return; std::error_code e; fs::remove(file, e); fs::remove(file.parent_path(), e); } } input_cleanup{options.luau_package.empty() && options.native_package.empty() && options.data_package.empty() ? fs::path() : options.output / "input" / "effective.rom"};
+  struct InputCleanup { fs::path file; ~InputCleanup() { if (file.empty()) return; std::error_code e; fs::remove(file, e); fs::remove(file.parent_path(), e); } } input_cleanup{options.luau_package.empty() && options.native_package.empty() && options.data_package.empty() && options.set_packages.empty() ? fs::path() : options.output / "input" / "effective.rom"};
   if (!input_cleanup.file.empty()) { std::error_code stale; fs::remove(input_cleanup.file, stale); }
   if (options.admission_plan) {
     std::ifstream in(*options.admission_plan, std::ios::binary);
@@ -2012,6 +2174,11 @@ int run_build(Options options) {
   try {
     // ---- analyze ----
     stage("analyze", "begin");
+    if (!options.set_packages.empty()) {
+      const auto original = segarecomp::read_binary(options.rom);
+      const std::string original_sha = segarecomp::sha256_hex(original);
+      if (const auto refusal = prepare_set_route(options, log, original, original_sha)) return fail(options, log, original_sha, "analyze", 1, refusal->message, refusal->diagnostic);
+    }
     if (!options.native_package.empty() || !options.luau_package.empty()) {   // SEG-147-T004: the verified package's platform selects the Master System route; Genesis packages continue below unchanged
       const bool native = !options.native_package.empty();
       const auto original = segarecomp::read_binary(options.rom);
@@ -2435,6 +2602,7 @@ int run_build(Options options) {
         }
         status_extra += "]" + (options.geometry_declaration.empty() ? std::string() : ",\"geometry_declaration\":\"" + options.geometry_declaration + "\"") + "}";
       }
+      status_extra += options.set_status;
       if (options.luau)
         status_extra += ",\"luau\":{\"package_identity\":\"" + options.luau_identity + "\",\"original_sha256\":\"" + options.luau_original_sha256 + "\",\"effective_sha256\":\"" + options.luau_effective_sha256 +
                         "\",\"bytecode_digest\":\"" + options.luau_bytecode_digest + "\",\"compiler\":\"luau-" + std::string(segarecomp::luau::compiler_pin()) + "\",\"capabilities\":\"" + options.luau_capabilities + "\"" + (options.geometry_declaration.empty() ? std::string() : ",\"geometry_declaration\":\"" + options.geometry_declaration + "\"") + "}";
@@ -2479,6 +2647,7 @@ int run_build(Options options) {
         const fs::path viewer_lib = root / "libs" / "viewer";
         base.insert(base.end(), {"-I", viewer.string(), "-I", (viewer_lib / "include").string(), "-I", (viewer_lib / "src").string(), "-I",
                                  options.sdl3_include->string()});
+        if (!options.set_save_identity.empty()) base.push_back("-DSEGARECOMP_SET_IDENTITY=\"" + options.set_save_identity + "\"");
         for (const char *name : {"sms_viewer.c", "sms_snapshot.c", "sms_viewer_state.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, {}});
         // SEG-058 (ADR 0120): the shared SDL3 viewer foundation, compiled with the game exactly like the console adapter above.
         for (const char *name : kViewerFoundationSources) compile.push_back({viewer_lib / "src" / name, {}});
@@ -2491,12 +2660,23 @@ int run_build(Options options) {
         const fs::path mod_dir = options.runtime_dir / "mod";
         base.insert(base.end(), {"-DSEGARECOMP_SMS_MOD=1", "-I", mod_dir.string(), "-I", sdk.string(), "-I", core_sdk.string(), "-I", (viewer_lib / "include").string(), "-I", (viewer_lib / "src").string(), "-I", viewer.string()});
         for (const char *name : {"sms_mod_scheduler.c", "sms_mod_present.c", "sms_mod_host.c"}) compile.push_back({mod_dir / name, {}});
-        compile.push_back({options.native_mod_dir / "sms_mod_artifact.c", {}});
+        compile.push_back({options.mod_set ? options.set_artifact : options.native_mod_dir / "sms_mod_artifact.c", {}});
+        if (options.mod_set) base.push_back("-DSEGARECOMP_SMS_MOD_SET=1");
         if (!play) {   // the viewer foundation already links the font and the viewer the snapshot codec
           compile.push_back({options.runtime_dir / "headless" / "sms_headless_mod.c", {}});
           compile.push_back({viewer / "sms_snapshot.c", {}});
           for (const char *name : {"sv_font.c", "sv_font_data.c"}) compile.push_back({viewer_lib / "src" / name, {}});
         }
+        if (options.mod_set)   // ADR 0327: every native member's units, each with its own ABI minor, include path and renamed entry symbol; the Luau VM below is always linked into a set program
+          for (const auto &unit : options.set_units) {
+            std::vector<std::string> isolated{options.cc};
+            isolated.insert(isolated.end(), options.cc_args.begin(), options.cc_args.end());
+            for (const std::string_view flag : segarecomp::mod::kNativeCompileFlags)
+              if (flag != "-c") isolated.emplace_back(flag);
+            isolated.insert(isolated.end(), {"-O" + options.optimize, "-DSEGA_MOD_TARGET_PLATFORM=2", "-DSEGA_MOD_TARGET_ABI_MAJOR=2U", "-DSEGA_MOD_TARGET_ABI_MINOR=" + std::to_string(unit.abi_minor) + "U", "-I", sdk.string(),
+                                             "-I", core_sdk.string(), "-I", unit.include.string(), "-Dsegarecomp_mod_provider=segarecomp_mod_provider_m" + std::to_string(unit.member)});
+            compile.push_back({unit.source, {}, isolated, unit.digest});
+          }
         if (options.sms_mod_native) {   // the SAME host-owned flags `mod check` / `mod build` validate with, the Master System target defines, the SDK headers and the package's own tree only
           std::vector<std::string> isolated{options.cc};
           isolated.insert(isolated.end(), options.cc_args.begin(), options.cc_args.end());
@@ -2528,7 +2708,9 @@ int run_build(Options options) {
           for (const fs::path &source : vm_sources) compile.push_back({source, {}, vm_flags});
           for (const char *name : {"luau_vm.cpp", "luau_api.cpp", "luau_stored.cpp", "luau_phase_provider.cpp"}) compile.push_back({host / name, {}, flags});
           for (const char *name : {"sha256.cpp", "mod_adapter.cpp"}) compile.push_back({media / "src" / name, {}, flags});
-          compile.push_back({mod_dir / "sms_mod_luau.cpp", {}, flags});
+          std::vector<std::string> adapter_flags = flags;
+          if (options.mod_set) adapter_flags.push_back("-DSEGARECOMP_SMS_MOD_SET=1");
+          compile.push_back({mod_dir / "sms_mod_luau.cpp", {}, adapter_flags});
         }
       }
     }
@@ -2625,7 +2807,10 @@ int run_build(Options options) {
     log.line("$ (link)");
     log.line("# link target=" + executable.filename().string());
     log.append_file(link_log);
-    if (link_rc != 0) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
+    if (link_rc != 0)
+      return set_symbol_collision(options, link_log)
+                 ? fail(options, log, sha, "link", 3, "The mod set program could not be linked: two native mods may define the same external symbol (see build.log).", "E_SET_NATIVE_LINK")
+                 : fail(options, log, sha, "link", 3, "The native program could not be linked.");
     if (g_profile.enabled()) {
       std::vector<std::string> final_set;
       std::uint64_t generated_c = 0;
@@ -2637,7 +2822,7 @@ int run_build(Options options) {
     }
     fs::remove_all(object_dir, ec);
     stage("link", "done");
-    write_status(options, sha, "ok", "done", "", sms_provenance + data_status + options.sms_mod_status + sms_images + aot_policy_json(options, log, sha, false));
+    write_status(options, sha, "ok", "done", "", sms_provenance + data_status + options.sms_mod_status + options.set_status + sms_images + aot_policy_json(options, log, sha, false));
     std::cout << "@result ok executable=" << executable.string() << std::endl;
     return 0;
   } catch (const std::exception &error) {

@@ -7,6 +7,12 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Mod sets that run: several mods in one Genesis or Master System game (ADR 0327)
+
+* Developer preview: `segarecomp mod set build` builds an ordered set (typed edits, injected code, Luau scripts and native C11 mods) into one program. Mods run in set order with a chained controller input; a faulting mod is disabled alone; the whole set is saved, rewound and replayed together, and a state loads only into the same set. The played program keeps each set's saves in its own folder.
+* A replaced function now has exactly one owner (`E_SET_HOOK_OWNER`); `before`/`after` hooks of several mods share a function.
+* Limits, all refused with a stable class: one drawing mod per set, no audio API in sets, no Sega CD sets, no two native mods with the same external symbol. The launcher cannot select or play a set yet. Synthetic evidence only.
+
 ### Master System mods: gameplay scripting, saved state, presentation and PSG sound mods (ADR 0325)
 
 * Developer preview: Luau and native C11 (ABI 2 minor 5) mods now run in Master System programs built with `segarecomp build --luau-package` / `--native-package`: frame and input phases, pad interception, declared work-RAM reads and writes, and presentation-only HUD, palette mapping, picture offset and authored sprites. Mod state is part of save states and rewind. `mod test` runs Master System scenarios. A redistributable gameplay example (with a C11 twin) and a PSG sound-mod example are included ([guide](docs/product/master-system-mods.md)). The launcher does not install Master System mods yet; the FM unit stays unsupported.

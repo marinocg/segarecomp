@@ -67,8 +67,8 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Enhanced audio | Genesis / Mega Drive | unsupported | unsupported | planned: SEG-145-T009 |
 | Enhanced audio | Master System | unsupported | unsupported | planned: SEG-145-T009 |
 | Enhanced audio | Sega CD | unsupported | unsupported | planned: SEG-145-T009 |
-| Multiple-mod composition | Genesis / Mega Drive | unsupported | supported-with-limitations | planned: SEG-141-T006 |
-| Multiple-mod composition | Master System | unsupported | supported-with-limitations | planned: SEG-141-T007 |
+| Multiple-mod composition | Genesis / Mega Drive | supported-with-limitations | supported-with-limitations | `tests/mod_set_build_test.py`, `tests/genesis_mod_set_test.cpp`, `tests/mod_set_test.py` |
+| Multiple-mod composition | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_set_sms_test.py`, `tests/mod_set_test.py` |
 | Multiple-mod composition | Sega CD | unsupported | unsupported | planned: SEG-141-T008 |
 | Save states / rewind with mods | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/mod_viewer_gameplay_test.py`, `tests/mod_native_viewer_test.py` |
 | Save states / rewind with mods | Master System | supported-with-limitations | supported-with-limitations | `tests/sms_mod_scheduler_test.cpp`, `tests/mod_sms_lifecycle_test.py`, `tests/sms_viewer_mod_test.py`, `tests/mod_platform_conformance_test.cpp` |

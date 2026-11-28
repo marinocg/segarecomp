@@ -8,6 +8,10 @@ extern "C" {   // the SDK core declares the provider entry for C: this definitio
 #include "segarecomp/luau_phase_provider.hpp"
 
 #include <segarecomp_mod_sms.h>
+#ifdef SEGARECOMP_SMS_MOD_SET
+#include "sms_mod_set_artifact.h"
+#include <vector>
+#endif
 
 #include <cstddef>
 #include <cstdio>
@@ -15,20 +19,20 @@ extern "C" {   // the SDK core declares the provider entry for C: this definitio
 #include <string>
 
 extern "C" {
+#ifndef SEGARECOMP_SMS_MOD_SET
 extern const unsigned char segarecomp_luau_artifact[];
 extern const unsigned long segarecomp_luau_artifact_size;
 extern const char segarecomp_luau_bytecode_digest[];
 extern const unsigned long segarecomp_luau_memory_bytes, segarecomp_luau_budget_units;
 extern const char segarecomp_sms_mod_identity[];
 extern const char segarecomp_sms_mod_capabilities[];
+#endif
 void sms_mod_fault_current(const char *cause);   // sms_mod_scheduler.h
 }
 
 namespace {
 
 using namespace segarecomp;
-
-std::unique_ptr<luau::PhaseProvider> g_provider;
 
 const SegaMasterSystemFeatures *features_of(void *ctx) {
   return static_cast<const SegaMasterSystemFeatures *>(static_cast<const SegaModHost *>(ctx)->platform_features);
@@ -77,16 +81,17 @@ void fill(luau::HostServices &services) {
   services.vdp_byte = vdp_byte;
 }
 
-bool create() {
-  const std::span<const std::uint8_t> stored(segarecomp_luau_artifact, static_cast<std::size_t>(segarecomp_luau_artifact_size));
-  const luau::CompileResult loaded = luau::load_stored(segarecomp_sms_mod_identity, stored, segarecomp_luau_bytecode_digest);
+// One script VM from its stored form. Null = refused (reported).
+std::unique_ptr<luau::PhaseProvider> open_script(const char *identity, const unsigned char *artifact, std::size_t size, const char *bytecode_digest, const char *capabilities, std::size_t memory_bytes, std::size_t budget_units) {
+  const std::span<const std::uint8_t> stored(artifact, size);
+  const luau::CompileResult loaded = luau::load_stored(identity, stored, bytecode_digest);
   if (!loaded.ok) {
     std::fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\"}\n", loaded.rejection.code.c_str());
-    return false;
+    return nullptr;
   }
   luau::HostConfig host;
   host.platform = "master-system";
-  const std::string names = segarecomp_sms_mod_capabilities;
+  const std::string names = capabilities;
   for (std::size_t from = 0; from < names.size();) {
     std::size_t to = names.find(',', from);
     if (to == std::string::npos) to = names.size();
@@ -94,24 +99,51 @@ bool create() {
     from = to + 1;
   }
   luau::Limits limits = luau::policy_limits();   // a package may only lower the policy (the reader refused anything above it)
-  if (segarecomp_luau_memory_bytes != 0 && segarecomp_luau_memory_bytes < limits.memory_bytes) limits.memory_bytes = segarecomp_luau_memory_bytes;
-  if (segarecomp_luau_budget_units != 0 && segarecomp_luau_budget_units < limits.callback_units) limits.callback_units = segarecomp_luau_budget_units;
+  if (memory_bytes != 0 && memory_bytes < limits.memory_bytes) limits.memory_bytes = memory_bytes;
+  if (budget_units != 0 && budget_units < limits.callback_units) limits.callback_units = budget_units;
   std::string error;
-  g_provider = luau::PhaseProvider::create(segarecomp_sms_mod_identity, loaded.compiled, limits, host, sms_mod_fault_current, error);
-  if (g_provider == nullptr) {
+  std::unique_ptr<luau::PhaseProvider> provider = luau::PhaseProvider::create(identity, loaded.compiled, limits, host, sms_mod_fault_current, error);
+  if (provider == nullptr) {
     std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_VM_CREATE\"}\n");
-    return false;
+    return nullptr;
   }
-  g_provider->set_service_fill(fill);
-  return true;
+  provider->set_service_fill(fill);
+  return provider;
 }
 
 }  // namespace
 
+#ifdef SEGARECOMP_SMS_MOD_SET
+// SEG-141-T007: one VM per script member of a set; the VMs share nothing.
+namespace {
+std::vector<std::unique_ptr<luau::PhaseProvider>> g_scripts;
+}
+extern "C" const SegaModProvider *segarecomp_sms_mod_luau_open(const SegarecompSmsModMemberRow *row, void **state_out, std::uint32_t *phase_mask) {
+  std::unique_ptr<luau::PhaseProvider> p = open_script(row->identity, row->luau_artifact, static_cast<std::size_t>(row->luau_artifact_size), row->luau_bytecode_digest, row->capabilities,
+                                                       static_cast<std::size_t>(row->luau_memory_bytes), static_cast<std::size_t>(row->luau_budget_units));
+  if (p == nullptr) return nullptr;
+  *state_out = p->state();
+  *phase_mask = p->phase_mask();
+  g_scripts.push_back(std::move(p));
+  return g_scripts.back()->provider();
+}
+extern "C" int segarecomp_sms_mod_luau_nondeterministic(const void *state) {
+  for (const auto &p : g_scripts)
+    if (p->state() == state) return p->nondeterministic() ? 1 : 0;
+  return 0;
+}
+#else
+namespace {
+std::unique_ptr<luau::PhaseProvider> g_provider;
+}
 extern "C" const SegaModProvider *segarecomp_mod_provider(void **state_out) {
-  if (g_provider == nullptr && !create()) return nullptr;
+  if (g_provider == nullptr)
+    g_provider = open_script(segarecomp_sms_mod_identity, segarecomp_luau_artifact, static_cast<std::size_t>(segarecomp_luau_artifact_size), segarecomp_luau_bytecode_digest, segarecomp_sms_mod_capabilities,
+                             static_cast<std::size_t>(segarecomp_luau_memory_bytes), static_cast<std::size_t>(segarecomp_luau_budget_units));
+  if (g_provider == nullptr) return nullptr;
   if (state_out != nullptr) *state_out = g_provider->state();
   return g_provider->provider();
 }
 extern "C" std::uint32_t segarecomp_sms_mod_phase_mask(void) { return g_provider != nullptr ? g_provider->phase_mask() : 0U; }
 extern "C" int segarecomp_sms_mod_nondeterministic(void) { return g_provider != nullptr && g_provider->nondeterministic() ? 1 : 0; }
+#endif

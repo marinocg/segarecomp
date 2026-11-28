@@ -12,7 +12,12 @@
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/sha256.hpp"
 #include "mod_scenery_window.hpp"
-#ifndef SEGARECOMP_MOD_NATIVE
+// SEG-141-T003 (ADR 0327): a program with several mods (SEGARECOMP_MOD_SET) links both provider kinds; a single-mod program links exactly the one it carries.
+#if defined(SEGARECOMP_MOD_NATIVE) || defined(SEGARECOMP_MOD_SET)
+#define SEGARECOMP_MOD_HAS_NATIVE 1
+#endif
+#if !defined(SEGARECOMP_MOD_NATIVE) || defined(SEGARECOMP_MOD_SET)
+#define SEGARECOMP_MOD_HAS_LUAU 1
 #include "segarecomp/luau_phase_provider.hpp"
 #endif
 
@@ -25,8 +30,10 @@ extern "C" {
 #include "genesis_snapshot.h"
 #include "mod_scheduler.h"
 #include "runtime.h"
+#include "mod_set_artifact.h"
 }
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -38,15 +45,13 @@ extern "C" {
 #include <vector>
 
 extern "C" {
+#ifndef SEGARECOMP_MOD_SET
 #ifdef SEGARECOMP_MOD_NATIVE
 extern const char segarecomp_mod_identity[];             // package identity (64 hex)
 extern const char segarecomp_mod_capabilities[];         // comma separated catalogue names the build granted
 extern const char segarecomp_mod_id[];
 extern const unsigned long long segarecomp_mod_caps_required[2], segarecomp_mod_caps_optional[2];   // bitsets by capability id
 const SegaModProvider *segarecomp_mod_provider(void **state_out);                                    // the package's ABI 2 entry symbol
-#define MOD_IDENTITY segarecomp_mod_identity
-#define MOD_CAPABILITIES segarecomp_mod_capabilities
-#define MOD_ID segarecomp_mod_id
 #else
 extern const unsigned char segarecomp_luau_artifact[];
 extern const unsigned long segarecomp_luau_artifact_size;
@@ -55,12 +60,8 @@ extern const char segarecomp_luau_bytecode_digest[];
 extern const char segarecomp_luau_capabilities[];
 extern const unsigned long segarecomp_luau_memory_bytes, segarecomp_luau_budget_units;
 extern const char segarecomp_luau_mod_id[];
-#define MOD_IDENTITY segarecomp_luau_identity
-#define MOD_CAPABILITIES segarecomp_luau_capabilities
-#define MOD_ID segarecomp_luau_mod_id
 #endif
 // The scheduled-path constants (written by the build next to the artifact).
-extern const char segarecomp_mod_effective_sha256[];
 extern const unsigned long segarecomp_mod_state_schema;
 extern const unsigned long segarecomp_mod_range_count;
 extern const unsigned long segarecomp_mod_ranges[][4];   // space, offset, length, modes
@@ -68,17 +69,21 @@ extern const unsigned long segarecomp_mod_ranges[][4];   // space, offset, lengt
 #ifdef SEGARECOMP_MOD_NATIVE
 extern const unsigned char segarecomp_mod_rom_data[];
 #endif
+#endif
+extern const char segarecomp_mod_effective_sha256[];
 #ifdef SEGARECOMP_MOD_AUDIO
 // SEG-145-T008: the package's declared command/event mappings, one row per (mapping, value). Only a program built from a package that declares them defines and compiles these.
 struct segarecomp_mod_audio_row { const char *mapping; const char *name; unsigned long kind, offset, width, value; };
 extern const unsigned long segarecomp_mod_audio_count;
 extern const segarecomp_mod_audio_row segarecomp_mod_audio[];
 #endif
-#if defined(SEGARECOMP_MOD_NATIVE) && defined(SEGARECOMP_MOD_HOOKS)
+#ifdef SEGARECOMP_MOD_HOOKS
+#ifndef SEGARECOMP_MOD_SET
 // SEG-138-T012 (ADR 0308): the function hooks of the built program: the artifact's bindings (generated site id, the hook id the provider is called with), the hook phases it registers, and the generated site table.
 extern const unsigned long segarecomp_mod_hook_count, segarecomp_mod_hook_phases;
 struct segarecomp_mod_hook_binding { const char *id; unsigned long hook_id; };
 extern const segarecomp_mod_hook_binding segarecomp_mod_hooks[];
+#endif
 const GenesisHookSiteInfo *genesis_generated_hook_sites(size_t *count);
 #endif
 }
@@ -87,11 +92,29 @@ namespace {
 
 using namespace segarecomp;
 
+// One running mod: its row of the artifact and everything that is its own. The scheduler instance is where its grants, ranges, staged effects, fault, witness and state live.
+struct Member {
+  SegarecompModMemberRow row{};
+#ifdef SEGARECOMP_MOD_HAS_LUAU
+  std::unique_ptr<luau::PhaseProvider> luau;
+#endif
+  SegaModProvider native_table{};            // the package's provider table (for the drawing mod: with `phase` wrapped)
+  std::unique_ptr<GenesisModScheduler> scheduler{std::make_unique<GenesisModScheduler>()};
+  GenesisModRange ranges[GENESIS_MOD_RANGES_MAX]{};
+  GenesisModHookBinding bindings[GENESIS_MOD_HOOKS_MAX]{};   // SEG-138-T012: must outlive the scheduler
+  GenesisModHookScope scopes[GENESIS_MOD_HOOKS_MAX]{};
+  bool native() const { return row.native_entry != nullptr; }
+};
+
+// The program's mods and the render output of the ONE mod that draws (`lead`): a build refuses a set in which two mods declare presentation output (ADR 0327).
 struct Mod {
-#ifndef SEGARECOMP_MOD_NATIVE
-  std::unique_ptr<luau::PhaseProvider> provider;
-#else
-  SegaModProvider wrapper{};                 // the package's provider table with `phase` replaced (render output commit)
+  std::vector<std::unique_ptr<Member>> members;
+  Member *lead = nullptr;
+  std::unique_ptr<GenesisModSet> set;
+#ifdef SEGARECOMP_MOD_HAS_LUAU
+  luau::PhaseProvider *provider = nullptr;   // the lead's script provider; null when the lead is native
+#endif
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
   void (*native_phase_entry)(void *, const SegaModHost *) = nullptr;
   luau::Output staged, visible;              // the render callback in flight / the last committed render output
   int target = 0;
@@ -118,10 +141,8 @@ struct Mod {
   std::int64_t staged_left_px = -1, visible_left_px = -1;
   std::uint32_t staged_left_margin = 0, visible_left_margin = 0;
 #endif
-  std::unique_ptr<GenesisModScheduler> scheduler;
+  GenesisModScheduler *scheduler = nullptr;   // the lead's
   GenesisSnapshotModState snapshot{};
-  GenesisModRange ranges[GENESIS_MOD_RANGES_MAX]{};
-  GenesisModHookBinding bindings[GENESIS_MOD_HOOKS_MAX]{};   // SEG-138-T012: must outlive the scheduler
   GenesisModAudioEntry audio[GENESIS_MOD_AUDIO_ENTRIES_MAX]{};
   std::string fault_text;
   bool attached = false;
@@ -160,14 +181,23 @@ void log_sink(void *, const char *line, std::uint32_t length) {
   std::fprintf(stderr, "MOD_LOG {\"line\":\"%s\"}\n", json_escaped(std::string(line, length)).c_str());
 }
 
-void identity_bytes(std::uint8_t out[32]) {
-  for (unsigned i = 0; i < 32U; ++i) out[i] = static_cast<std::uint8_t>(std::strtoul(std::string(MOD_IDENTITY + i * 2U, 2U).c_str(), nullptr, 16));
+void hex_bytes(const char *text, std::uint8_t out[32]) {
+  for (unsigned i = 0; i < 32U; ++i) out[i] = static_cast<std::uint8_t>(std::strtoul(std::string(text + i * 2U, 2U).c_str(), nullptr, 16));
+}
+
+// A saved state belongs to the effective image and to the variant: one mod's package identity, or a set's composite identity (membership, order, member builds and the composed image).
+const char *variant_identity_text() {
+#ifdef SEGARECOMP_MOD_SET
+  return segarecomp_mod_set_identity;
+#else
+  return g.lead->row.identity;
+#endif
 }
 
 void snapshot_identity(GenesisSnapshotIdentity &id) {
   std::memset(&id, 0, sizeof id);
-  for (unsigned i = 0; i < 32U; ++i) id.source_sha256[i] = static_cast<std::uint8_t>(std::strtoul(std::string(segarecomp_mod_effective_sha256 + i * 2U, 2U).c_str(), nullptr, 16));
-  identity_bytes(id.variant_sha256);
+  hex_bytes(segarecomp_mod_effective_sha256, id.source_sha256);
+  hex_bytes(variant_identity_text(), id.variant_sha256);
 }
 
 
@@ -182,14 +212,17 @@ struct RenderView {
   std::uint32_t declined, decline_reason;   // SEG-152-T006: the non-fault decline of the committed callback (native route only)
 };
 RenderView render_view() {
-#ifdef SEGARECOMP_MOD_NATIVE
+#ifdef SEGARECOMP_MOD_HAS_LUAU
+  if (g.provider != nullptr) return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene(), &g.provider->sprites(), nullptr, 0, 0, 0U, 0U};
+#endif
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
   return {&g.visible.overlay, &g.visible.layers, &g.visible.scene, &g.visible.sprites, g.have_visible_set ? g.visible_set.get() : nullptr, g.visible.fallback_x, g.visible.fallback_y, g.visible.declined, g.visible.decline_reason};
 #else
-  return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene(), &g.provider->sprites(), nullptr, 0, 0, 0U, 0U};
+  std::abort();   // a Luau-only program always has a script provider here
 #endif
 }
 
-#ifdef SEGARECOMP_MOD_NATIVE
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
 // ---- SEG-138-T011: the typed ABI 2 render API (SegaGenesisRenderApi). The rules are luau_api.cpp's (shared with the Luau bindings); a refusal is a fault of the callback with the scheduler's stable cause. ----
 bool in_render() { return g.scheduler != nullptr && g.scheduler->in_callback != 0U && g.scheduler->phase == SEGA_MOD_PHASE_RENDER; }
 int refused_phase() { genesis_mod_fault_current("phase"); return SEGA_MOD_E_PHASE; }
@@ -402,83 +435,138 @@ void wrapped_phase(void *state, const SegaModHost *host) {
 
 extern "C" {
 
-// 0 = the mod is attached (or there is none to attach); nonzero = refused (the program must not run a half-configured mod: the caller exits).
-int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
-  g.scheduler = std::make_unique<GenesisModScheduler>();
-  GenesisModConfig c{};
-  c.mod_id = MOD_ID;
+}  // extern "C"
+
+namespace {
+
+bool refuse_begin(const std::string &cls) {
+  g.refused = true; g.refusal = cls;
+  std::fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\"}\n", cls.c_str());
+  return false;
+}
+
+// The rows of the program's mods, in set order. A single-mod program describes its own artifact symbols as one row.
+std::vector<SegarecompModMemberRow> artifact_rows() {
+#ifdef SEGARECOMP_MOD_SET
+  return std::vector<SegarecompModMemberRow>(segarecomp_mod_set_members, segarecomp_mod_set_members + segarecomp_mod_set_count);
+#else
+  SegarecompModMemberRow row{};
 #ifdef SEGARECOMP_MOD_NATIVE
-  void *native_state = nullptr;
-  const SegaModProvider *native = segarecomp_mod_provider(&native_state);
-  if (native == nullptr || native->phase == nullptr) { g.refused = true; g.refusal = "E_ABI_ENTRY_MISSING"; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_ABI_ENTRY_MISSING\"}\n"); return 1; }
-  std::memcpy(&g.wrapper, native, native->size < sizeof g.wrapper ? native->size : sizeof g.wrapper);   // a table smaller than the ABI's is refused by the scheduler's negotiation (E_ABI_TABLE_SIZE), never read past
-  g.native_phase_entry = native->phase;
-  g.wrapper.phase = wrapped_phase;
-  c.provider = &g.wrapper;
-  c.provider_state = native_state;
-  c.phase_mask = (1U << SEGA_MOD_PHASE_RESET) | (1U << SEGA_MOD_PHASE_FRAME_BEGIN) | (1U << SEGA_MOD_PHASE_INPUT) | (1U << SEGA_MOD_PHASE_POST_INPUT) | (1U << SEGA_MOD_PHASE_FRAME_END) | (1U << SEGA_MOD_PHASE_RENDER);
-  c.required[0] = segarecomp_mod_caps_required[0]; c.required[1] = segarecomp_mod_caps_required[1];
-  c.optional[0] = segarecomp_mod_caps_optional[0]; c.optional[1] = segarecomp_mod_caps_optional[1];
-  c.render_api = &g_render_api;
-#ifdef SEGARECOMP_MOD_VIEWER
-  c.vdp_helpers = &g_vdp_helpers;   // SEG-152-T004: the host's own pure VDP functions (ABI 1 GenesisCompatHost), re-exported through the ABI 2 Genesis table
+  row.id = segarecomp_mod_id; row.identity = segarecomp_mod_identity; row.capabilities = segarecomp_mod_capabilities;
+  row.required[0] = segarecomp_mod_caps_required[0]; row.required[1] = segarecomp_mod_caps_required[1];
+  row.optional[0] = segarecomp_mod_caps_optional[0]; row.optional[1] = segarecomp_mod_caps_optional[1];
+  row.native_entry = segarecomp_mod_provider;
+  row.rom_data = segarecomp_mod_rom_data;
+#else
+  row.id = segarecomp_luau_mod_id; row.identity = segarecomp_luau_identity; row.capabilities = segarecomp_luau_capabilities;
+  row.luau_artifact = segarecomp_luau_artifact; row.luau_artifact_size = segarecomp_luau_artifact_size; row.luau_bytecode_digest = segarecomp_luau_bytecode_digest;
+  row.luau_memory_bytes = segarecomp_luau_memory_bytes; row.luau_budget_units = segarecomp_luau_budget_units;
 #endif
+  row.state_schema = segarecomp_mod_state_schema;
+  row.range_count = segarecomp_mod_range_count;
+  row.ranges = segarecomp_mod_ranges;
+  return {row};
+#endif
+}
+
+// Loads one member's provider and fills its scheduler configuration. False = refused (reported).
+bool configure(Member &m, bool lead, GenesisModConfig &c) {
+  c = GenesisModConfig{};
+  c.mod_id = m.row.id;
+  if (m.native()) {
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
+    void *native_state = nullptr;
+    const SegaModProvider *native = m.row.native_entry(&native_state);
+    if (native == nullptr || native->phase == nullptr) return refuse_begin("E_ABI_ENTRY_MISSING");
+    std::memcpy(&m.native_table, native, native->size < sizeof m.native_table ? native->size : sizeof m.native_table);   // a table smaller than the ABI's is refused by the scheduler's negotiation (E_ABI_TABLE_SIZE), never read past
+    if (lead) {   // only the drawing mod stages render output; the others have no render API (no presentation capability)
+      g.native_phase_entry = native->phase;
+      m.native_table.phase = wrapped_phase;
+      c.render_api = &g_render_api;
+    }
+    c.provider = &m.native_table;
+    c.provider_state = native_state;
+    c.phase_mask = (1U << SEGA_MOD_PHASE_RESET) | (1U << SEGA_MOD_PHASE_FRAME_BEGIN) | (1U << SEGA_MOD_PHASE_INPUT) | (1U << SEGA_MOD_PHASE_POST_INPUT) | (1U << SEGA_MOD_PHASE_FRAME_END) | (1U << SEGA_MOD_PHASE_RENDER);
+    c.required[0] = m.row.required[0]; c.required[1] = m.row.required[1];
+    c.optional[0] = m.row.optional[0]; c.optional[1] = m.row.optional[1];
+#ifdef SEGARECOMP_MOD_VIEWER
+    c.vdp_helpers = &g_vdp_helpers;   // SEG-152-T004: the host's own pure VDP functions (ABI 1 GenesisCompatHost), re-exported through the ABI 2 Genesis table
+#endif
+#else
+    return refuse_begin("E_PROVIDER_ENTRY");
+#endif
+  } else {
+#ifdef SEGARECOMP_MOD_HAS_LUAU
+    const std::span<const std::uint8_t> stored(m.row.luau_artifact, static_cast<std::size_t>(m.row.luau_artifact_size));
+    const luau::CompileResult loaded = luau::load_stored(m.row.identity, stored, m.row.luau_bytecode_digest);
+    if (!loaded.ok) return refuse_begin(loaded.rejection.code);
+    luau::HostConfig host;
+    for (const char *p = m.row.capabilities; *p != '\0';) {
+      const char *end = std::strchr(p, ',');
+      const std::string name = end != nullptr ? std::string(p, end) : std::string(p);
+      if (!name.empty()) host.capabilities.push_back(name);
+      if (end == nullptr) break;
+      p = end + 1;
+    }
+    luau::Limits limits = luau::policy_limits();
+    if (m.row.luau_memory_bytes != 0 && m.row.luau_memory_bytes < limits.memory_bytes) limits.memory_bytes = m.row.luau_memory_bytes;
+    if (m.row.luau_budget_units != 0 && m.row.luau_budget_units < limits.callback_units) limits.callback_units = m.row.luau_budget_units;
+    std::string error;
+    m.luau = luau::PhaseProvider::create(m.row.identity, loaded.compiled, limits, host, [](const char *cause) { genesis_mod_fault_current(cause); }, error);
+    if (!m.luau) return refuse_begin(error);
+    c.provider = m.luau->provider();
+    c.provider_state = m.luau->state();
+    c.phase_mask = m.luau->phase_mask();
+    m.luau->capabilities(c.required);
+    if ((c.required[0] >> SEGA_MOD_CAP_FRAME_VDP & 1U) != 0U) return refuse_begin("E_CAPABILITY_UNSUPPORTED");   // ADR 0320: the exact-frame callback is a native ABI 2 feature
+#else
+    return refuse_begin("E_PROVIDER_ENTRY");
+#endif
+  }
 #ifdef SEGARECOMP_MOD_HOOKS
-  {   // SEG-138-T012: every binding must name a site of the generated table (the build checked the same; a program must never run with a binding that can never fire), and the hook phases are registered with it
+  if (m.native()) {   // SEG-138-T012: every binding must name a site of the generated table (the build checked the same; a program must never run with a binding that can never fire), and the hook phases are registered with it
     std::size_t site_count = 0;
     const GenesisHookSiteInfo *sites = genesis_generated_hook_sites(&site_count);
-    if (segarecomp_mod_hook_count > GENESIS_MOD_HOOKS_MAX) { g.refused = true; g.refusal = "E_HOOK_BINDING"; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_HOOK_BINDING\"}\n"); return 1; }
-    for (unsigned long i = 0; i < segarecomp_mod_hook_count; ++i) {
+#ifdef SEGARECOMP_MOD_SET
+    const std::size_t hook_count = m.row.hook_count;
+    const std::uint32_t hook_phases = static_cast<std::uint32_t>(m.row.hook_phases);
+#else
+    const std::size_t hook_count = segarecomp_mod_hook_count;
+    const std::uint32_t hook_phases = static_cast<std::uint32_t>(segarecomp_mod_hook_phases);
+#endif
+    if (hook_count > GENESIS_MOD_HOOKS_MAX) return refuse_begin("E_HOOK_BINDING");
+    for (std::size_t i = 0; i < hook_count; ++i) {
+#ifdef SEGARECOMP_MOD_SET
+      const char *id = m.row.hooks[i].id;
+      m.bindings[i] = GenesisModHookBinding{id, static_cast<std::uint32_t>(m.row.hooks[i].hook_id)};
+      m.scopes[i] = GenesisModHookScope{static_cast<std::uint32_t>(m.row.hooks[i].modes), static_cast<std::uint32_t>(m.row.hooks[i].reads)};
+#else
+      const char *id = segarecomp_mod_hooks[i].id;
+      m.bindings[i] = GenesisModHookBinding{id, static_cast<std::uint32_t>(segarecomp_mod_hooks[i].hook_id)};
+#endif
       bool found = false;
-      for (std::size_t site = 0; site < site_count; ++site) found = found || std::strcmp(sites[site].id, segarecomp_mod_hooks[i].id) == 0;
-      if (!found) { g.refused = true; g.refusal = "E_HOOK_BINDING"; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_HOOK_BINDING\"}\n"); return 1; }
-      g.bindings[i] = GenesisModHookBinding{segarecomp_mod_hooks[i].id, static_cast<std::uint32_t>(segarecomp_mod_hooks[i].hook_id)};
+      for (std::size_t site = 0; site < site_count; ++site) found = found || std::strcmp(sites[site].id, id) == 0;
+      if (!found) return refuse_begin("E_HOOK_BINDING");
     }
-    c.hooks = g.bindings;
-    c.hook_count = static_cast<std::uint32_t>(segarecomp_mod_hook_count);
-    c.sites = sites;
-    c.site_count = static_cast<std::uint32_t>(site_count);
-    c.phase_mask |= static_cast<std::uint32_t>(segarecomp_mod_hook_phases);
+    if (hook_count != 0U) {
+      c.hooks = m.bindings;
+      c.hook_scopes = m.scopes;
+      c.hook_count = static_cast<std::uint32_t>(hook_count);
+      c.sites = sites;
+      c.site_count = static_cast<std::uint32_t>(site_count);
+      c.phase_mask |= hook_phases;
+    }
   }
 #endif
-#else
-  const std::span<const std::uint8_t> stored(segarecomp_luau_artifact, static_cast<std::size_t>(segarecomp_luau_artifact_size));
-  const luau::CompileResult loaded = luau::load_stored(segarecomp_luau_identity, stored, segarecomp_luau_bytecode_digest);
-  if (!loaded.ok) { g.refused = true; g.refusal = loaded.rejection.code; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\"}\n", loaded.rejection.code.c_str()); return 1; }
-  luau::HostConfig host;
-  for (const char *p = segarecomp_luau_capabilities; *p != '\0';) {
-    const char *end = std::strchr(p, ',');
-    const std::string name = end != nullptr ? std::string(p, end) : std::string(p);
-    if (!name.empty()) host.capabilities.push_back(name);
-    if (end == nullptr) break;
-    p = end + 1;
+  std::uint32_t rom_bytes = 0;   // the ROM bytes are the sum of the ROM-space range lengths; the scheduler checks the sum against its bound and refuses a mismatch
+  for (unsigned long i = 0; i < m.row.range_count && i < GENESIS_MOD_RANGES_MAX; ++i) {
+    m.ranges[i] = GenesisModRange{static_cast<std::uint32_t>(m.row.ranges[i][0]), static_cast<std::uint32_t>(m.row.ranges[i][1]), static_cast<std::uint32_t>(m.row.ranges[i][2]), static_cast<std::uint32_t>(m.row.ranges[i][3])};
+    if (m.ranges[i].space == SEGA_GEN_SPACE_M68K_ROM) rom_bytes += m.ranges[i].length;
   }
-  luau::Limits limits = luau::policy_limits();
-  if (segarecomp_luau_memory_bytes != 0 && segarecomp_luau_memory_bytes < limits.memory_bytes) limits.memory_bytes = segarecomp_luau_memory_bytes;
-  if (segarecomp_luau_budget_units != 0 && segarecomp_luau_budget_units < limits.callback_units) limits.callback_units = segarecomp_luau_budget_units;
-  std::string error;
-  g.provider = luau::PhaseProvider::create(segarecomp_luau_identity, loaded.compiled, limits, host, [](const char *cause) { genesis_mod_fault_current(cause); }, error);
-  if (!g.provider) { g.refused = true; g.refusal = error; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\"}\n", error.c_str()); return 1; }
-  c.provider = g.provider->provider();
-  c.provider_state = g.provider->state();
-  c.phase_mask = g.provider->phase_mask();
-  g.provider->capabilities(c.required);
-#endif
-  for (unsigned long i = 0; i < segarecomp_mod_range_count && i < GENESIS_MOD_RANGES_MAX; ++i)
-    g.ranges[i] = GenesisModRange{static_cast<std::uint32_t>(segarecomp_mod_ranges[i][0]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][1]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][2]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][3])};
-  c.ranges = g.ranges;
-  {   // the ROM bytes are the sum of the ROM-space range lengths; the scheduler checks the sum against its bound and refuses a mismatch
-    std::uint32_t rom_bytes = 0;
-    for (unsigned long i = 0; i < segarecomp_mod_range_count && i < GENESIS_MOD_RANGES_MAX; ++i)
-      if (g.ranges[i].space == SEGA_GEN_SPACE_M68K_ROM) rom_bytes += g.ranges[i].length;
-#ifdef SEGARECOMP_MOD_NATIVE
-    c.rom_data = rom_bytes != 0 ? segarecomp_mod_rom_data : nullptr;
-#else
-    c.rom_data = nullptr;   // a Luau program has no ROM range (the capability is native-only), so rom_bytes is 0 here
-#endif
-    c.rom_data_bytes = rom_bytes;
-  }
-  c.range_count = static_cast<std::uint32_t>(segarecomp_mod_range_count);
+  c.ranges = m.ranges;
+  c.range_count = static_cast<std::uint32_t>(m.row.range_count);
+  c.rom_data = rom_bytes != 0 ? m.row.rom_data : nullptr;   // a Luau program has no ROM range (the capability is native-only), so rom_bytes is 0 there
+  c.rom_data_bytes = rom_bytes;
 #ifdef SEGARECOMP_MOD_AUDIO
   for (unsigned long i = 0; i < segarecomp_mod_audio_count && i < GENESIS_MOD_AUDIO_ENTRIES_MAX; ++i) {
     const segarecomp_mod_audio_row &r = segarecomp_mod_audio[i];
@@ -487,24 +575,59 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
   c.audio = g.audio;
   c.audio_count = static_cast<std::uint32_t>(segarecomp_mod_audio_count);   // a count above the bound is refused by the scheduler, never truncated
 #endif
-  c.state_schema = static_cast<std::uint32_t>(segarecomp_mod_state_schema);
+  c.state_schema = static_cast<std::uint32_t>(m.row.state_schema);
   c.log_sink = log_sink;
-  identity_bytes(c.identity_sha256);
-  const char *why = "";
-#ifndef SEGARECOMP_MOD_NATIVE
-  if ((c.required[0] >> SEGA_MOD_CAP_FRAME_VDP & 1U) != 0U) {   // ADR 0320: the exact-frame callback is a native ABI 2 feature; a Luau script that requires frame.vdp is refused exactly as before
-    g.refused = true; g.refusal = "E_CAPABILITY_UNSUPPORTED";
-    std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_CAPABILITY_UNSUPPORTED\"}\n");
-    return 1;
+  hex_bytes(m.row.identity, c.identity_sha256);
+  return true;
+}
+
+bool draws(const SegarecompModMemberRow &row) {
+  const std::string names = std::string(",") + row.capabilities + ",";
+  return names.find(",overlay.rgba,") != std::string::npos || names.find(",scenery.words,") != std::string::npos || names.find(",frame.vdp,") != std::string::npos;
+}
+
+}  // namespace
+
+extern "C" {
+
+// 0 = the mods are attached; nonzero = refused (the program must not run a half-configured mod: the caller exits).
+int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
+  const std::vector<SegarecompModMemberRow> rows = artifact_rows();
+  if (rows.empty() || rows.size() > GENESIS_MOD_SET_MEMBERS_MAX) { (void)refuse_begin("E_SET_SIZE"); return 1; }
+  g.members.clear();
+  for (const SegarecompModMemberRow &row : rows) {
+    g.members.push_back(std::make_unique<Member>());
+    g.members.back()->row = row;
   }
+  g.lead = g.members.front().get();
+  for (const auto &m : g.members)
+    if (draws(m->row)) { g.lead = m.get(); break; }
+  g.scheduler = g.lead->scheduler.get();
+  std::vector<GenesisModConfig> configs(g.members.size());
+  std::vector<GenesisModScheduler *> schedulers;
+  for (std::size_t i = 0; i < g.members.size(); ++i) {
+    if (!configure(*g.members[i], g.members[i].get() == g.lead, configs[i])) return 1;
+    schedulers.push_back(g.members[i]->scheduler.get());
+  }
+#ifdef SEGARECOMP_MOD_HAS_LUAU
+  g.provider = g.lead->luau.get();
 #endif
-  if (genesis_mod_scheduler_attach(g.scheduler.get(), runtime, &c, &why) != 0) {
-    g.refused = true; g.refusal = why;
-    std::fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\"}\n", why);
-    return 1;
-  }
+  const char *why = "";
+#ifdef SEGARECOMP_MOD_SET
+  std::uint8_t identity[32];
+  hex_bytes(segarecomp_mod_set_identity, identity);
+  g.set = std::make_unique<GenesisModSet>();
+  std::uint32_t member = 0;
+  if (genesis_mod_set_attach(g.set.get(), runtime, schedulers.data(), configs.data(), static_cast<std::uint32_t>(configs.size()), identity, &why, &member) != 0) { (void)refuse_begin(why); return 1; }
+#else
+  if (genesis_mod_scheduler_attach(schedulers.front(), runtime, &configs.front(), &why) != 0) { (void)refuse_begin(why); return 1; }
+#endif
   g.attached = true;
-  genesis_mod_snapshot_state(g.scheduler.get(), &g.snapshot);
+#ifdef SEGARECOMP_MOD_SET
+  genesis_mod_set_snapshot_state(g.set.get(), &g.snapshot);
+#else
+  genesis_mod_snapshot_state(g.scheduler, &g.snapshot);
+#endif
 #ifndef SEGARECOMP_MOD_VIEWER   // the played program has the viewer's own save-state / rewind service; these seams are the headless capture's
   if (const char *text = std::getenv("SEGARECOMP_MOD_CHECKPOINT"); text != nullptr && *text != '\0') {
     char *end = nullptr;
@@ -530,13 +653,18 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
     g.loaded_digest = hex(bytes.data() + bytes.size() - 32U, 32U);
   }
 #endif
-#if defined(SEGARECOMP_MOD_NATIVE) && defined(SEGARECOMP_MOD_HOOKS)
-  std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"kind\":\"native\",\"package_identity\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu,\"hooks\":%lu}\n", MOD_ID, MOD_IDENTITY, MOD_CAPABILITIES, segarecomp_mod_range_count, segarecomp_mod_hook_count);
-#elif defined(SEGARECOMP_MOD_NATIVE)
-  std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"kind\":\"native\",\"package_identity\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", MOD_ID, MOD_IDENTITY, MOD_CAPABILITIES, segarecomp_mod_range_count);
-#else
-  std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"package_identity\":\"%s\",\"bytecode_digest\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", MOD_ID, MOD_IDENTITY,
-               segarecomp_luau_bytecode_digest, MOD_CAPABILITIES, segarecomp_mod_range_count);
+  for (const auto &m : g.members) {
+    char hooks_text[32] = "";
+#if defined(SEGARECOMP_MOD_HOOKS)
+    if (m->native()) std::snprintf(hooks_text, sizeof hooks_text, ",\"hooks\":%u", static_cast<unsigned>(m->scheduler->config.hook_count));
+#endif
+    if (m->native())
+      std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"kind\":\"native\",\"package_identity\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu%s}\n", m->row.id, m->row.identity, m->row.capabilities, m->row.range_count, hooks_text);
+    else
+      std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"package_identity\":\"%s\",\"bytecode_digest\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", m->row.id, m->row.identity, m->row.luau_bytecode_digest, m->row.capabilities, m->row.range_count);
+  }
+#ifdef SEGARECOMP_MOD_SET
+  std::fprintf(stderr, "MOD_SET_LOADED {\"set_identity\":\"%s\",\"mods\":%zu}\n", segarecomp_mod_set_identity, g.members.size());
 #endif
   return 0;
 }
@@ -566,7 +694,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   p.have_set = false;
   p.scenery = false;
   p.left_ok = false;
-#ifdef SEGARECOMP_MOD_NATIVE
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
   g.exact_served = false;
 #endif
   if ((frame->requested & (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY)) == 0) return;
@@ -575,7 +703,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     return;
   }
   unsigned accepted = 0;
-#ifdef SEGARECOMP_MOD_NATIVE
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
   // ADR 0320 (SEG-152-T003): an exact-frame provider (it required frame.vdp) has its `render` callback run HERE, once per produced frame, with an immutable copy of this frame's data. What it stages is consumed by this very
   // call: there is no epoch to bind, so nothing of another frame can be served. An ordinary provider is untouched (its callback ran after the previous snapshot; the epoch rules below apply).
   const bool exact = g.scheduler->exact_frame != 0U;
@@ -594,7 +722,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     ef.vram_frame_start = raster != nullptr && frame->vram != nullptr && frame->vram == raster->frame.vram_start ? 1U : 0U;   // a journaled frame hands out the frame-start VRAM, any other the producer's end-of-frame image
     g.exact_side = eff_side;
     g.exact_running = true;
-    const int ran = genesis_mod_scheduler_present(g.scheduler.get(), &ef);
+    const int ran = genesis_mod_scheduler_present(g.scheduler, &ef);
     g.exact_running = false;
     if (!ran) {
       if (g.scheduler->disabled != 0U || g.scheduler->fault.faulted != 0U) out->reason = GENESIS_COMPAT_FAULT;   // a genuine callback fault: nothing staged is served
@@ -619,7 +747,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
 #endif
   const RenderView view_now = render_view();
   std::uint32_t declined = view_now.declined;
-#ifdef SEGARECOMP_MOD_NATIVE
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
   if (!current) declined = 0U;   // a refusal belongs to the frame of the callback that made it: the same epoch guard as the windows and the placement (a skipped callback, restore, rewind or any discontinuity drops it)
 #endif   // SEG-152-T006: components the provider refused for this frame (never a fault): their output is discarded, the generic path serves them
   if ((declined & GENESIS_COMPAT_SCENERY) != 0U) { p.scenery = false; accepted &= ~static_cast<unsigned>(GENESIS_COMPAT_SCENERY); }
@@ -632,7 +760,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     if (p.have_sprites) p.sprites = *view.sprites;
     p.set = view.set;
     p.have_set = view.set != nullptr && view.set->count > 0 && (declined & GENESIS_COMPAT_SPRITES) == 0U;
-#ifdef SEGARECOMP_MOD_NATIVE
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
     if (p.have_set && frame->work_ram != nullptr) {   // W04 gap B (a provider without frame.work_ram has no snapshot: the compositor then rejects game art as UNVERIFIED_STATE, as before): a set naming the game's own art must belong to THIS frame's epoch; otherwise the whole set is dropped (a stale submission, a restore, a rewind or a skipped callback never draws game art)
       bool verified = false;
       for (std::uint32_t i = 0; i < view.set->count && i < GENESIS_VSPRITE_MAX; ++i) verified = verified || view.set->sprites[i].provenance == GENESIS_VSPRITE_GAME_STATE_VERIFIED;
@@ -656,7 +784,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   }
   out->accepted = accepted;
   if (accepted == 0U && declined != 0U) out->reason = static_cast<std::uint8_t>(view_now.decline_reason);   // SEG-152-T006: the provider's diagnostic, reported exactly as an ABI 1 decline (a host reason is never provider-selectable)
-#ifdef SEGARECOMP_MOD_NATIVE
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
   if (declined == (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_SPRITES)) p.left_ok = false;   // a wholly declined frame is generic: no placement either
   if (p.left_ok) { out->left_px = static_cast<std::int32_t>(g.visible_left_px); out->has_left_px = 1U; }   // with the verdict OK even when no component is accepted (ADR 0315)
 #endif
@@ -666,7 +794,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
 }
 // SEG-140-T011: answers only from the committed window of the frame `prepare` accepted; a cell outside it is a failed answer (the host then withdraws the frame's authored-scenery claim), never a guess.
 int scenery_word(void *, unsigned plane, unsigned row, int x, int hscroll, int vscroll, uint16_t *word) {
-#ifdef SEGARECOMP_MOD_NATIVE
+#ifdef SEGARECOMP_MOD_HAS_NATIVE
   if (!p.scenery || plane > 1U || word == nullptr) return 0;
   return segarecomp::scenery::answer(g.visible_row_mask[plane], g.visible_scenery[plane], static_cast<int>(row), x, hscroll, vscroll, word, GENESIS_COMPAT_WORD_VDP_START, GENESIS_COMPAT_WORD_GENERIC, &g.visible_row_origin[plane]);   // SEG-152-T017: the per-row origin delta; SEG-152-T007: a marked screen row is the VDP's own word as a provider word (honoured only on this adapter's trusted attach); ADR 0314: a plane without a window is left to the generic extension
 #else
@@ -721,38 +849,68 @@ void segarecomp_capture_mod_checkpoint(GenesisRuntime *runtime) {
   genesis_snapshot_buffer_free(&second);
 }
 
-// After the run: the MOD_SUMMARY line and the detach.
+}  // extern "C"
+
+namespace {
+// One mod's report as a JSON object. The checkpoint, loaded-state and overlay fields describe the whole program in a single-mod run; a set reports them once (MOD_SET_SUMMARY).
+std::string member_summary(const Member &m, bool lead) {
+  GenesisModScheduler &s = *m.scheduler;
+  std::uint8_t digest[32];
+  genesis_mod_write_log_digest(&s, digest);
+  std::size_t op_count = 0;
+  std::string overlay_hex;
+  if (lead) {
+    const RenderView view = render_view();
+    op_count = view.ops->size();
+    if (op_count != 0U) {
+      const luau::OverlayImage image = luau::rasterize_overlay(*view.ops);
+      overlay_hex = sha256_hex(std::span<const std::uint8_t>(image.rgba.data(), image.rgba.size()));
+    }
+  }
+  bool nondeterministic = false;
+#ifdef SEGARECOMP_MOD_HAS_LUAU
+  nondeterministic = m.luau && m.luau->nondeterministic();
+#endif
+  char text[1024];
+  std::snprintf(text, sizeof text, "\"mod\":\"%s\",\"faulted\":%s,\"fault\":\"%s\",\"callbacks\":%llu,\"committed_writes\":%llu,\"write_digest\":\"%s\",\"overlay_ops\":%llu,\"overlay_sha256\":\"%s\",\"nondeterministic\":%s",
+                m.row.id, s.fault.faulted != 0U ? "true" : "false", s.fault.faulted != 0U ? json_escaped(s.fault.text).c_str() : "", static_cast<unsigned long long>(s.callbacks_run),
+                static_cast<unsigned long long>(s.write_total), hex(digest, 32).c_str(), static_cast<unsigned long long>(op_count), overlay_hex.c_str(), nondeterministic ? "true" : "false");
+  return text;
+}
+// SEG-138-T012: the hook counters (callbacks delivered by phase, and the loud non-altering skips: abandoned, unproven caller, frame stack full); only a hooked mod reports them
+std::string hook_summary(const Member &m) {
+#ifdef SEGARECOMP_MOD_HOOKS
+  if (!m.native() || m.scheduler->config.hook_count == 0U) return {};
+  const GenesisModScheduler &s = *m.scheduler;
+  char text[240];
+  std::snprintf(text, sizeof text, ",\"hooks\":{\"entry\":%llu,\"exit\":%llu,\"abandoned\":%llu,\"unproven\":%llu,\"overflowed\":%llu,\"checkpoint_depth\":%u}", static_cast<unsigned long long>(s.hook_calls[0]), static_cast<unsigned long long>(s.hook_calls[1]),
+                static_cast<unsigned long long>(s.hook_skips[1]), static_cast<unsigned long long>(s.hook_skips[2]), static_cast<unsigned long long>(s.hook_skips[3]), static_cast<unsigned>(g.checkpoint_depth));
+  return text;
+#else
+  (void)m;
+  return {};
+#endif
+}
+}  // namespace
+
+extern "C" {
+
+// After the run: the MOD_SUMMARY line (a set: MOD_SET_SUMMARY with one entry per mod in set order) and the detach.
 void segarecomp_capture_mod_end(GenesisRuntime *runtime) {
   (void)runtime;
   if (!g.attached) return;
-  GenesisModScheduler &s = *g.scheduler;
-  std::uint8_t digest[32];
-  genesis_mod_write_log_digest(&s, digest);
-  const RenderView view = render_view();
-  const luau::OverlayImage image = luau::rasterize_overlay(*view.ops);
-  const std::string overlay_hex = view.ops->empty() ? std::string() : (sha256_hex(std::span<const std::uint8_t>(image.rgba.data(), image.rgba.size())));
-  std::string hooks_json;
-#if defined(SEGARECOMP_MOD_NATIVE) && defined(SEGARECOMP_MOD_HOOKS)   // SEG-138-T012: the hook counters (callbacks delivered by phase, and the loud non-altering skips: abandoned, unproven caller, frame stack full); only a hooked program reports them
-  {
-    char text[240];
-    std::snprintf(text, sizeof text, ",\"hooks\":{\"entry\":%llu,\"exit\":%llu,\"abandoned\":%llu,\"unproven\":%llu,\"overflowed\":%llu,\"checkpoint_depth\":%u}", static_cast<unsigned long long>(s.hook_calls[0]), static_cast<unsigned long long>(s.hook_calls[1]),
-                  static_cast<unsigned long long>(s.hook_skips[1]), static_cast<unsigned long long>(s.hook_skips[2]), static_cast<unsigned long long>(s.hook_skips[3]), static_cast<unsigned>(g.checkpoint_depth));
-    hooks_json = text;
-  }
-#endif
-  std::fprintf(stderr,
-               "MOD_SUMMARY {\"mod\":\"%s\",\"faulted\":%s,\"fault\":\"%s\",\"callbacks\":%llu,\"committed_writes\":%llu,\"write_digest\":\"%s\",\"overlay_ops\":%llu,\"overlay_sha256\":\"%s\","
-               "\"nondeterministic\":%s,\"roundtrip\":{\"requested\":%s,\"frame\":%llu,\"status\":\"%s\",\"state_sha256\":\"%s\"},\"loaded_state_sha256\":\"%s\"%s}\n",
-               MOD_ID, s.fault.faulted != 0U ? "true" : "false", s.fault.faulted != 0U ? json_escaped(s.fault.text).c_str() : "", static_cast<unsigned long long>(s.callbacks_run),
-               static_cast<unsigned long long>(s.write_total), hex(digest, 32).c_str(), static_cast<unsigned long long>(view.ops->size()), overlay_hex.c_str(),
-#ifdef SEGARECOMP_MOD_NATIVE
-               "false",
+  char state[512];
+  std::snprintf(state, sizeof state, "\"roundtrip\":{\"requested\":%s,\"frame\":%llu,\"status\":\"%s\",\"state_sha256\":\"%s\"},\"loaded_state_sha256\":\"%s\"", g.checkpoint_wanted ? "true" : "false",
+                static_cast<unsigned long long>(g.checkpoint_frame), g.checkpoint_wanted ? (g.checkpoint_done ? g.checkpoint_status.c_str() : "not_reached") : "none", g.checkpoint_digest.c_str(), g.loaded_digest.c_str());
+#ifdef SEGARECOMP_MOD_SET
+  std::string members;
+  for (const auto &m : g.members) members += std::string(members.empty() ? "{" : ",{") + member_summary(*m, m.get() == g.lead) + hook_summary(*m) + "}";
+  std::fprintf(stderr, "MOD_SET_SUMMARY {\"set_identity\":\"%s\",\"members\":[%s],%s}\n", segarecomp_mod_set_identity, members.c_str(), state);
+  genesis_mod_set_detach(g.set.get());
 #else
-               g.provider->nondeterministic() ? "true" : "false",
+  std::fprintf(stderr, "MOD_SUMMARY {%s,%s%s}\n", member_summary(*g.lead, true).c_str(), state, hook_summary(*g.lead).c_str());
+  genesis_mod_scheduler_detach(g.scheduler);
 #endif
-               g.checkpoint_wanted ? "true" : "false", static_cast<unsigned long long>(g.checkpoint_frame),
-               g.checkpoint_wanted ? (g.checkpoint_done ? g.checkpoint_status.c_str() : "not_reached") : "none", g.checkpoint_digest.c_str(), g.loaded_digest.c_str(), hooks_json.c_str());
-  genesis_mod_scheduler_detach(&s);
 }
 
 }  // extern "C"

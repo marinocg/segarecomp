@@ -4,6 +4,7 @@
 #include "segarecomp/mod.hpp"
 #include "segarecomp/sha256.hpp"
 
+#include <map>
 #include <algorithm>
 #include <fstream>
 #include <system_error>
@@ -146,7 +147,10 @@ ModSet verify_mod_set(const LibraryEntry &entry, const segarecomp::mod::SetDefin
   out.effective_sha256 = composition.effective_sha256;
   if (!out.ok) {
     out.error = "These mods cannot be used together:";
-    for (const segarecomp::mod::SetViolation &v : composition.violations) out.error += "\n" + v.message + ".";
+    for (const segarecomp::mod::SetViolation &v : composition.violations) {
+      const ModSetClassText text = mod_set_class_text(v.code);
+      out.error += "\n" + text.title + ": " + v.message + ".\n  " + text.next;
+    }
   }
   return out;
 }
@@ -222,6 +226,39 @@ std::string mod_refusal_next_step(const std::string &refusal) {
   if (has("maximum number")) return "Remove a mod you no longer use, then install this one.";
   if (has("read-only") || has("newer Segarecomp")) return "Use the newer Segarecomp that wrote this library, or leave mods unchanged.";
   return "Choose a different package, or ask its author for one made for this game. Nothing was installed.";
+}
+
+ModSetClassText mod_set_class_text(const std::string &code) {
+  static const std::map<std::string, ModSetClassText> texts = {
+      {"E_SET_SIZE", {"Too many or no mods", "Choose between 1 and 16 mods."}},
+      {"E_SET_DUPLICATE_MOD", {"The same mod twice", "Keep only one copy or version of that mod."}},
+      {"E_SET_PLATFORM", {"Mods for different consoles", "Use only mods made for this game's console."}},
+      {"E_SET_PLATFORM_UNSUPPORTED", {"This console cannot combine mods yet", "Use one mod at a time."}},
+      {"E_SET_MISSING_DEPENDENCY", {"A required mod is missing", "Add the required mod to the set, or remove the mod that needs it."}},
+      {"E_SET_VERSION_MISMATCH", {"A required mod has the wrong version", "Install a version in the required range."}},
+      {"E_SET_INCOMPATIBLE", {"Two mods are declared incompatible", "Remove one of the two."}},
+      {"E_SET_SOURCE", {"A mod is for another game file", "Use only mods made for this exact game and revision."}},
+      {"E_SET_EDIT_OVERLAP", {"Two mods change the same bytes", "Remove one of the two. Overlapping changes are never merged."}},
+      {"E_SET_BPS_CONFLICT", {"A whole-image patch cannot be combined", "Use the patch without other mods that change or hook the game."}},
+      {"E_SET_HOOK_SITE", {"One mod rewrites a function another hooks", "Remove one of the two."}},
+      {"E_SET_HOOK_OWNER", {"Two mods claim one function", "Only one mod may replace a function. Remove one of the two."}},
+      {"E_SET_HOOK_ANCHOR", {"Two mods disagree about a hooked function", "Remove one of the two, or ask their authors to align them."}},
+      {"E_SET_HOOK_SITE_ID", {"Two mods' hooks cannot be told apart", "Ask one author to rename the hook."}},
+      {"E_SET_GUEST_ADMISSION", {"Two mods' added code conflicts", "Remove one of the two."}},
+      {"E_SET_HEADER_POLICY", {"Mods disagree about the game header", "Remove one of the two, or ask their authors to agree."}},
+      {"E_HEADER_FIELD_COLLISION", {"A header repair would discard a mod's change", "Remove one of the two."}},
+      {"E_EDIT_EXPECTED_MISMATCH", {"A mod does not fit the original game", "A mod cannot depend on bytes another mod writes. Remove it or choose a matching version."}},
+      {"E_SET_PRESENTATION_CONFLICT", {"Two mods draw on the screen", "Keep one mod that draws (overlay, scenery or picture changes)."}},
+      {"E_SET_GEOMETRY_UNSUPPORTED", {"A data mod's screen claim cannot be combined", "Use that mod on its own, or choose a version without a geometry declaration."}},
+      {"E_SET_AUDIO_UNSUPPORTED", {"A mod's sound features cannot be combined yet", "Use that mod on its own."}},
+      {"E_SET_NATIVE_LINK", {"Two native mods cannot be built together", "Remove one of them, or ask their authors to make internal names private."}},
+      {"E_NOT_APPROVED", {"A mod with executable code is not approved", "Install it again and approve it, or remove it from the set."}},
+      {"E_SET_VERSION", {"This mod set was saved by another version", "Use the newer Segarecomp, or create the set again."}},
+      {"E_SET_SYNTAX", {"The saved mod set is damaged", "Create the set again."}},
+      {"E_SET_UNKNOWN", {"No such mod set", "Choose a saved set."}},
+  };
+  const auto found = texts.find(code);
+  return found != texts.end() ? found->second : ModSetClassText{"The mods cannot be used", "Remove a mod and try again. Nothing was changed."};
 }
 
 ModStatus mod_status(const InstalledPatch &patch, const ModStatusInput &in) {

@@ -1,0 +1,896 @@
+{
+ "E_ARCHIVE_ENTRY (build)": [
+  {
+   "case": "a member that cannot be read",
+   "diagnostic": "E_ARCHIVE_ENTRY",
+   "message": "The mod set cannot be built: member 1 of the set cannot be read"
+  }
+ ],
+ "E_EDIT_EXPECTED_MISMATCH": [
+  {
+   "case": "relying on another mod's bytes",
+   "class": "E_EDIT_EXPECTED_MISMATCH",
+   "error": "the mod \"relies-on-a\" does not apply to the original image: line 1: the original bytes at offset 0x400 differ from the expected value (expected values are asserted against the unmodified original; a mod cannot depend on bytes another mod writes)",
+   "violations": [
+    {
+     "class": "E_EDIT_EXPECTED_MISMATCH",
+     "message": "the mod \"relies-on-a\" does not apply to the original image: line 1: the original bytes at offset 0x400 differ from the expected value (expected values are asserted against the unmodified original; a mod cannot depend on bytes another mod writes)",
+     "mods": [
+      "relies-on-a"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "relying on another mod's bytes",
+   "class": "E_EDIT_EXPECTED_MISMATCH",
+   "error": "the mod \"relies-on-a\" does not apply to the original image: line 1: the original bytes at offset 0x400 differ from the expected value (expected values are asserted against the unmodified original; a mod cannot depend on bytes another mod writes)",
+   "violations": [
+    {
+     "class": "E_EDIT_EXPECTED_MISMATCH",
+     "message": "the mod \"relies-on-a\" does not apply to the original image: line 1: the original bytes at offset 0x400 differ from the expected value (expected values are asserted against the unmodified original; a mod cannot depend on bytes another mod writes)",
+     "mods": [
+      "relies-on-a"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_HEADER_FIELD_COLLISION": [
+  {
+   "case": "another mod's write that the combined strict repair would discard",
+   "class": "E_HEADER_FIELD_COLLISION",
+   "error": "the mod \"rom-end\": an edit or injected block overlaps a header field that the selected header repair rewrites (checksum 0x18E-0x18F, ROM end 0x1A4-0x1A7); declare header_repair = \"none\" to write it yourself",
+   "violations": [
+    {
+     "class": "E_HEADER_FIELD_COLLISION",
+     "message": "the mod \"rom-end\": an edit or injected block overlaps a header field that the selected header repair rewrites (checksum 0x18E-0x18F, ROM end 0x1A4-0x1A7); declare header_repair = \"none\" to write it yourself",
+     "mods": [
+      "rom-end",
+      "strict"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_HOOK_CALLBACK_UNSUPPORTED": [
+  {
+   "case": "a script hook has no callback",
+   "class": "E_HOOK_CALLBACK_UNSUPPORTED",
+   "error": "the mod \"script-hook\": function hook callbacks are native ABI 2 only; a Luau callback for a hook is not supported",
+   "violations": [
+    {
+     "class": "E_HOOK_CALLBACK_UNSUPPORTED",
+     "message": "the mod \"script-hook\": function hook callbacks are native ABI 2 only; a Luau callback for a hook is not supported",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_HOOK_COUNT": [
+  {
+   "case": "more than 64 hooked functions across a set",
+   "class": "E_HOOK_COUNT",
+   "error": "the set hooks more than 64 functions",
+   "violations": [
+    {
+     "class": "E_HOOK_COUNT",
+     "message": "the set hooks more than 64 functions",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_HOOK_REVISION": [
+  {
+   "case": "hooks that apply to no function of this revision",
+   "class": "E_HOOK_REVISION",
+   "error": "the mod \"hook-elsewhere\" declares function hooks but none applies to this revision",
+   "violations": [
+    {
+     "class": "E_HOOK_REVISION",
+     "message": "the mod \"hook-elsewhere\" declares function hooks but none applies to this revision",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_MEMORY_RANGE": [
+  {
+   "case": "a ROM range beyond the composed image",
+   "class": "E_MEMORY_RANGE",
+   "error": "the mod \"rom-reader\" declares an m68k.rom range outside the composed image",
+   "violations": [
+    {
+     "class": "E_MEMORY_RANGE",
+     "message": "the mod \"rom-reader\" declares an m68k.rom range outside the composed image",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_NOT_APPROVED": [
+  {
+   "case": "a native member without approval",
+   "class": "E_NOT_APPROVED",
+   "error": "the mod \"gameplay-native\" carries native code and needs the approval of its exact identity",
+   "violations": []
+  },
+  {
+   "case": "a native member without approval",
+   "class": "E_NOT_APPROVED",
+   "error": "the mod \"needs-approval\" carries native code and needs the approval of its exact identity (--approve <digest>)",
+   "violations": [
+    {
+     "class": "E_NOT_APPROVED",
+     "message": "the mod \"needs-approval\" carries native code and needs the approval of its exact identity (--approve <digest>)",
+     "mods": [
+      "needs-approval"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_PACKAGE_CHANGED": [
+  {
+   "case": "a replaced installed package",
+   "class": "E_PACKAGE_CHANGED",
+   "error": "the installed package no longer has the identity <digest>",
+   "violations": []
+  }
+ ],
+ "E_PACKAGE_CHANGED (build)": [
+  {
+   "case": "a member that is not the pinned package",
+   "diagnostic": "E_PACKAGE_CHANGED",
+   "message": "The mod set cannot be built: member 1 of the set: the installed package no longer has the identity <digest>"
+  }
+ ],
+ "E_PLATFORM_UNKNOWN": [
+  {
+   "case": "a stored definition: an unknown platform",
+   "class": "E_PLATFORM_UNKNOWN",
+   "error": "the mod set names a platform that has no registered adapter",
+   "violations": []
+  }
+ ],
+ "E_RANGE_DECLARATION": [
+  {
+   "case": "a memory capability without a range for this revision",
+   "class": "E_RANGE_DECLARATION",
+   "error": "the mod \"range-elsewhere\" declares a memory capability but no memory range with that access for this revision",
+   "violations": [
+    {
+     "class": "E_RANGE_DECLARATION",
+     "message": "the mod \"range-elsewhere\" declares a memory capability but no memory range with that access for this revision",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_SET_ARTIFACT_WRITE": [
+  {
+   "case": "a user folder where the build stages",
+   "class": "E_SET_ARTIFACT_WRITE",
+   "error": "The native sources could not be staged: the output folder may already hold a set-mod folder this build did not create (it is never deleted), or it cannot be written.",
+   "violations": []
+  }
+ ],
+ "E_SET_AUDIO_UNSUPPORTED": [
+  {
+   "case": "the audio API in a set",
+   "class": "E_SET_AUDIO_UNSUPPORTED",
+   "error": "the mod \"sound-mod\" uses the audio API, which a built mod set does not support yet",
+   "violations": [
+    {
+     "class": "E_SET_AUDIO_UNSUPPORTED",
+     "message": "the mod \"sound-mod\" uses the audio API, which a built mod set does not support yet",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_SET_BPS_CONFLICT": [
+  {
+   "case": "BPS with typed edits (disjoint bytes are still refused)",
+   "class": "E_SET_BPS_CONFLICT",
+   "error": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"edit-a\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+   "violations": [
+    {
+     "class": "E_SET_BPS_CONFLICT",
+     "message": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"edit-a\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+     "mods": [
+      "bps-a",
+      "edit-a"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "typed edits then BPS",
+   "class": "E_SET_BPS_CONFLICT",
+   "error": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"edit-a\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+   "violations": [
+    {
+     "class": "E_SET_BPS_CONFLICT",
+     "message": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"edit-a\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+     "mods": [
+      "bps-a",
+      "edit-a"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "two BPS patches",
+   "class": "E_SET_BPS_CONFLICT",
+   "error": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"bps-b\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+   "violations": [
+    {
+     "class": "E_SET_BPS_CONFLICT",
+     "message": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"bps-b\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+     "mods": [
+      "bps-a",
+      "bps-b"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "BPS with injected code",
+   "class": "E_SET_BPS_CONFLICT",
+   "error": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"code-c\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+   "violations": [
+    {
+     "class": "E_SET_BPS_CONFLICT",
+     "message": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"code-c\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+     "mods": [
+      "bps-a",
+      "code-c"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "BPS with a hooking mod",
+   "class": "E_SET_BPS_CONFLICT",
+   "error": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"hooker\", whose hook sites cannot be verified in the patched image; BPS ranges are never merged (use typed ROM edits)",
+   "violations": [
+    {
+     "class": "E_SET_BPS_CONFLICT",
+     "message": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"hooker\", whose hook sites cannot be verified in the patched image; BPS ranges are never merged (use typed ROM edits)",
+     "mods": [
+      "bps-a",
+      "hooker"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "a composition refusal reads the same from build",
+   "class": "E_SET_BPS_CONFLICT",
+   "error": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"edit-a\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+   "violations": [
+    {
+     "class": "E_SET_BPS_CONFLICT",
+     "message": "the mod \"bps-a\" is a whole-image BPS patch, which cannot be composed with \"edit-a\", which also changes the image; BPS ranges are never merged (use typed ROM edits)",
+     "mods": [
+      "bps-a",
+      "edit-a"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_SET_DUPLICATE_MOD": [
+  {
+   "case": "the same mod twice",
+   "class": "E_SET_DUPLICATE_MOD",
+   "error": "the set holds the mod \"base-lib\" twice (versions 1.4.0 and 1.5.0)",
+   "violations": [
+    {
+     "class": "E_SET_DUPLICATE_MOD",
+     "message": "the set holds the mod \"base-lib\" twice (versions 1.4.0 and 1.5.0)",
+     "mods": [
+      "base-lib"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "a package twice",
+   "class": "E_SET_DUPLICATE_MOD",
+   "error": "a mod set names a package twice",
+   "violations": []
+  },
+  {
+   "case": "a stored definition: a repeated member",
+   "class": "E_SET_DUPLICATE_MOD",
+   "error": "a mod set names a package twice",
+   "violations": []
+  }
+ ],
+ "E_SET_EDIT_OVERLAP": [
+  {
+   "case": "overlapping edits",
+   "class": "E_SET_EDIT_OVERLAP",
+   "error": "the mods \"edit-a\" and \"edit-over\" both write offset 0x401, 1 byte(s); overlapping changes are rejected, never merged",
+   "violations": [
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"edit-a\" and \"edit-over\" both write offset 0x401, 1 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "edit-a",
+      "edit-over"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "identical writes are still an overlap",
+   "class": "E_SET_EDIT_OVERLAP",
+   "error": "the mods \"edit-a\" and \"edit-same\" both write offset 0x400, 2 byte(s); overlapping changes are rejected, never merged",
+   "violations": [
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"edit-a\" and \"edit-same\" both write offset 0x400, 2 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "edit-a",
+      "edit-same"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "an edit over another mod's injected block",
+   "class": "E_SET_EDIT_OVERLAP",
+   "error": "the mods \"edit-into-code\" and \"code-c\" both write offset 0x1002, 2 byte(s); overlapping changes are rejected, never merged",
+   "violations": [
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"edit-into-code\" and \"code-c\" both write offset 0x1002, 2 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "edit-into-code",
+      "code-c"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "two injected blocks overlap",
+   "class": "E_SET_EDIT_OVERLAP",
+   "error": "the mods \"code-c\" and \"code-d\" both write offset 0x1002, 2 byte(s); overlapping changes are rejected, never merged",
+   "violations": [
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"code-c\" and \"code-d\" both write offset 0x1002, 2 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "code-c",
+      "code-d"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "every overlapping pair is listed",
+   "class": "E_SET_EDIT_OVERLAP",
+   "error": "the mods \"edit-a\" and \"edit-over\" both write offset 0x401, 1 byte(s); overlapping changes are rejected, never merged",
+   "violations": [
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"edit-a\" and \"edit-over\" both write offset 0x401, 1 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "edit-a",
+      "edit-over"
+     ]
+    },
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"edit-a\" and \"edit-same\" both write offset 0x400, 2 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "edit-a",
+      "edit-same"
+     ]
+    },
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"edit-over\" and \"edit-same\" both write offset 0x401, 1 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "edit-over",
+      "edit-same"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "many ranges",
+   "class": "E_SET_EDIT_OVERLAP",
+   "error": "the mods \"many-a\" and \"many-b\" both write offset 0x800, 1 byte(s) (the first of 40 overlapping ranges); overlapping changes are rejected, never merged",
+   "violations": [
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"many-a\" and \"many-b\" both write offset 0x800, 1 byte(s) (the first of 40 overlapping ranges); overlapping changes are rejected, never merged",
+     "mods": [
+      "many-a",
+      "many-b"
+     ]
+    },
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"many-a\" and \"many-c\" both write offset 0xa00, 1 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "many-a",
+      "many-c"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "the same sound-RAM address",
+   "class": "E_SET_EDIT_OVERLAP",
+   "error": "the mods \"snd-a\" and \"snd-b\" both write z80.sound_ram address 0x1000, 1 byte(s); overlapping changes are rejected, never merged",
+   "violations": [
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"snd-a\" and \"snd-b\" both write z80.sound_ram address 0x1000, 1 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "snd-a",
+      "snd-b"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "a bank-qualified overlap",
+   "class": "E_SET_EDIT_OVERLAP",
+   "error": "the mods \"sms-a\" and \"sms-b\" both write offset 0x1c100 (bank 7, bank offset 0x0100), 1 byte(s); overlapping changes are rejected, never merged",
+   "violations": [
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"sms-a\" and \"sms-b\" both write offset 0x1c100 (bank 7, bank offset 0x0100), 1 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "sms-a",
+      "sms-b"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_SET_GEOMETRY_UNSUPPORTED": [
+  {
+   "case": "a data-only geometry claim is refused, never dropped",
+   "class": "E_SET_GEOMETRY_UNSUPPORTED",
+   "error": "the mod \"wide-data\" is data-only and declares a geometry, which a built set does not apply; declare it in the mod that draws",
+   "violations": [
+    {
+     "class": "E_SET_GEOMETRY_UNSUPPORTED",
+     "message": "the mod \"wide-data\" is data-only and declares a geometry, which a built set does not apply; declare it in the mod that draws",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_SET_GUEST_ADMISSION": [
+  {
+   "case": "joint admission",
+   "class": "E_SET_GUEST_ADMISSION",
+   "error": "the injected code of \"sms-d\" and \"sms-e\" is not statically admitted together: the injected code at offset 0x300 (bank 0, bank offset 0x0300) is not statically admitted: the control target lies in free-range padding",
+   "violations": [
+    {
+     "class": "E_SET_GUEST_ADMISSION",
+     "message": "the injected code of \"sms-d\" and \"sms-e\" is not statically admitted together: the injected code at offset 0x300 (bank 0, bank offset 0x0300) is not statically admitted: the control target lies in free-range padding",
+     "mods": [
+      "sms-d",
+      "sms-e"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_SET_HEADER_POLICY": [
+  {
+   "case": "opting out against a repairing mod",
+   "class": "E_SET_HEADER_POLICY",
+   "error": "the mod \"opt-out\" declares header_repair = \"none\" but \"edit-a\" expects the header checksum to be handled by the build; one image has one header policy",
+   "violations": [
+    {
+     "class": "E_SET_HEADER_POLICY",
+     "message": "the mod \"opt-out\" declares header_repair = \"none\" but \"edit-a\" expects the header checksum to be handled by the build; one image has one header policy",
+     "mods": [
+      "opt-out",
+      "edit-a"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_SET_HOOK_ANCHOR": [
+  {
+   "case": "hooked functions declared with different anchors",
+   "class": "E_SET_HOOK_ANCHOR",
+   "error": "the mods \"hook-plain\" and \"hook-anchored\" declare different anchors for one hooked function",
+   "violations": [
+    {
+     "class": "E_SET_HOOK_ANCHOR",
+     "message": "the mods \"hook-plain\" and \"hook-anchored\" declare different anchors for one hooked function",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_SET_HOOK_OWNER": [
+  {
+   "case": "an exclusive-hook conflict swapper/swapper-two",
+   "class": "E_SET_HOOK_OWNER",
+   "error": "the mods \"swapper\" and \"swapper-two\" both hook the m68k function at offset 0x600 and a replacement owns its function exclusively; only before/after hooks of several mods can share a site",
+   "violations": [
+    {
+     "class": "E_SET_HOOK_OWNER",
+     "message": "the mods \"swapper\" and \"swapper-two\" both hook the m68k function at offset 0x600 and a replacement owns its function exclusively; only before/after hooks of several mods can share a site",
+     "mods": [
+      "swapper",
+      "swapper-two"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "an exclusive-hook conflict hooker/swapper",
+   "class": "E_SET_HOOK_OWNER",
+   "error": "the mods \"hooker\" and \"swapper\" both hook the m68k function at offset 0x600 and a replacement owns its function exclusively; only before/after hooks of several mods can share a site",
+   "violations": [
+    {
+     "class": "E_SET_HOOK_OWNER",
+     "message": "the mods \"hooker\" and \"swapper\" both hook the m68k function at offset 0x600 and a replacement owns its function exclusively; only before/after hooks of several mods can share a site",
+     "mods": [
+      "hooker",
+      "swapper"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "an exclusive-hook conflict swapper/hooker",
+   "class": "E_SET_HOOK_OWNER",
+   "error": "the mods \"swapper\" and \"hooker\" both hook the m68k function at offset 0x600 and a replacement owns its function exclusively; only before/after hooks of several mods can share a site",
+   "violations": [
+    {
+     "class": "E_SET_HOOK_OWNER",
+     "message": "the mods \"swapper\" and \"hooker\" both hook the m68k function at offset 0x600 and a replacement owns its function exclusively; only before/after hooks of several mods can share a site",
+     "mods": [
+      "swapper",
+      "hooker"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_SET_HOOK_SITE": [
+  {
+   "case": "a write over a hooked entry",
+   "class": "E_SET_HOOK_SITE",
+   "error": "the mod \"edit-hook\" writes the entry of a function that \"hooker\" hooks (offset 0x601, 1 byte(s))",
+   "violations": [
+    {
+     "class": "E_SET_HOOK_SITE",
+     "message": "the mod \"edit-hook\" writes the entry of a function that \"hooker\" hooks (offset 0x601, 1 byte(s))",
+     "mods": [
+      "edit-hook",
+      "hooker"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_SET_HOOK_SITE_ID": [
+  {
+   "case": "hook ids that cannot be made unique",
+   "class": "E_SET_HOOK_SITE_ID",
+   "error": "the hook ids of the set cannot be made unique",
+   "violations": [
+    {
+     "class": "E_SET_HOOK_SITE_ID",
+     "message": "the hook ids of the set cannot be made unique",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_SET_INCOMPATIBLE": [
+  {
+   "case": "incompatible",
+   "class": "E_SET_INCOMPATIBLE",
+   "error": "the mod \"foe\" is incompatible with \"base-lib\" (<=1.4.0); the set holds version 1.4.0",
+   "violations": [
+    {
+     "class": "E_SET_INCOMPATIBLE",
+     "message": "the mod \"foe\" is incompatible with \"base-lib\" (<=1.4.0); the set holds version 1.4.0",
+     "mods": [
+      "foe",
+      "base-lib"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_SET_MISSING_DEPENDENCY": [
+  {
+   "case": "missing",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+   "violations": [
+    {
+     "class": "E_SET_MISSING_DEPENDENCY",
+     "message": "the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+     "mods": [
+      "needs-base",
+      "base-lib"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "every violated rule is listed",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod \"many\" requires \"absent-one\" (any version), which is not in the set",
+   "violations": [
+    {
+     "class": "E_SET_MISSING_DEPENDENCY",
+     "message": "the mod \"many\" requires \"absent-one\" (any version), which is not in the set",
+     "mods": [
+      "many",
+      "absent-one"
+     ]
+    },
+    {
+     "class": "E_SET_VERSION_MISMATCH",
+     "message": "the mod \"many\" requires \"base-lib\" >9.0.0, but the set holds version 1.4.0",
+     "mods": [
+      "many",
+      "base-lib"
+     ]
+    },
+    {
+     "class": "E_SET_INCOMPATIBLE",
+     "message": "the mod \"many\" is incompatible with \"foe\" (any version); the set holds version 1.0.0",
+     "mods": [
+      "many",
+      "foe"
+     ]
+    },
+    {
+     "class": "E_SET_INCOMPATIBLE",
+     "message": "the mod \"foe\" is incompatible with \"base-lib\" (<=1.4.0); the set holds version 1.4.0",
+     "mods": [
+      "foe",
+      "base-lib"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "relations and edit conflicts are reported together",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod \"lonely\" requires \"nobody\" (any version), which is not in the set",
+   "violations": [
+    {
+     "class": "E_SET_MISSING_DEPENDENCY",
+     "message": "the mod \"lonely\" requires \"nobody\" (any version), which is not in the set",
+     "mods": [
+      "lonely",
+      "nobody"
+     ]
+    },
+    {
+     "class": "E_SET_EDIT_OVERLAP",
+     "message": "the mods \"lonely\" and \"edit-a\" both write offset 0x400, 2 byte(s); overlapping changes are rejected, never merged",
+     "mods": [
+      "lonely",
+      "edit-a"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "saving a set with a violated rule",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+   "violations": [
+    {
+     "class": "E_SET_MISSING_DEPENDENCY",
+     "message": "the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+     "mods": [
+      "needs-base",
+      "base-lib"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "a single-mod variant never ignores a requirement",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+   "violations": []
+  },
+  {
+   "case": "nor does the build route",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+   "violations": [
+    {
+     "class": "E_SET_MISSING_DEPENDENCY",
+     "message": "the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+     "mods": [
+      "needs-base",
+      "base-lib"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "diff-run of a data-only mod with a requirement",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod cannot be run alone: the mod \"needs-data\" requires \"base-lib\" (any version), which is not in the set",
+   "violations": []
+  },
+  {
+   "case": "diff-run of a Luau mod with a requirement",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod cannot be run alone: the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+   "violations": []
+  },
+  {
+   "case": "mod test of a data-only mod with a requirement",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod cannot be run alone: the mod \"needs-data\" requires \"base-lib\" (any version), which is not in the set",
+   "violations": []
+  },
+  {
+   "case": "a fixture session of a mod with a requirement",
+   "class": "E_SET_MISSING_DEPENDENCY",
+   "error": "the mod \"needs-base\" requires \"base-lib\" (>=1.2.0 <2.0.0), which is not in the set",
+   "violations": []
+  }
+ ],
+ "E_SET_PLATFORM": [
+  {
+   "case": "mods of two platforms",
+   "class": "E_SET_PLATFORM",
+   "error": "the mod \"sms-a\" is for master-system but \"edit-a\" is for genesis",
+   "violations": [
+    {
+     "class": "E_SET_PLATFORM",
+     "message": "the mod \"sms-a\" is for master-system but \"edit-a\" is for genesis",
+     "mods": [
+      "sms-a",
+      "edit-a"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "a stored definition: another platform than its members",
+   "class": "E_SET_PLATFORM",
+   "error": "the mod \"edit-a\" is not for the platform of the set (master-system)",
+   "violations": []
+  }
+ ],
+ "E_SET_PRESENTATION_CONFLICT": [
+  {
+   "case": "two drawing mods",
+   "class": "E_SET_PRESENTATION_CONFLICT",
+   "error": "the mods \"draw-one\" and \"draw-two\" both draw (overlay, scenery, exact frame, picture transform or a geometry declaration); a built set supports one drawing mod",
+   "violations": [
+    {
+     "class": "E_SET_PRESENTATION_CONFLICT",
+     "message": "the mods \"draw-one\" and \"draw-two\" both draw (overlay, scenery, exact frame, picture transform or a geometry declaration); a built set supports one drawing mod",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_SET_SIZE": [
+  {
+   "case": "17 members",
+   "class": "E_SET_SIZE",
+   "error": "a mod set holds 1 to 16 mods",
+   "violations": [
+    {
+     "class": "E_SET_SIZE",
+     "message": "a mod set holds 1 to 16 mods",
+     "mods": []
+    }
+   ]
+  },
+  {
+   "case": "a stored definition: no member",
+   "class": "E_SET_SIZE",
+   "error": "a mod set holds 1 to 16 mods",
+   "violations": []
+  }
+ ],
+ "E_SET_SOURCE": [
+  {
+   "case": "a member that does not declare this image",
+   "class": "E_SET_SOURCE",
+   "error": "the mod \"other-image\" does not declare this exact original image",
+   "violations": [
+    {
+     "class": "E_SET_SOURCE",
+     "message": "the mod \"other-image\" does not declare this exact original image",
+     "mods": [
+      "other-image"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "different mapper declarations",
+   "class": "E_SET_SOURCE",
+   "error": "the mods \"map-a\" and \"map-b\" declare different cartridge mappers for this image",
+   "violations": [
+    {
+     "class": "E_SET_SOURCE",
+     "message": "the mods \"map-a\" and \"map-b\" declare different cartridge mappers for this image",
+     "mods": [
+      "map-a",
+      "map-b"
+     ]
+    }
+   ]
+  }
+ ],
+ "E_SET_SYNTAX": [
+  {
+   "case": "a stored definition: not a definition",
+   "class": "E_SET_SYNTAX",
+   "error": "this is not a mod set definition",
+   "violations": []
+  },
+  {
+   "case": "a stored definition: an unknown key",
+   "class": "E_SET_SYNTAX",
+   "error": "a mod set member is the 64 digit identity of a package",
+   "violations": []
+  },
+  {
+   "case": "a stored definition: no final newline",
+   "class": "E_SET_SYNTAX",
+   "error": "this is not a mod set definition",
+   "violations": []
+  }
+ ],
+ "E_SET_UNKNOWN": [
+  {
+   "case": "an unknown set",
+   "class": "E_SET_UNKNOWN",
+   "error": "no mod set of this name is stored (or it is larger than allowed)",
+   "violations": []
+  }
+ ],
+ "E_SET_VERSION": [
+  {
+   "case": "a stored definition: a newer format",
+   "class": "E_SET_VERSION",
+   "error": "the mod set definition has a format this release does not read",
+   "violations": []
+  }
+ ],
+ "E_SET_VERSION_MISMATCH": [
+  {
+   "case": "version mismatch",
+   "class": "E_SET_VERSION_MISMATCH",
+   "error": "the mod \"needs-base\" requires \"base-lib\" >=1.2.0 <2.0.0, but the set holds version 2.0.0",
+   "violations": [
+    {
+     "class": "E_SET_VERSION_MISMATCH",
+     "message": "the mod \"needs-base\" requires \"base-lib\" >=1.2.0 <2.0.0, but the set holds version 2.0.0",
+     "mods": [
+      "needs-base",
+      "base-lib"
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -103,6 +103,9 @@ std::vector<SetViolation> check_set_relations(std::span<const Manifest *const> m
     if (m.platform != members.front()->platform)
       out.push_back({"E_SET_PLATFORM", {m.id, members.front()->id}, "the mod " + named(m.id) + " is for " + m.platform + " but " + named(members.front()->id) + " is for " + members.front()->platform});
   }
+  // Sega CD has no composition support yet (SEG-141-T008, post-beta): more than one mod is refused here, so every route (check, apply, save, variant, build, launcher) says the same.
+  if (members.size() > 1 && members.front()->platform == "sega-cd")
+    out.push_back({"E_SET_PLATFORM_UNSUPPORTED", {}, "mod sets of more than one mod are not supported for sega-cd; use one mod at a time"});
   const auto range_text = [](const ModRelation &r) { return r.version.empty() ? std::string("any version") : r.version; };
   for (const Manifest *member : members) {
     const Manifest &m = *member;
@@ -223,6 +226,8 @@ SetComposition compose_set(std::span<const Package *const> members, std::span<co
 
   // claims: what each member writes, and the entry instruction word of each function it hooks
   std::vector<bool> hooks(members.size(), false);
+  struct Hooked { std::size_t member; std::string cpu; std::uint32_t entry; bool replaces; };
+  std::vector<Hooked> hooked;
   for (std::size_t i = 0; i < members.size(); ++i) {
     const Manifest &m = *manifests[i];
     std::string cpu;
@@ -234,7 +239,11 @@ SetComposition compose_set(std::span<const Package *const> members, std::span<co
         out.violations.push_back({resolved.rejection.code, {m.id}, "the mod " + named(m.id) + ": " + resolved.rejection.message});
         return out;
       }
-      for (const ResolvedHook &h : resolved.hooks) { out.claims.push_back({i, "cartridge-image", h.cpu, "hook-site", h.entry, static_cast<std::uint64_t>(h.entry) + 2U}); hooks[i] = true; }
+      for (const ResolvedHook &h : resolved.hooks) {
+        out.claims.push_back({i, "cartridge-image", h.cpu, "hook-site", h.entry, static_cast<std::uint64_t>(h.entry) + 2U});
+        hooks[i] = true;
+        hooked.push_back({i, h.cpu, h.entry, h.mode == "replace"});
+      }
     }
     if (platform == "genesis" && cpu == "z80") {   // the sound CPU runs these blocks from its RAM: another member's code at the same address is a conflict even when the cartridge bytes are disjoint
       const GuestListingResult l = guest_listing(m, members[i]->files, revision_for(m, out.original_sha256)->label);
@@ -253,6 +262,17 @@ SetComposition compose_set(std::span<const Package *const> members, std::span<co
                                     (changes_image(*manifests[j]) ? ", which also changes the image" : ", whose hook sites cannot be verified in the patched image") + "; BPS ranges are never merged (use typed ROM edits)"});
     }
   }
+
+  // exclusive hook ownership, per CPU and site (ADR 0327): a replacement admits no other member at that entry; observing (before / after) hooks of several members may share it. Hooks exist only
+  // where the platform adapter supports them (a member of another platform that declares one was already refused when it was built alone).
+  for (std::size_t a = 0; a < hooked.size(); ++a)
+    for (std::size_t b = a + 1; b < hooked.size(); ++b) {
+      const Hooked &x = hooked[a], &y = hooked[b];
+      if (x.member == y.member || x.cpu != y.cpu || x.entry != y.entry || (!x.replaces && !y.replaces)) continue;
+      const std::string &first = manifests[x.member]->id, &second = manifests[y.member]->id;
+      out.violations.push_back({"E_SET_HOOK_OWNER", {first, second}, "the mods " + named(first) + " and " + named(second) + " both hook the " + x.cpu + " function at " + image_location(platform, x.entry) +
+                                                                         " and a replacement owns its function exclusively; only before/after hooks of several mods can share a site"});
+    }
 
   const std::vector<SetOverlap> overlaps = find_overlaps(out.claims);
   for (const SetOverlap &o : overlaps) {

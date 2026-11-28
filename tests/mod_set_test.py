@@ -7,7 +7,10 @@ usage: mod_set_test.py <segarecomp-cli> <platforms-dir> <C compiler> <tools/sega
 import importlib.util
 import json
 import os
+import re
+import shutil
 import struct
+import subprocess
 import sys
 import zipfile
 
@@ -82,6 +85,16 @@ def excl(mod_id, version=None):
     return dep(mod_id, version, "incompatibility")
 
 
+# SEG-141-T006: the exact text of every composition and set-build diagnostic (class, message, every violation) is pinned in tests/data/mod_set_diagnostics.json. A deliberate wording change is made with
+# SEGARECOMP_UPDATE_GOLDEN=1 and reviewed as a diff. Temporary paths and package digests are normalised.
+GOLDEN = {}
+GOLDEN_PATH = Path(__file__).resolve().parent / "data" / "mod_set_diagnostics.json"
+
+
+def normalised(value):
+    return json.loads(re.sub(r"[0-9a-f]{64}", "<digest>", json.dumps(value).replace(str(tmp), "<tmp>")))
+
+
 def ok(what, *args):
     rc, doc, p = cli.run(*args)
     cli.check(rc == 0 and doc and doc.get("ok") is True, f"{what}: expected ok, got rc={rc} {doc} {p.stderr[-300:]}")
@@ -92,6 +105,8 @@ def refused(what, code, *args, says=(), mods=None):
     rc, doc, p = cli.run(*args)
     cli.check(rc == 1 and doc and doc.get("ok") is False and doc.get("class") == code, f"{what}: expected {code}, got rc={rc} {doc and (doc.get('class'), doc.get('error'))} {p.stderr[-300:]}")
     doc = doc or {}
+    if code.startswith(("E_SET_", "E_HEADER_FIELD", "E_EDIT_EXPECTED", "E_NOT_APPROVED")) or (list(args[:2]) == ["mod", "set"] and code in ("E_PACKAGE_CHANGED", "E_PLATFORM_UNKNOWN", "E_RANGE_DECLARATION", "E_MEMORY_RANGE", "E_HOOK_REVISION", "E_HOOK_COUNT", "E_HOOK_CALLBACK_UNSUPPORTED")):
+        GOLDEN.setdefault(code, []).append(normalised({"case": what, "class": doc.get("class"), "error": doc.get("error"), "violations": doc.get("violations", [])}))
     for word in says:
         cli.check(word in doc.get("error", ""), f"{what}: the diagnostic says {word!r}: {doc.get('error')}")
     if mods is not None:
@@ -200,6 +215,18 @@ HOOK = '\n[[hook]]\nid = "watch"\nsymbol = "fn"\nmode = "before"\nreads = ["d0"]
 hooker = project("hooker", native=True, hooks=HOOK, symbols=(("fn", "0x00000600"),))
 rejected_composition("a write over a hooked entry", "E_SET_HOOK_SITE", [project("edit-hook", edits=f"rev-a u8 0x00000601 0x{ROM[0x601]:02x} 0x00\n"), hooker], says=('"edit-hook"', '"hooker"'), mods=["edit-hook", "hooker"])
 composed("a write next to a hooked entry", [project("edit-near", edits=f"rev-a u8 0x00000602 0x{ROM[0x602]:02x} 0x00\n"), hooker])
+# exclusive ownership (SEG-141-T003, ADR 0327): two observers share a site; a replacement owns its function alone, in either order
+observer = project("observer", native=True, hooks=HOOK, symbols=(("fn", "0x00000600"),))
+doc = ok("two observing mods share a site", "mod", "set", "check", hooker, observer, "--rom", ROM_PATH)
+cli.check(doc.get("composed") is True, f"two before hooks on one function compose: {doc}")
+REPLACE = '\n[[hook]]\nid = "swap"\nsymbol = "fn"\nmode = "replace"\nreads = ["d0"]\nwrites = ["d0", "ccr"]\ncost = 24\n'
+swapper = project("swapper", native=True, hooks=REPLACE, symbols=(("fn", "0x00000600"),))
+other_swapper = project("swapper-two", native=True, hooks=REPLACE, symbols=(("fn", "0x00000600"),))
+for members, names in (([swapper, other_swapper], ["swapper", "swapper-two"]), ([hooker, swapper], ["hooker", "swapper"]), ([swapper, hooker], ["swapper", "hooker"])):
+    rejected_composition("an exclusive-hook conflict " + "/".join(names), "E_SET_HOOK_OWNER", members, says=(f'"{names[0]}"', f'"{names[1]}"', "exclusively"), mods=names)
+elsewhere = project("swapper-else", native=True, hooks=REPLACE, symbols=(("fn", "0x00000700"),))
+composed("replacements of different functions", [swapper, elsewhere])
+
 rejected_composition("BPS with a hooking mod", "E_SET_BPS_CONFLICT", [bps_a, hooker], says=("hook sites",), mods=["bps-a", "hooker"])
 
 # header policy: one image, one policy
@@ -539,5 +566,220 @@ try:
 except OSError:
     pass
 cli.check(snapshot() == before, "the successful runs changed no input")
+
+# ------------------------------------------------------------------ SEG-141-T006: `mod set build` refusals that happen before any compiler runs, and the saved-definition classes through it
+def build_refused(what, code, members, *approvals, rom=ROM_PATH, **kw):
+    out = tmp / ("setbuild-" + str(len(GOLDEN.get(code, []))) + code)
+    args = ["mod", "set", "build", *members, "--rom", rom, "--out", out, "--cc", CC, "--sdk-dir", PLATFORMS]
+    for a in approvals:
+        args += ["--approve", a]
+    refused(what, code, *args, **kw)
+    cli.check(not (out / "game").exists() and not (out / "game.exe").exists(), f"{what}: no executable")
+
+
+def identity_of(d):
+    return ok("check " + d.name, "mod", "check", d)["package_identity"]
+
+
+def drawing(mod_id):
+    d = project(mod_id, luau=True)
+    toml = d / "mod.toml"
+    write(toml, toml.read_text().replace('required = ["host.log"]', 'required = ["host.log", "overlay.rgba"]').encode())
+    return d
+
+
+native_one = project("needs-approval", native=True)
+build_refused("a native member without approval", "E_NOT_APPROVED", [edit_a, native_one])
+build_refused("two drawing mods", "E_SET_PRESENTATION_CONFLICT", [drawing("draw-one"), drawing("draw-two")])
+sound = project("sound-mod", luau=True, extra='\n[[audio.mapping]]\nid = "now"\nkind = "event"\nspace = "m68k.work_ram"\noffset = 112\nwidth = 1\n\n[[audio.mapping.value]]\nname = "idle"\nvalue = 0\n')
+write(sound / "mod.toml", (sound / "mod.toml").read_text().replace('required = ["host.log"]', 'required = ["audio.event.read", "host.log"]').encode())
+build_refused("the audio API in a set", "E_SET_AUDIO_UNSUPPORTED", [edit_a, sound])
+plain_hook = project("hook-plain", native=True, hooks=HOOK, symbols=(("fn", "0x00000600"),))
+anchored = project("hook-anchored", native=True, hooks=HOOK + 'anchor = "other"\n', symbols=(("fn", "0x00000600"), ("other", "0x00000700")))
+build_refused("hooked functions declared with different anchors", "E_SET_HOOK_ANCHOR", [plain_hook, anchored], identity_of(plain_hook), identity_of(anchored))
+build_refused("a composition refusal reads the same from build", "E_SET_BPS_CONFLICT", [bps_a, edit_a])
+geometry = project("wide-data", edits=f"rev-a u8 0x00000710 0x{ROM[0x710]:02x} 0x00\n", extra='\n[geometry]\naspect_max = "16:9"\n')
+build_refused("a data-only geometry claim is refused, never dropped", "E_SET_GEOMETRY_UNSUPPORTED", [geometry, code_c])
+
+
+def two_revisions(d, extra):
+    """The project with a second declared revision `rev-b` and `extra` appended."""
+    toml = d / "mod.toml"
+    write(toml, (toml.read_text() + f'\n[[target.revision]]\nlabel = "rev-b"\nsha256 = "{sha(OTHER)}"\n' + extra).encode())
+    return d
+
+
+def with_caps(d, caps):
+    toml = d / "mod.toml"
+    write(toml, toml.read_text().replace('required = ["host.log"]', f"required = [{caps}]").encode())
+    return d
+
+
+script_hook = project("script-hook", luau=True, extra=HOOK, symbols=(("fn", "0x00000600"),))
+build_refused("a script hook has no callback", "E_HOOK_CALLBACK_UNSUPPORTED", [edit_a, with_caps(script_hook, '"hook.function", "host.log"')])
+elsewhere_range = two_revisions(with_caps(project("range-elsewhere", luau=True), '"host.log", "memory.write.m68k.work_ram"'),
+                                '\n[[memory]]\nrevision = "rev-b"\nspace = "m68k.work_ram"\noffset = 16\nlength = 2\naccess = "write"\n')
+build_refused("a memory capability without a range for this revision", "E_RANGE_DECLARATION", [edit_a, elsewhere_range])
+rom_reader = project("rom-reader", native=True)
+write(rom_reader / "mod.toml", ((rom_reader / "mod.toml").read_text() + '\n[capabilities]\nrequired = ["memory.read.m68k.rom"]\n\n[[memory]]\nrevision = "rev-a"\nspace = "m68k.rom"\noffset = 8176\nlength = 64\naccess = "read"\n').encode())
+build_refused("a ROM range beyond the composed image", "E_MEMORY_RANGE", [edit_a, rom_reader], identity_of(rom_reader))
+other_hook = two_revisions(project("hook-elsewhere", native=True, hooks=HOOK.replace('id = "watch"', 'id = "watch"\nrevision = "rev-b"'), symbols=(("fn", "0x00000600"),)),
+                           '\n[[symbol]]\nname = "fn"\nrevision = "rev-b"\naddress = "0x00000600"\nprovenance = "verified"\n')
+build_refused("hooks that apply to no function of this revision", "E_HOOK_REVISION", [edit_a, other_hook], identity_of(other_hook))
+
+
+def many_hooks(mod_id, base):
+    names = [(f"fn{i}", f"0x{base + 4 * i:08x}") for i in range(40)]
+    return project(mod_id, native=True, hooks="".join(f'\n[[hook]]\nid = "{mod_id}-{i:02d}"\nsymbol = "fn{i}"\nmode = "before"\nreads = ["d0"]\n' for i in range(40)), symbols=names)
+
+
+crowd = [many_hooks("crowd-a", 0x400), many_hooks("crowd-b", 0x600)]
+build_refused("more than 64 hooked functions across a set", "E_HOOK_COUNT", crowd, identity_of(crowd[0]), identity_of(crowd[1]))
+
+
+def direct_build_refused(what, code, package, identity):
+    """The two member-verification refusals only `segarecomp build --set-package` can reach (mod set build pins what it just read)."""
+    out = tmp / ("direct-" + code)
+    p = subprocess.run([sys.argv[1], "build", "--rom", str(ROM_PATH), "--output", str(out), "--cc", CC, "--runtime-dir", str(Path(PLATFORMS) / "genesis"), "--set-package", str(package), "--set-identity", identity],
+                       text=True, capture_output=True, timeout=600)
+    status = json.loads((out / "status.json").read_text()) if (out / "status.json").is_file() else {}
+    cli.check(p.returncode != 0 and status.get("diagnostic") == code and not (out / "game").exists(), f"{what}: expected {code}, got {status}")
+    GOLDEN.setdefault(code + " (build)", []).append(normalised({"case": what, "diagnostic": status.get("diagnostic"), "message": status.get("message")}))
+
+
+packed_edit = tmp / "direct-member.segapatch"
+ok("pack the direct member", "mod", "pack", edit_a, "--out", packed_edit)
+direct_build_refused("a member that is not the pinned package", "E_PACKAGE_CHANGED", packed_edit, "0" * 64)
+direct_build_refused("a member that cannot be read", "E_ARCHIVE_ENTRY", tmp / "no-such.segapatch", "0" * 64)
+
+# two mods' hook ids that cannot be told apart even with the member suffix
+def hook_text(hook_id, symbol):
+    return f'\n[[hook]]\nid = "{hook_id}"\nsymbol = "{symbol}"\nmode = "before"\nreads = ["d0"]\n'
+
+
+taken = project("ids-taken", native=True, hooks=hook_text("x", "fn-a") + hook_text("x-m1", "fn-b"), symbols=(("fn-a", "0x00000600"), ("fn-b", "0x00000700")))
+clashing = project("ids-clash", native=True, hooks=hook_text("x", "fn-c"), symbols=(("fn-c", "0x00000800"),))
+build_refused("hook ids that cannot be made unique", "E_SET_HOOK_SITE_ID", [taken, clashing], identity_of(taken), identity_of(clashing))
+
+# a set-mod folder the build did not create is never deleted; the refusal's class and message are pinned
+occupied = tmp / ("setbuild-" + str(len(GOLDEN.get("E_SET_ARTIFACT_WRITE", []))) + "E_SET_ARTIFACT_WRITE")
+write(occupied / "set-mod" / "keep.txt", b"user data")
+build_refused("a user folder where the build stages", "E_SET_ARTIFACT_WRITE", [edit_a, project("runs", luau=True)])
+cli.check((occupied / "set-mod" / "keep.txt").read_bytes() == b"user data" and sorted(p.name for p in (occupied / "set-mod").iterdir()) == ["keep.txt"], "the user's set-mod folder is untouched")
+
+# ------------------------------------------------------------------ no output of a package build may be an input: the composed image <out>/input/effective.rom first of all (it is removed and rewritten)
+GUARD = tmp / "guard"
+guard_members = [edit_a, edit_b]
+member_packages = []
+for i, d in enumerate(guard_members):
+    package = GUARD / f"member-{i}.segapatch"
+    package.parent.mkdir(parents=True, exist_ok=True)
+    ok("pack a guard member", "mod", "pack", d, "--out", package)
+    member_packages.append(package)
+member_ids = [identity_of(d) for d in guard_members]
+
+
+def tree(root):
+    return {str(p.relative_to(root)): (os.readlink(p) if p.is_symlink() else p.read_bytes() if p.is_file() else "dir") for p in sorted(root.rglob("*"))}
+
+
+def direct_args(out, rom, packages):
+    argv = [sys.argv[1], "build", "--rom", str(rom), "--output", str(out), "--cc", CC, "--runtime-dir", str(Path(PLATFORMS) / "genesis")]
+    for package, identity in zip(packages, member_ids):
+        argv += ["--set-package", str(package), "--set-identity", identity]
+    return argv
+
+
+def guarded(what, area, out, rom, packages=None, cwd=None):
+    """Both routes refuse with E_OUTPUT_IS_INPUT and change nothing under `area` (inputs, links and the output folder)."""
+    before = tree(area)
+    p = subprocess.run(direct_args(out, rom, packages or member_packages), text=True, capture_output=True, timeout=600, cwd=cwd)
+    cli.check(p.returncode == 1 and "class=E_OUTPUT_IS_INPUT" in p.stdout and tree(area) == before, f"{what} (build --set-package): rc={p.returncode} {p.stdout[-300:]} changed={sorted(set(tree(area).items()) ^ set(before.items()))[:4] if tree(area) != before else []}")
+    rc, doc, _ = cli.run("mod", "set", "build", *(packages or member_packages), "--rom", rom, "--out", out, "--cc", CC, "--sdk-dir", PLATFORMS, cwd=cwd)
+    cli.check(rc == 1 and doc and doc.get("class") == "E_OUTPUT_IS_INPUT" and tree(area) == before, f"{what} (mod set build): rc={rc} {doc}")
+
+
+def area(name):
+    d = GUARD / name
+    (d / "out" / "input").mkdir(parents=True)
+    return d
+
+
+a = area("direct")
+original = write(a / "out" / "input" / "effective.rom", ROM)
+guarded("the original at the generated image path", a, a / "out", original)
+guarded("an equivalent spelling of the same path", a, a / "out" / "input" / ".." , original)
+guarded("relative paths", a, Path("out"), Path("out/./input/../input/effective.rom"), cwd=a)
+a = area("status-file")
+status_rom = write(a / "out" / "status.json", ROM)
+guarded("the original at another fixed build output", a, a / "out", status_rom)
+a = area("generated-tree")
+tree_rom = write(a / "out" / "obj" / "game.bin", ROM)
+guarded("the original inside a folder the build replaces", a, a / "out", tree_rom)
+a = area("member-at-image")
+shutil.copy(member_packages[0], a / "out" / "input" / "effective.rom")
+image = write(a / "game.bin", ROM)
+guarded("a member package at the generated image path", a, a / "out", image, [a / "out" / "input" / "effective.rom", member_packages[1]])
+try:
+    a = area("symlink-destination")
+    image = write(a / "game.bin", ROM)
+    (a / "out" / "input" / "effective.rom").symlink_to(image)
+    guarded("a link at the generated image path pointing to the original", a, a / "out", image)
+    a = area("symlink-original")
+    real = write(a / "out" / "input" / "effective.rom", ROM)
+    (a / "game.bin").symlink_to(real)
+    guarded("the original named through a link to the generated image path", a, a / "out", a / "game.bin")
+    a = GUARD / "symlink-folder"
+    (a / "out").mkdir(parents=True)
+    real = write(a / "mine" / "effective.rom", ROM)
+    (a / "out" / "input").symlink_to(a / "mine", target_is_directory=True)
+    guarded("a linked input folder that holds the original", a, a / "out", real)
+    a = area("symlink-log")
+    image = write(a / "game.bin", ROM)
+    (a / "out" / "build.log").symlink_to(image)
+    guarded("a link at the build log pointing to the original", a, a / "out", image)
+except OSError:
+    print("mod_set_test: symbolic links are not available here; link collisions not exercised")
+try:
+    a = area("hardlink")
+    image = write(a / "game.bin", ROM)
+    os.link(image, a / "out" / "input" / "effective.rom")
+    guarded("a hard link of the original at the generated image path", a, a / "out", image)
+except OSError:
+    print("mod_set_test: hard links are not available here")
+# with performance reporting on, the build also writes and removes <out>/compiler-version.tmp (the compiler's version text), so that path is protected like every other fixed output
+def profiled_refused(what, root, argv):
+    before = tree(root)
+    p = subprocess.run(argv + ["--performance-report", str(root / "report.json")], text=True, capture_output=True, timeout=600)
+    cli.check(p.returncode == 1 and "class=E_OUTPUT_IS_INPUT" in p.stdout and tree(root) == before, f"{what}: rc={p.returncode} {p.stdout[-300:]} changed={tree(root) != before}")
+
+
+a = area("version-file")
+version_rom = write(a / "out" / "compiler-version.tmp", ROM)
+profiled_refused("a profiled set build with the original at compiler-version.tmp", a, direct_args(a / "out", version_rom, member_packages))
+cli.check(version_rom.is_file() and version_rom.read_bytes() == ROM, "the original's bytes are unchanged")
+guarded("the original at compiler-version.tmp", a, a / "out", version_rom)
+a = area("version-member")
+shutil.copy(member_packages[0], a / "out" / "compiler-version.tmp")
+image = write(a / "game.bin", ROM)
+profiled_refused("a profiled set build with a member package at compiler-version.tmp", a, direct_args(a / "out", image, [a / "out" / "compiler-version.tmp", member_packages[1]]))
+cli.check((a / "out" / "compiler-version.tmp").is_file() and (a / "out" / "compiler-version.tmp").read_bytes() == member_packages[0].read_bytes(), "the member package's bytes are unchanged")
+
+# a single-mod package route shares the same generated image path and the same guard
+a = area("single-route")
+single = write(a / "out" / "input" / "effective.rom", ROM)
+before = tree(a)
+p = subprocess.run([sys.argv[1], "build", "--rom", str(single), "--output", str(a / "out"), "--cc", CC, "--runtime-dir", str(Path(PLATFORMS) / "genesis"), "--data-package", str(member_packages[0]), "--data-identity", member_ids[0]],
+                   text=True, capture_output=True, timeout=600)
+cli.check(p.returncode == 1 and "class=E_OUTPUT_IS_INPUT" in p.stdout and tree(a) == before, f"the single data-package route refuses too: {p.returncode} {p.stdout[-300:]}")
+
+if os.environ.get("SEGARECOMP_UPDATE_GOLDEN") == "1":
+    write(GOLDEN_PATH, (json.dumps(GOLDEN, indent=1, sort_keys=True) + "\n").encode())
+golden = json.loads(GOLDEN_PATH.read_text()) if GOLDEN_PATH.is_file() else {}
+cli.check(sorted(golden) == sorted(GOLDEN), f"every diagnostic class has a golden record: golden only {sorted(set(golden) - set(GOLDEN))}, new {sorted(set(GOLDEN) - set(golden))}")
+for code in sorted(set(golden) & set(GOLDEN)):
+    for want, got in zip(golden[code], GOLDEN[code]):
+        cli.check(want == got, f"golden diagnostic {code} / {want.get('case')}: {got} != {want}")
+    cli.check(len(golden[code]) == len(GOLDEN[code]), f"golden case count of {code}")
 
 cli.done("mod_set_test")

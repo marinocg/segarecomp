@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -80,6 +81,21 @@ int main(int argc, char **argv) {
   const ModSet clash = store_mod_set(entry, "pair", {ids[0], ids[2]}, rom_path, library);
   expect(!clash.ok && clash.violations.size() == 1 && clash.violations[0].code == "E_SET_EDIT_OVERLAP" && clash.error.find("\"first\"") != std::string::npos && clash.error.find("\"clash\"") != std::string::npos,
          "an overlapping set is refused naming both mods: " + clash.error);
+  expect(clash.error.find("Two mods change the same bytes: ") != std::string::npos && clash.error.find("\n  Remove one of the two. Overlapping changes are never merged.") != std::string::npos,
+         "the launcher words the class and the next step: " + clash.error);
+  {   // SEG-141-T006: every composition class has its own launcher text; only an unknown class gets the generic one
+    const launcher::ModSetClassText generic = launcher::mod_set_class_text("E_SOMETHING_ELSE");
+    std::set<std::string> titles;
+    const char *classes[] = {"E_SET_SIZE", "E_SET_DUPLICATE_MOD", "E_SET_PLATFORM", "E_SET_PLATFORM_UNSUPPORTED", "E_SET_MISSING_DEPENDENCY", "E_SET_VERSION_MISMATCH", "E_SET_INCOMPATIBLE", "E_SET_SOURCE", "E_SET_EDIT_OVERLAP",
+                             "E_SET_BPS_CONFLICT", "E_SET_HOOK_SITE", "E_SET_HOOK_OWNER", "E_SET_HOOK_ANCHOR", "E_SET_HOOK_SITE_ID", "E_SET_GUEST_ADMISSION", "E_SET_HEADER_POLICY", "E_HEADER_FIELD_COLLISION", "E_EDIT_EXPECTED_MISMATCH",
+                             "E_SET_PRESENTATION_CONFLICT", "E_SET_AUDIO_UNSUPPORTED", "E_SET_GEOMETRY_UNSUPPORTED", "E_SET_NATIVE_LINK", "E_NOT_APPROVED", "E_SET_VERSION", "E_SET_SYNTAX", "E_SET_UNKNOWN"};
+    for (const char *code : classes) {
+      const auto text = launcher::mod_set_class_text(code);
+      expect(!text.title.empty() && !text.next.empty() && text.title != generic.title, std::string("a dedicated launcher text for ") + code);
+      titles.insert(text.title);
+    }
+    expect(titles.size() == std::size(classes), "every class has a distinct title");
+  }
   expect(slurp(file) == before, "a refused store leaves the stored definition untouched");
   expect(!store_mod_set(entry, "../escape", {ids[0]}, rom_path, library).ok && !store_mod_set(entry, "none", {}, rom_path, library).ok && !store_mod_set(entry, "twice", {ids[0], ids[0]}, rom_path, library).ok &&
              !store_mod_set(entry, "stranger", {std::string(64, 'f')}, rom_path, library).ok,

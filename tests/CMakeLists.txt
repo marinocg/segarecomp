@@ -238,6 +238,14 @@ target_compile_features(genesis_mod_scheduler_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_mod_scheduler_tests)
 add_test(NAME genesis_mod_scheduler_tests COMMAND genesis_mod_scheduler_tests)
 set_tests_properties(genesis_mod_scheduler_tests PROPERTIES TIMEOUT 300)
+# SEG-141-T003 (ADR 0327): several mods on one runtime: composite dispatch order, failure isolation, combined state, exclusive replace-hook ownership and the recorded dispatch overhead.
+add_executable(genesis_mod_set_tests genesis_mod_set_test.cpp
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_persistence.c)
+target_link_libraries(genesis_mod_set_tests PRIVATE segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+target_compile_features(genesis_mod_set_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_mod_set_tests)
+add_test(NAME genesis_mod_set_tests COMMAND genesis_mod_set_tests)
+set_tests_properties(genesis_mod_set_tests PROPERTIES TIMEOUT 300)
 # SEG-152-T003/T004 (ADR 0320): the exact-frame presentation seam and the VDP helper table, driven by a synthetic strict-C11 ABI 2 provider; the provider object is compiled with warnings as errors.
 add_library(genesis_mod_exact_frame_provider OBJECT fixtures/mod_sdk/exact_frame_provider.c)
 set_target_properties(genesis_mod_exact_frame_provider PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
@@ -2602,6 +2610,16 @@ add_test(NAME patch_bps_writer_test COMMAND patch_bps_writer_test)
 set_property(TEST patch_bps_writer_test APPEND PROPERTY LABELS full fast)
 # SEG-136-T007 / SEG-138-T009 (ADR 0300, delivery F11): bounded `mod diff-run` / `mod test` and the synthetic gameplay example end to end (scheduled Luau mod in a built, headless generated-native program). Fabricated ROM only.
 add_test(NAME mod_diff_run_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_diff_run_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-141-T003/T006 (ADR 0327): built mod sets (Luau + native + typed edit, input chain, shared hooks, combined state, fault isolation, refusal classes); the played section needs the SDL3 prefix.
+add_test(NAME mod_set_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_set_build_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+set_property(TEST mod_set_build_test APPEND PROPERTY LABELS full)   # many generated-native builds: CI full tier and --focus, not the local fast preset
+set_property(TEST mod_set_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST mod_set_build_test PROPERTY TIMEOUT 1500)
+# SEG-141-T007 (ADR 0327): built Master System mod sets on the shared engine and set dispatcher; the played section needs SDL3.
+add_test(NAME mod_set_sms_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_set_sms_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+set_property(TEST mod_set_sms_test APPEND PROPERTY LABELS full)
+set_property(TEST mod_set_sms_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST mod_set_sms_test PROPERTY TIMEOUT 1500)
 add_test(NAME mod_gameplay_example_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_gameplay_example_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST mod_diff_run_test mod_gameplay_example_test PROPERTY TIMEOUT 900)
 foreach(_mod_test mod_package_test mod_project_test mod_sources_test mod_audio_test mod_workflow_test mod_edits_test mod_hooks_test mod_guest_test mod_guest_exec_test mod_diff_run_test mod_gameplay_example_test)
@@ -2674,7 +2692,7 @@ add_test(NAME luau_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOUR
 add_test(NAME luau_host_golden_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/luau_host_golden_test.py)
 add_test(NAME mod_luau_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_luau_api_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_api_test.py $<TARGET_FILE:segarecomp>)
-foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_frame_cost genesis_mod_exact_adapter_tests genesis_mod_bitmap_tests genesis_mod_refusal_tests genesis_mod_refusal_epoch_tests genesis_mod_capability_isolation_tests genesis_mod_scenery_rows_tests genesis_mod_scenery_rows_epoch_tests genesis_mod_scenery_rows_capability_tests genesis_mod_scenery_rows_phase_tests genesis_mod_scenery_rows_phase_ungranted_tests genesis_mod_scenery_origin_tests genesis_mod_scenery_origin_epoch_tests genesis_mod_scenery_origin_capability_tests genesis_mod_scenery_origin_phase_tests genesis_mod_scenery_origin_phase_ungranted_tests genesis_mod_state_tests genesis_mod_replay_tests genesis_mod_audio_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
+foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_set_tests genesis_mod_exact_frame_tests genesis_mod_vdp_helper_tests genesis_mod_exact_frame_cost genesis_mod_exact_adapter_tests genesis_mod_bitmap_tests genesis_mod_refusal_tests genesis_mod_refusal_epoch_tests genesis_mod_capability_isolation_tests genesis_mod_scenery_rows_tests genesis_mod_scenery_rows_epoch_tests genesis_mod_scenery_rows_capability_tests genesis_mod_scenery_rows_phase_tests genesis_mod_scenery_rows_phase_ungranted_tests genesis_mod_scenery_origin_tests genesis_mod_scenery_origin_epoch_tests genesis_mod_scenery_origin_capability_tests genesis_mod_scenery_origin_phase_tests genesis_mod_scenery_origin_phase_ungranted_tests genesis_mod_state_tests genesis_mod_replay_tests genesis_mod_audio_tests mod_platform_conformance_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
   set_property(TEST ${_luau_test} APPEND PROPERTY LABELS full fast)
   set_property(TEST ${_luau_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endforeach()
