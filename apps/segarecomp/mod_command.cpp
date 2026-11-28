@@ -490,7 +490,8 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
     const std::string stored = slurp(entry / "luau.bin");
     luau_ok = luau::verify_compiled(p, {reinterpret_cast<const std::uint8_t *>(stored.data()), stored.size()}, lb.compiled.digest()).ok;
   }
-  if (luau_ok && mod::parse_components(slurp(entry / "variant.txt")) == v.components && fs::is_regular_file(entry / "package.segapatch", ec)) {
+  std::vector<std::uint8_t> stored_package;   // a hit also needs the cached archive to be the verified one, byte for byte (missing, unreadable, damaged or another package: a miss), as for a larger set
+  if (luau_ok && mod::parse_components(slurp(entry / "variant.txt")) == v.components && read_all(entry / "package.segapatch", mod::kMaxArchiveBytes, stored_package) && stored_package == package_bytes) {
     cache = "hit";
   } else {
     const std::vector<mod::VariantComponent> previous = mod::parse_components(slurp(index));

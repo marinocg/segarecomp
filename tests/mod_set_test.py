@@ -395,6 +395,29 @@ for victim in [entry / f"luau-{I_LUAU}.bin", entry / "members" / f"{I_EDIT}.sega
     rebuilt = variant("trio")
     cli.check(rebuilt.get("cache") == "miss" and victim.read_bytes() == good, f"a modified {victim.name} is rebuilt: {rebuilt}")
 
+# ONE member, same integrity rule: a cached archive that is damaged, truncated, empty, missing or another VALID package is a miss that restores the verified bytes. Both routes share the one key and entry,
+# with and without compiled Luau (the compiled-output check alone never covered the archive).
+save("solo-data", I_EDIT)
+for ident, set_name in [(I_EDIT, "solo-data"), (I_LUAU, "solo")]:
+    base_record = single_variant(ident)
+    cached = LIB / "cache" / "variants" / base_record["variant_key"] / "package.segapatch"
+    good = (LIB / "mods" / f"{ident}.segapatch").read_bytes()
+    another = (LIB / "mods" / f"{I_CODE}.segapatch").read_bytes()
+    entries = sorted(p.name for p in (LIB / "cache" / "variants").iterdir())
+    damages = [("a flipped byte of the same size", lambda: cached.write_bytes(good[:40] + bytes([good[40] ^ 1]) + good[41:])), ("appended bytes", lambda: cached.write_bytes(good + b"x")),
+               ("truncated", lambda: cached.write_bytes(good[:-1])), ("empty", lambda: cached.write_bytes(b"")), ("missing", lambda: cached.unlink()), ("another valid package", lambda: cached.write_bytes(another))]
+    for route, run_variant in [("mod variant", lambda: single_variant(ident)), ("one-member set", lambda: variant(set_name))]:
+        before_hit = run_variant()
+        cli.check(before_hit.get("cache") == "hit" and cached.read_bytes() == good, f"{route}: a valid entry is a hit: {before_hit}")
+        for what, damage in damages:
+            damage()
+            rebuilt = run_variant()
+            cli.check(rebuilt.get("cache") == "miss" and cached.is_file() and cached.read_bytes() == good, f"{route}, {what}: a miss that restores the verified package: {rebuilt}")
+            cli.check(rebuilt.get("variant_key") == base_record["variant_key"] and rebuilt.get("components") == base_record["components"], f"{route}, {what}: the single-mod identity is unchanged")
+            again = run_variant()
+            cli.check(again.get("cache") == "hit", f"{route}, {what}: the restored entry is a hit: {again}")
+    cli.check(sorted(p.name for p in (LIB / "cache" / "variants").iterdir()) == entries, "no other cache entry appears")
+
 # a native member needs its own approval, and its compile-only probe runs; a failed build publishes nothing
 I_NATIVE = install(project("gameplay-native", native=True), approve=False)
 save("with-native", I_LUAU, I_NATIVE, I_EDIT)
