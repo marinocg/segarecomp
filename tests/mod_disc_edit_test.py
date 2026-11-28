@@ -211,6 +211,10 @@ def rejections(tmp, projects):
     refused(cli("check", projects.make(identity, [good], bios='requirement = "file"')), "E_FIELD_VALUE", "an unknown BIOS requirement")
     refused(cli("check", projects.make(identity, [good], extra='\n[[source]]\nkind = "luau-source"\npath = "x.luau"\n')), "E_ARCHIVE_ENTRY", "a missing source file")
 
+    for start, length, label in ((0x00, 4, "the disc system identifier"), (0x34, 4, "the IP boot descriptor"), (0x44, 4, "the SP boot descriptor")):
+        where = user_offset("raw", 0, start)
+        apply(projects.make(identity, [edit(b"\xab" * length, where, track[where:where + length])]), "rewriting " + label, "E_DISC_METADATA")
+
     # ---- layout vectors (sega-cd-mod-sources.md section 4), on a three-track disc: the audio FILE holds two audio tracks of different lengths ----
     base3 = tmp / "base3"
     shutil.copytree(disc, base3)
@@ -294,6 +298,22 @@ def iso_files(tmp, projects):
             refused(cli("apply", bad, "--cue", d / "disc.cue", "--out", tmp / ("iso-bad-" + variant + klass)), klass, variant + ": " + name)
 
 
+def iso_metadata(tmp, projects):
+    """Filesystem metadata is layout: no write may rewrite a volume descriptor, a path table or a directory record (an extent or a size), by raw range or by file name."""
+    for variant in ("cooked", "raw"):
+        d = tmp / ("iso-" + variant)
+        disc = oracle.read_disc(d / "disc.cue")
+        track = (d / "track01.bin").read_bytes()
+        for lba, within, label in ((F.ISO_PVD, 80, "the primary volume descriptor"), (F.ISO_TERMINATOR, 0, "the descriptor set terminator"), (F.ISO_ROOT, 70, "a root directory record"),
+                                   (F.ISO_OVL, 40, "a sub-directory record")):
+            at = user_offset(variant, lba, within)
+            old = track[at:at + 16]
+            bad = projects.make(disc["identity"], [edit(bytes(b ^ 1 for b in old), at, old)])
+            out = tmp / ("meta-%s-%d" % (variant, lba))
+            refused(cli("apply", bad, "--cue", d / "disc.cue", "--out", out), "E_DISC_METADATA", "%s: rewriting %s" % (variant, label))
+            check(not out.exists(), variant + ": nothing is written for " + label)
+
+
 def packages(tmp, projects):
     """The disc size model: an archive over 32 MiB is legal only when every payload is a disc kind; the cartridge commands refuse a disc package by name."""
     identity = "1" * 64
@@ -302,6 +322,13 @@ def packages(tmp, projects):
     package = tmp / "big.segapatch"
     code, doc = cli("pack", only, "--out", package)
     check(code == 0 and package.stat().st_size > (32 << 20) and cli("inspect", package)[0] == 0, "a disc-only package over 32 MiB packs and re-reads: %s" % doc.get("error", ""))
+    # Every size up to the per-payload cap is legal, on both sides of the 16 MiB cartridge entry limit and the 32 MiB archive limit.
+    for mib in (15, 17, 31):
+        data = bytes(mib << 20)
+        mod = projects.make(identity, [(data, dict(target=0, start=0, original_sha256=sha(data)))])
+        out = tmp / ("size-%d.segapatch" % mib)
+        code, doc = cli("pack", mod, "--out", out)
+        check(code == 0 and cli("inspect", out)[0] == 0, "a %d MiB disc payload packs and re-reads: %s" % (mib, doc.get("error", "")))
     mixed = projects.make(identity, [(big, dict(target=0, start=0, original_sha256=sha(big)))], extra='\n[[source]]\nkind = "guest-asm"\npath = "main.asm"\ncpu = "m68k"\n')
     (mixed / "main.asm").write_text("free * 0x4000000 0x10 0x00\norg * 0x4000000 at 0xff0000\n  rts\n", newline="\n")
     code, doc = cli("check", mixed)
@@ -321,6 +348,7 @@ def main():
         cdframe(tmp, common.Builder(SEGARECOMP, CC, tmp), projects)
         rejections(tmp, projects)
         iso_files(tmp, projects)
+        iso_metadata(tmp, projects)
         packages(tmp, projects)
     print("%d failures" % len(failures))
     return 1 if failures else 0

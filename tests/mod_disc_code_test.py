@@ -205,6 +205,40 @@ def main():
         evidence_refused(mods.project(guest="free * 0x%x 0x100 0x00\norg * 0x%x at 0x%x\n  jsr @entry\n  rts\n" % (module + free, module + free, base + free),
                                       symbols=[dict(wrong_module, module="/NOPE.BIN;1")]), "o-module2", "unsupported_code_class:unrecognized_module", "a symbol naming a module the disc does not have")
 
+        # The module rule reads what the ASSEMBLER resolved: whitespace the assembler drops (`@ entry`) cannot hide a symbol from it.
+        for i, operand in enumerate(("@ entry", "@\tentry", "@en try")):
+            evidence_refused(mods.project(guest="free * 0x%x 0x100 0x00\norg * 0x%x at 0x%x\n  jsr %s\n  rts\n" % (module + free, module + free, base + free, operand),
+                                          symbols=[dict(wrong_module, module="/NOPE.BIN;1"), dict(wrong_module, name="en")]), "o-space%d" % i,
+                             "unsupported_code_class:unrecognized_module", "the symbol written as %r" % operand)
+
+        # Nothing is ever created in the original disc's folder, by the output folder or the object cache.
+        listing = sorted(p.name for p in (fx / "disc").iterdir())
+        refused(cli("disc-build", good, "--out", fx / "disc" / "sub" / "deeper", *disc_args), "E_DISC_OUTPUT", "a nested output inside the original disc's folder")
+        refused(cli("disc-build", good, "--out", tmp / "o-cache", "--cue", fx / "disc" / "disc.cue", "--bios", fx / "bios.bin", "--runtime-dir", ROOT, "--cc", CC, "--budget", BUDGET,
+                    "--cache-dir", fx / "disc" / "cachehere"), "E_DISC_OUTPUT", "an object cache inside the original disc's folder")
+        check(sorted(p.name for p in (fx / "disc").iterdir()) == listing and not (tmp / "o-cache").exists(), "neither refusal creates anything")
+
+        # No option that turns a proof source off, and no test-only control, is forwarded to the build.
+        for option in ("--static-boot", "--static-discovery", "--boot-fixture-profiles", "--pass-set", "--viewer-host-source"):
+            code, _, _ = cli("disc-build", good, "--out", tmp / "o-option", *disc_args, option, "0")
+            check(code == 2 and not (tmp / "o-option").exists(), "`%s` is not accepted" % option)
+
+        # A required other mod is never silently absent.
+        needy = mods.project(edits=[(p["data_offset"], (0x5678).to_bytes(2, "big"), {})])
+        with open(needy / "mod.toml", "a") as f:
+            f.write('\n[[dependency]]\nid = "other-mod"\n')
+        refused(cli("disc-build", needy, "--out", tmp / "o-needy", *disc_args), "E_SET_MISSING_DEPENDENCY", "a disc mod with an unmet dependency")
+
+        # The differential run executes only the two programs a build writes, whatever a folder's record says.
+        record = (tmp / "good" / "disc-mod.json").read_text()
+        for old, new in (('"vanilla/program"', '"/bin/true"'), ('"modded/program"', '"modded/../../program"'), ('"disc/disc.cue"', '"disc/../../x.cue"')):
+            if old not in record:
+                continue   # the Windows program names carry .exe
+            forged = tmp / "forged"
+            forged.mkdir(exist_ok=True)
+            (forged / "disc-mod.json").write_text(record.replace(old, new))
+            refused(cli("disc-diff-run", forged, "--cue", fx / "disc" / "disc.cue", "--bios", fx / "bios.bin", "--budget", BUDGET, "--timeout", "60"), "E_DISC_BUILD", "a forged record naming %s" % new)
+
         # ---- dynamic code: the bytes that run are made in RAM ----
         dfx, dtruth = fixture(tmp, "main_decoded")
         dp = dtruth["patch"]

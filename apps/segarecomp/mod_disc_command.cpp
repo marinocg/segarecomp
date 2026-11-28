@@ -10,6 +10,7 @@
 #include "process_run.hpp"
 #include "segarecomp/machine/sega_cd/boot_contract.hpp"
 #include "segarecomp/mod_disc.hpp"
+#include "segarecomp/mod_set.hpp"
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
@@ -73,11 +74,12 @@ std::optional<mod::Rejection> load_disc_package(const fs::path &target, mod::Pac
     if (!p.ok) return p.rejection;
   }
   if (p.manifest.platform != "sega-cd") return mod::Rejection{"E_SOURCE_PLATFORM", "the disc commands take a sega-cd package"};
+  if (const auto r = mod::check_standalone(p.manifest)) return r;   // ADR 0326: a required other mod is never silently absent
   return std::nullopt;
 }
 
 // The declared BIOS requirement against the user's BIOS (never packaged): an exact digest, or a runtime BIOS profile that the BIOS image matches.
-std::optional<mod::Rejection> check_bios(const mod::Manifest &m, const fs::path &path, const DiscImage &disc, bool fixture_profiles, std::string &sha_out) {
+std::optional<mod::Rejection> check_bios(const mod::Manifest &m, const fs::path &path, const DiscImage &disc, std::string &sha_out) {
   std::string bytes;
   if (!read_text(path, scd::kBiosWindowBytes, bytes)) return mod::Rejection{"E_DISC_BIOS", "the BIOS image cannot be read"};
   const std::span<const std::uint8_t> view(reinterpret_cast<const std::uint8_t *>(bytes.data()), bytes.size());
@@ -88,9 +90,22 @@ std::optional<mod::Rejection> check_bios(const mod::Manifest &m, const fs::path 
     if (std::find(m.bios_sha256s.begin(), m.bios_sha256s.end(), sha_out) == m.bios_sha256s.end()) return mod::Rejection{"E_DISC_BIOS", "the BIOS image is not one of the digests the mod requires"};
     return std::nullopt;
   }
-  const scd::BootContract contract = scd::derive_boot_contract(*admitted.bios, disc, fixture_profiles ? scd::BootProfileScope::with_test_fixtures : scd::BootProfileScope::authentic);
+  const scd::BootContract contract = scd::derive_boot_contract(*admitted.bios, disc, scd::BootProfileScope::authentic);
   if (contract.profile != m.bios_class) return mod::Rejection{"E_DISC_BIOS", "the BIOS image does not match the BIOS profile \"" + m.bios_class + "\" the mod requires"};
   return std::nullopt;
+}
+
+// `path` (existing or not) is `folder` or lies inside it, links resolved.
+bool inside_folder(const fs::path &path, const fs::path &folder) {
+  std::error_code ec;
+  const fs::path resolved = fs::weakly_canonical(fs::absolute(path, ec), ec);
+  if (ec) return true;
+  for (fs::path at = resolved; !at.empty(); at = at.parent_path()) {
+    std::error_code same;
+    if (fs::equivalent(at, folder, same) && !same) return true;
+    if (at == at.parent_path()) break;
+  }
+  return false;
 }
 
 struct Opened {
@@ -121,9 +136,10 @@ struct Options {
   std::vector<std::pair<std::string, std::string>> build;   // forwarded to `sega-cd build`
 };
 
-// The `sega-cd build` options a disc build forwards. `--emit-arg` is deliberately absent (it could admit extents by hand, which are never evidence), as are the options this command owns.
-constexpr std::string_view kForwarded[] = {"--jobs", "--cache-dir", "--cc-arg", "--cxx", "--cxx-arg", "--link-arg", "--pass-timeout", "--optimize", "--pass-set", "--viewer", "--viewer-host-source",
-                                           "--sdl3-include", "--sdl3-lib", "--input-script", "--backup-ram", "--until-tick", "--boot-fixture-profiles", "--static-boot", "--static-discovery"};
+// The `sega-cd build` options a disc build forwards: host tools and the machine's inputs. Deliberately absent: `--emit-arg` (hand-admitted extents are never evidence), every option that turns a
+// proof source off (`--static-boot`, `--static-discovery`, which would weaken the refusals), and the test-only controls (`--boot-fixture-profiles`, `--pass-set`, `--viewer-host-source`).
+constexpr std::string_view kForwarded[] = {"--jobs", "--cache-dir", "--cc-arg", "--cxx", "--cxx-arg", "--link-arg", "--pass-timeout", "--optimize", "--viewer", "--sdl3-include", "--sdl3-lib",
+                                           "--input-script", "--backup-ram", "--until-tick"};
 
 bool parse(int argc, char **argv, Options &o, const std::string &sub) {
   for (int i = 3; i < argc; ++i) {
@@ -158,7 +174,7 @@ int apply(const Options &o) {
     return refuse({"E_DISC_CODE_EVIDENCE", "the package patches code; code is patched only by `mod disc-build`, which first proves where the bytes of the original disc run"});
   if (!o.bios.empty()) {
     std::string sha;
-    if (const auto r = check_bios(opened.package.manifest, o.bios, opened.original, false, sha)) return refuse(*r);
+    if (const auto r = check_bios(opened.package.manifest, o.bios, opened.original, sha)) return refuse(*r);
   }
   const mod::DiscMaterialized made = mod::materialize_disc(opened.plan, opened.original, o.cue, o.out);
   if (!made.ok) return refuse(made.rejection);
@@ -227,21 +243,19 @@ int disc_build(const Options &o) {
   if (o.cue.empty() || o.bios.empty() || o.out.empty() || o.runtime_dir.empty() || o.cc.empty() || o.budget.empty()) return usage();
   Opened opened;
   if (const auto r = open_and_plan(o.target, o.cue, opened)) return refuse(*r);
-  const bool fixtures = std::any_of(o.build.begin(), o.build.end(), [](const auto &e) { return e.first == "--boot-fixture-profiles" && e.second == "1"; });
   std::string bios_sha;
-  if (const auto r = check_bios(opened.package.manifest, o.bios, opened.original, fixtures, bios_sha)) return refuse(*r);
+  if (const auto r = check_bios(opened.package.manifest, o.bios, opened.original, bios_sha)) return refuse(*r);
   std::error_code ec;
   const fs::path out = fs::absolute(o.out, ec);
+  const fs::path source = fs::absolute(o.cue, ec).parent_path();
+  // Every folder this command writes is judged BEFORE anything is created: nothing may appear in the original disc's folder.
+  if (inside_folder(out, source)) return refuse({"E_DISC_OUTPUT", "the build folder is the original disc's folder or lies inside it; originals are never written"});
+  for (const auto &e : o.build)
+    if (e.first == "--cache-dir" && inside_folder(e.second, source)) return refuse({"E_DISC_OUTPUT", "the cache folder is the original disc's folder or lies inside it; originals are never written"});
   if (fs::exists(fs::symlink_status(out, ec)) && (!fs::is_directory(fs::symlink_status(out, ec)) || !fs::is_empty(out, ec)))
     return refuse({"E_DISC_OUTPUT", "the build folder exists and is not empty"});
   fs::create_directories(out, ec);
   if (!fs::is_directory(out, ec)) return refuse({"E_DISC_OUTPUT", "the build folder cannot be created"});
-  const fs::path source = fs::absolute(o.cue, ec).parent_path();
-  for (fs::path at = fs::weakly_canonical(out, ec); !at.empty(); at = at.parent_path()) {
-    std::error_code same;
-    if (fs::equivalent(at, source, same) && !same) return refuse({"E_DISC_OUTPUT", "the build folder is the original disc's folder or lies inside it; originals are never written"});
-    if (at == at.parent_path()) break;
-  }
   const fs::path vanilla = out / "vanilla", modded = out / "modded", disc_dir = out / "disc", cache = out / "objects";
 
   if (run_build(o, o.cue, vanilla, cache, {}, out / "vanilla.log") != 0) return refuse({"E_DISC_BUILD", "the build of the original disc failed (vanilla.log)"});
@@ -335,6 +349,14 @@ int disc_diff(const Options &o) {
   if (!read_text(dir / "disc-mod.json", 1U << 16U, record) || record.rfind("{\"ok\":true,", 0) != 0) return refuse({"E_DISC_BUILD", "the folder does not hold a successful disc build"});
   std::map<std::string, std::string> fields;
   for (const auto &m : members(record)) fields[m.first] = m.second.size() > 1 && m.second.front() == '"' ? m.second.substr(1, m.second.size() - 2) : m.second;
+  // The record is a file in a folder: the only programs it may name are the two this command's build writes, and the patched CUE is a plain file name under `disc/`.
+  for (const char *which : {"vanilla", "modded"}) {
+    const std::string &program = fields[std::string(which) + "_program"];
+    if (program != std::string(which) + "/program" && program != std::string(which) + "/program.exe") return refuse({"E_DISC_BUILD", "the build record names a program this command does not build"});
+  }
+  const std::string &cue_field = fields["patched_cue"];
+  if (cue_field.rfind("disc/", 0) != 0 || cue_field.size() <= 5 || cue_field.find_first_of("/\\", 5) != std::string::npos || cue_field.find("..") != std::string::npos)
+    return refuse({"E_DISC_BUILD", "the build record names a patched disc outside the build folder"});
   const auto run = [&](const char *which, const fs::path &disc_dir, std::string &report) {
     const fs::path program = dir / fields[std::string(which) + "_program"], out = dir / (std::string(which) + "-report.json"), log = dir / (std::string(which) + "-run.log");
     std::error_code removed;

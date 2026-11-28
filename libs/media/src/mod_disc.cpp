@@ -7,6 +7,7 @@
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <random>
@@ -82,7 +83,7 @@ void check_raw_range(const DiscImage &disc, const Payload &p) {
     if (t.file_index != p.disc_target) continue;
     const std::uint64_t data_end = t.file_offset + static_cast<std::uint64_t>(t.sector_count) * t.sector_size;
     const std::uint64_t pregap_begin = t.file_offset - static_cast<std::uint64_t>(t.index0_sectors) * t.sector_size;
-    if (begin < t.file_offset && end > pregap_begin) fail("E_DISC_PREGAP", "\"" + p.path + "\" touches the INDEX 00 pregap of track " + std::to_string(t.number));
+    if (t.index0_sectors != 0 && begin < t.file_offset && end > pregap_begin) fail("E_DISC_PREGAP", "\"" + p.path + "\" touches the INDEX 00 pregap of track " + std::to_string(t.number));
     if (p.has_disc_track && t.number == p.disc_track) {
       if (begin < t.file_offset || end > data_end) fail("E_DISC_RANGE", "\"" + p.path + "\" leaves the track it names");
       named = true;
@@ -186,29 +187,74 @@ void apply_edit(const Payload &p, const std::vector<std::uint8_t> &payload, cons
   ++plan.edits_applied;
 }
 
-// Symbol names the guest text uses (comments excluded).
-std::vector<Symbol> used_symbols(const Manifest &m, const std::vector<std::uint8_t> &text) {
-  std::vector<Symbol> out;
-  bool comment = false;
-  for (std::size_t i = 0; i < text.size(); ++i) {
-    const char c = static_cast<char>(text[i]);
-    if (c == '\n') comment = false;
-    else if (c == ';') comment = true;
-    if (comment || c != '@') continue;
-    std::size_t end = i + 1;
-    while (end < text.size() && ((text[end] >= 'a' && text[end] <= 'z') || (text[end] >= '0' && text[end] <= '9') || text[end] == '_' || text[end] == '.')) ++end;   // `-` is the addend sign
-    const std::string name(text.begin() + static_cast<std::ptrdiff_t>(i + 1), text.begin() + static_cast<std::ptrdiff_t>(end));
-    for (const Symbol &y : m.symbols)
-      if (y.name == name && std::none_of(out.begin(), out.end(), [&](const Symbol &u) { return u.name == name; })) out.push_back(y);
+// The metadata a data track carries about its own layout, as track-1 user-data ranges: the boot header's identification and IP/SP descriptors, and - when track 1 holds an ISO9660 volume -
+// the descriptor set, every path table and every directory extent. "No resizing, no re-layout, no metadata rewriting" (sega-cd-mod-sources.md section 4): no write may touch them. A volume
+// that announces itself but cannot be walked completely refuses the plan, because its metadata cannot be told apart from file data.
+struct Metadata {
+  std::uint64_t begin = 0, end = 0;
+  std::string what;
+};
+
+std::vector<Metadata> disc_metadata(const DiscImage &disc) {
+  std::vector<Metadata> out;
+  if (disc.tracks().empty() || disc.tracks().front().type == DiscTrackType::audio) return out;
+  const DiscTrack &t = disc.tracks().front();
+  const auto read = iso9660_track_reader(disc, 0);
+  std::array<std::uint8_t, kIso9660BlockBytes> block{};
+  if (read(0, block) && std::equal(block.begin(), block.begin() + 14, "SEGADISCSYSTEM")) {
+    out.push_back({0x00, 0x10, "the disc system identifier"});
+    out.push_back({0x30, 0x50, "the IP/SP boot descriptors"});
+  }
+  const auto standard = [&] { return std::equal(block.begin() + 1, block.begin() + 6, "CD001"); };
+  if (t.sector_count <= kIso9660FirstDescriptor || !read(kIso9660FirstDescriptor, block) || !standard()) return out;
+  const auto volume = read_iso9660_volume(read, t.sector_count);
+  if (!volume.volume) fail("E_DISC_METADATA", std::string("the disc's ISO9660 volume cannot be read, so its metadata cannot be protected: ") + iso9660_error_name(volume.error));
+  const auto blocks = [&](std::uint64_t first, std::uint64_t bytes, const char *what) {
+    out.push_back({first * kIso9660BlockBytes, (first + (bytes + kIso9660BlockBytes - 1) / kIso9660BlockBytes) * kIso9660BlockBytes, what});
+  };
+  for (std::uint32_t at = kIso9660FirstDescriptor; at < kIso9660FirstDescriptor + kIso9660MaxDescriptors; ++at) {
+    if (!read(at, block) || !standard()) break;
+    blocks(at, kIso9660BlockBytes, "an ISO9660 volume descriptor");
+    if (block[0] == 255) break;
+    if (block[0] != 1 && block[0] != 2) continue;
+    // A primary or supplementary descriptor names a path table size (offset 132) and up to four tables (L, optional L: little-endian; M, optional M: big-endian).
+    const auto word = [&](std::size_t o, bool big) {
+      std::uint32_t v = 0;
+      for (unsigned i = 0; i < 4; ++i) v |= static_cast<std::uint32_t>(block[o + i]) << (8U * (big ? 3U - i : i));
+      return v;
+    };
+    const std::uint32_t table_bytes = word(132, false);
+    if (table_bytes > kIso9660MaxDirectoryBytes) fail("E_DISC_METADATA", "an ISO9660 path table is larger than supported");
+    for (const std::size_t o : {std::size_t{140}, std::size_t{144}, std::size_t{148}, std::size_t{152}})
+      if (const std::uint32_t location = word(o, o >= 148); location != 0) blocks(location, table_bytes, "an ISO9660 path table");
+    if (block[0] == 2) {   // a supplementary (for example Joliet) volume has its own directory tree, which this reader does not walk
+      fail("E_DISC_METADATA", "the disc has a supplementary ISO9660 volume, whose directory metadata cannot be protected");
+    }
+  }
+  struct Pending {
+    Iso9660Extent extent;
+    unsigned depth;
+  };
+  std::vector<Pending> work{{volume.volume->root, 0U}};
+  for (std::size_t next = 0; next < work.size(); ++next) {
+    if (work.size() > 1024) fail("E_DISC_METADATA", "the ISO9660 volume has more directories than supported");
+    const Pending dir = work[next];
+    blocks(dir.extent.block, dir.extent.size, "an ISO9660 directory");
+    const auto listing = list_iso9660_directory(read, *volume.volume, dir.extent);
+    if (listing.error != Iso9660Error::none) fail("E_DISC_METADATA", std::string("an ISO9660 directory cannot be read: ") + iso9660_error_name(listing.error));
+    for (const Iso9660Entry &entry : listing.entries) {
+      if (!entry.directory) continue;
+      if (dir.depth + 1U >= kIso9660MaxDepth) fail("E_DISC_METADATA", "the ISO9660 volume is deeper than supported");
+      work.push_back({entry.extent, dir.depth + 1U});
+    }
   }
   return out;
 }
 
-void inject(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, const Payload &p, const DiscImage &disc, DiscPlan &plan) {
+void inject(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, const DiscImage &disc, DiscPlan &plan) {
   const GuestListingResult listed = guest_listing(m, files, "");
   if (!listed.ok) fail(listed.rejection.code, listed.rejection.message);
   const DiscTrack &t = data_track_one(disc, kNotProven);
-  const std::vector<std::uint8_t> &text = files.at(p.path);
   std::vector<Piece> reserved;   // the free ranges' file bytes: no other edit may touch them
   // The assembler already checked that every block lies in one free range and that blocks and free ranges do not overlap each other.
   for (std::size_t i = 0; i < listed.listing.free_ranges.size(); ++i) {
@@ -233,7 +279,9 @@ void inject(const Manifest &m, const std::map<std::string, std::vector<std::uint
     plan.bytes_written += b.bytes.size();
     ++plan.blocks_injected;
   }
-  plan.symbol_uses = used_symbols(m, text);
+  for (const std::string &name : listed.listing.symbols)   // what the assembler itself resolved: no second reading of the text
+    for (const Symbol &y : m.symbols)
+      if (y.name == name) plan.symbol_uses.push_back(y);
 }
 
 bool inside(const fs::path &path, const fs::path &folder) {
@@ -348,8 +396,12 @@ DiscPlan plan_disc_patch(const Manifest &m, const std::map<std::string, std::vec
       if (it == files.end()) fail("E_ARCHIVE_ENTRY", "a disc payload is missing");
       apply_edit(p, it->second, disc, plan);
     }
-    if (guest != nullptr) inject(m, files, *guest, disc, plan);
+    if (guest != nullptr) inject(m, files, disc, plan);
     if (plan.writes.empty()) fail("E_FIELD_MISSING", "the package has no disc-extent-edit or guest-asm payload");
+    for (const Metadata &protect : disc_metadata(disc))
+      for (const DiscSpan &span : plan.spans)
+        if (span.offset < protect.end && protect.begin < span.offset + span.length)
+          fail("E_DISC_METADATA", span.origin + " writes " + protect.what + "; a disc patch never rewrites layout metadata");
     std::sort(plan.writes.begin(), plan.writes.end(), [](const DiscWrite &a, const DiscWrite &b) { return std::tie(a.file, a.offset) < std::tie(b.file, b.offset); });
     for (std::size_t i = 1; i < plan.writes.size(); ++i)
       if (plan.writes[i - 1].file == plan.writes[i].file && plan.writes[i - 1].offset + plan.writes[i - 1].bytes.size() > plan.writes[i].offset)
@@ -481,7 +533,7 @@ DiscMaterialized materialize_disc(const DiscPlan &plan, const DiscImage &origina
     if (!fs::copy_file(original_cue, partial / cue_name, ec) || ec) fail("E_DISC_OUTPUT", "the CUE cannot be written");   // never overwrites: a FILE of that name is refused
     const DiscOpened effective = open_disc(partial / cue_name);
     if (!effective.disc) fail(effective.rejection.code, effective.rejection.message);
-    if (const auto r = check_disc_layout(original, *effective.disc)) fail(r->code, r->message);
+    if (const auto r = verify_patched_disc(plan, original, *effective.disc)) fail(r->code, r->message);   // layout, and nothing but the planned bytes differs
     result.effective_identity = effective.disc->identity();
     if (exists) fs::remove(out, ec);
     fs::rename(partial, out, ec);

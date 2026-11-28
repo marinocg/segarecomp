@@ -31,6 +31,8 @@ struct ZipPolicy {
   std::uint64_t max_ratio = 0;                      // 0 = unchecked; else a deflated entry may expand to at most csize * max_ratio + 4096 bytes
   bool fold_case_duplicates = false;                // refuse names that differ only by ASCII case
   bool (*name_ok)(const std::string &) = nullptr;
+  // When set, `manifest.json` is inflated first and judged: false refuses the archive (E_ARCHIVE_SIZE) before any other entry is inflated.
+  bool (*manifest_gate)(const std::vector<std::uint8_t> &) = nullptr;
 };
 
 [[nodiscard]] bool safe_name(const std::string &name);   // the schema 1/2 flat entry-name rule

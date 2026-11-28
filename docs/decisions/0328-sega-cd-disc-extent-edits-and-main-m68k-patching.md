@@ -12,19 +12,20 @@
 3. Raw sectors: the sync pattern and header are layout and cannot be changed (`E_DISC_SECTOR_HEADER`). **EDC/ECC bytes are not recomputed**: the product neither reads nor checks them (machine contract section 13). A patched raw image is an input of this product's build, not a mastering output.
 4. The plan is complete before any byte exists: disc identity, ranges, data tracks only (no audio, no `INDEX 00` data), no overlap, every original digest, every delta. Materialization streams each FILE, re-checks the original's digest while reading, copies the CUE byte for byte into a new folder (never the original's folder or inside it), reloads the result, checks the layout rules and only then publishes it. A failure leaves nothing.
 5. The layout rules are one function over two loaded discs. `mod verify-disc` applies it to any patched image and also proves that nothing outside the declared bytes differs (`E_DISC_UNDECLARED_CHANGE`).
-6. Caps: the contract maxima are kept (128 MiB per disc payload, 512 MiB per package; an archive over 32 MiB only when every payload is a disc kind). A BPS replacement is limited to a 16 MiB range, because the delta is applied in memory.
+6. **Layout metadata is protected** (`E_DISC_METADATA`): no write may touch the boot header's system identifier or IP/SP descriptors, an ISO9660 volume descriptor, a path table or a directory extent, however the range is addressed. A disc whose ISO9660 volume announces itself but cannot be walked completely, or that carries a supplementary (for example Joliet) volume, refuses every edit: its metadata cannot be told apart from file data. This is a deliberate fail-closed limit.
+7. Caps: the contract maxima are kept (128 MiB per disc payload, 512 MiB per package; an archive over 32 MiB only when every payload is a disc kind). A BPS replacement is limited to a 16 MiB range, because the delta is applied in memory.
 
 ### Main-M68K patching (SEG-148-T003)
 
-7. **Eligibility comes from the product's own build of the original disc, never from the author.** `mod disc-build` runs `sega-cd build` on the original disc and reads its `disc_sources` evidence: the admitted extents that are exact copies of track-1 bytes (verified boot images, static loader proofs, resolved and relocated copies of delivered blocks), and separately the images that are not disc bytes (produced, statically evaluated, operand templates, epochs). Boot images that the same build contradicted are marked and never authorize a patch (they still count for refusals). Hand-admitted `--emit-arg` extents are never evidence, and `disc-build` does not accept the option. No new discovery heuristic exists.
-8. A code patch is **declared**: a `disc-extent-edit` with `code_cpu` `main` and `load_address`, or an m68k `guest-asm` payload. In `guest-asm`, `org` and `free` offsets are **track-1 user-data offsets** (the offset space of the build's disc extents), the only revision is `*`, and `at <address>` is mandatory. The ADR 0292 static admission (forbidden instructions, writes only to work RAM, free ranges proven to hold their fill) is unchanged. A disc symbol has no revision and carries `cpu` (`main` | `sub` | `z80`) and `module` (`boot` = the 32 KiB system area, or an ISO9660 path).
-9. Rules over every write that lands in track-1 user data, in this order:
+8. **Eligibility comes from the product's own build of the original disc, never from the author.** `mod disc-build` runs `sega-cd build` on the original disc and reads its `disc_sources` evidence: the admitted extents that are exact copies of track-1 bytes (verified boot images, static loader proofs, resolved and relocated copies of delivered blocks), and separately the images that are not disc bytes (produced, statically evaluated, operand templates, epochs). Boot images that the same build contradicted are marked and never authorize a patch (they still count for refusals). Hand-admitted `--emit-arg` extents are never evidence, and `disc-build` does not accept the option. No new discovery heuristic exists.
+9. A code patch is **declared**: a `disc-extent-edit` with `code_cpu` `main` and `load_address`, or an m68k `guest-asm` payload. In `guest-asm`, `org` and `free` offsets are **track-1 user-data offsets** (the offset space of the build's disc extents), the only revision is `*`, and `at <address>` is mandatory. The ADR 0292 static admission (forbidden instructions, writes only to work RAM, free ranges proven to hold their fill) is unchanged. A disc symbol has no revision and carries `cpu` (`main` | `sub` | `z80`) and `module` (`boot` = the 32 KiB system area, or an ISO9660 path).
+10. Rules over every write that lands in track-1 user data, in this order:
    - overlapping a proven **sub-CPU** extent: refused, even when a main extent covers the same disc bytes;
    - a data edit overlapping a proven main extent: refused (it must be declared as code);
    - a code patch needs one proven main extent that holds all of its bytes **and** places its first byte at `load_address`.
-10. The writes are judged twice: against the original disc's evidence before a patched disc exists, and against the Patched build's own evidence before the build is reported. A refusal keeps no patched disc and no Patched program.
-11. `mod apply --cue` materializes **data** edits only and refuses a package that patches code (`E_DISC_CODE_EVIDENCE`). Without a build it cannot know which bytes are code and says so (`"code_checked":false`).
-12. Rejection classes (exact strings):
+11. The writes are judged twice: against the original disc's evidence before a patched disc exists, and against the Patched build's own evidence before the build is reported. A refusal keeps no patched disc and no Patched program.
+12. `mod apply --cue` materializes **data** edits only and refuses a package that patches code (`E_DISC_CODE_EVIDENCE`). Without a build it cannot know which bytes are code and says so (`"code_checked":false`).
+13. Rejection classes (exact strings):
 
 | Class | Condition |
 |---|---|
@@ -36,14 +37,14 @@
 | `unsupported_code_class:layout_changing` | a code patch or injection that would change a size, grow a file or leave track 1 |
 | `unsupported_code_class:undeclared_code` | a data edit over proven main code |
 
-13. A Patched build binds its variant: `sega-cd build --variant-identity <key>`, where the key covers the original and effective disc identities, the BIOS digest, the package identity, the content digest and the payload digests. It enters the program identity (so states are bound to the variant), and the program verifies the **effective** disc. A Vanilla build's identity is unchanged.
-14. `mod disc-diff-run` runs the two programs of a build with the same explicit instruction budget and wall-clock timeout, each on its own disc, and reports the report fields that differ (the two identities are excluded: they differ by construction).
+14. A Patched build binds its variant: `sega-cd build --variant-identity <key>`, where the key covers the original and effective disc identities, the BIOS digest, the package identity, the content digest and the payload digests. It enters the program identity (so states are bound to the variant), and the program verifies the **effective** disc. A Vanilla build's identity is unchanged.
+15. `mod disc-diff-run` runs the two programs of a build with the same explicit instruction budget and wall-clock timeout, each on its own disc, and reports the report fields that differ (the two identities are excluded: they differ by construction).
 
 ## Limits (not claimed)
 
 - Eligibility reflects what one bounded build of the original proved. Code that build did not reach is `not_disc_proven`; raising the build budget is the only way to extend it. `--file-first` images are bound at run time and are not evidence.
 - A proven extent is executable authority, **not** a claim that every byte in it is code. Data inside a proven main module is therefore patched with a main code declaration. Data inside a proven sub extent cannot be patched by `disc-build`.
-- A data edit that no build evidence covers is judged only as data. `mod apply` applies data edits without any code check.
+- **A data edit is judged only against proven extents.** Bytes no extent covers are written as data even if they are code: sub-CPU code the bounded build did not reach, the encoded source of code that is later decoded or generated in RAM (the `dynamic` class applies only to a declared patch whose address such an image reaches), and **Z80 driver bytes**. The build evidence holds no Z80 extents, so Z80 data on disc cannot be identified: only declared Z80 patches (and Z80 symbols and addresses) are refused, and bytes inside a proven main extent can be declared as main code whatever the program later does with them. `mod apply` applies data edits without any code check.
 - Sub-M68K and Z80 patching (SEG-148-T013), runtime code in Sega CD mods (SEG-148-T005/T006), CD-DA replacement (SEG-145-T005) and the launcher flow are not part of this decision. No comprehensive multi-CPU modification is claimed. Evidence is synthetic fixtures only.
 
 ## Evidence

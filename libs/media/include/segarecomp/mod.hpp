@@ -379,6 +379,7 @@ struct GuestListing {
   std::vector<GuestBlock> blocks;
   std::vector<Range> free_ranges;         // image offsets of the revision's declared free ranges: padding, never existing cartridge code
   std::vector<std::uint8_t> free_fills;   // the declared fill byte of each free range (same order)
+  std::vector<std::string> symbols;       // the @symbols the assembler actually resolved for this revision (ascending): the one record of what the code names
   std::uint32_t code_limit = 0;           // the first CPU address that can never be cartridge code under the declared mapper (rom_only 0x8000, sega 0xC000); 0 admits no control target
 };
 using GuestAdmitter = std::optional<Rejection> (*)(const GuestListing &);

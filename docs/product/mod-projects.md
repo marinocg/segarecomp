@@ -160,7 +160,7 @@ start = 4096
 original_sha256 = "<sha256 of the original bytes of that range>"
 ```
 
-Edits never change a file size, a track or the layout; raw sector headers cannot be edited, and EDC/ECC bytes are not recomputed. Every digest is checked before anything is written.
+Edits never change a file size, a track or the layout. Layout metadata cannot be edited (`E_DISC_METADATA`: the boot header identifier and IP/SP descriptors, ISO9660 volume descriptors, path tables and directories; a disc with a supplementary/Joliet volume cannot be edited yet); raw sector headers cannot be edited, and EDC/ECC bytes are not recomputed. Every digest is checked before anything is written.
 
 ```text
 segarecomp mod apply <dir|package> --cue <original.cue> --out <new-dir> [--bios <image>]        # data edits only
@@ -169,7 +169,7 @@ segarecomp mod disc-build <dir|package> --cue <original.cue> --bios <image> --ou
 segarecomp mod disc-diff-run <build-dir> --cue <original.cue> --bios <image> --budget <instructions> --timeout <seconds>
 ```
 
-`disc-build` builds the original disc, checks your writes against what that build proved, writes the patched disc under `<new-dir>/disc` and builds it as its own variant. It accepts the usual `sega-cd build` options (`--jobs`, `--cache-dir`, `--viewer`, ...), never `--emit-arg`.
+`disc-build` builds the original disc, checks your writes against what that build proved, writes the patched disc under `<new-dir>/disc` and builds it as its own variant. It accepts the host and machine options of `sega-cd build` (`--jobs`, `--cache-dir`, `--viewer`, ...), never `--emit-arg` or an option that turns off a proof source.
 
 ### Patching main-CPU code
 
@@ -182,7 +182,7 @@ org * 0x14800 at 0x200800
   rts
 ```
 
-Everything else is refused with an exact class: `unsupported_code_class:sub_m68k`, `:z80`, `:dynamic` (code made in RAM), `:not_disc_proven` (including code the bounded build did not reach), `:unrecognized_module`, `:layout_changing` and `:undeclared_code` (a plain edit over proven code). This is not multi-CPU modding: the sub CPU and the Z80 cannot be patched.
+Everything else is refused with an exact class: `unsupported_code_class:sub_m68k`, `:z80`, `:dynamic` (code made in RAM), `:not_disc_proven` (including code the bounded build did not reach), `:unrecognized_module`, `:layout_changing` and `:undeclared_code` (a plain edit over proven code). This is not multi-CPU modding: patching sub-CPU or Z80 code is not supported. The refusals cover what you declare and what the build proved. They are not a scan of your replacement bytes: a plain data edit of bytes the build never saw run is applied as data, and Z80 driver bytes on the disc cannot be identified at all.
 
 ## Native sources
 

@@ -208,6 +208,7 @@ struct Ctx {
   const Block *banked = nullptr;                                    // set on the Master System `sega` mapper only
   const std::map<std::string, const Block *> *label_blocks = nullptr;
   const std::set<std::string> *code_labels = nullptr;               // set on master-system: labels bound to an instruction
+  std::set<std::string> *used_symbols = nullptr;                    // every @symbol resolved
 };
 
 struct Ev {
@@ -242,6 +243,7 @@ Ev eval(const Ctx &c, std::string_view expr) {
     Rejection why;
     const auto a = verified_symbol(c.m, name, c.rev, why);
     if (!a) fail(why.code, at(c.line) + why.message);
+    if (c.used_symbols != nullptr) c.used_symbols->insert(name);
     r.value = static_cast<std::int64_t>(*a) + addend;
     if (c.banked != nullptr && c.final) {   // a symbol is an IMAGE offset: translate it into the window the running block sees, or refuse
       const auto offset = static_cast<std::uint64_t>(r.value);
@@ -757,6 +759,7 @@ struct OutBlock {
 struct Assembled {
   std::vector<Free> frees;
   std::vector<OutBlock> blocks;
+  std::set<std::string> symbols;
 };
 
 bool is_data_op(const std::string &op) { return op == "dc" || op == "db" || op == "dw"; }
@@ -788,7 +791,7 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
       std::size_t last_args = 0;
       for (const Stmt &s : b->stmts) {
         const auto pc = static_cast<std::int64_t>(b->address + ob.bytes.size());
-        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line, banked ? b : nullptr, &label_blocks, sms ? &code_labels : nullptr};
+        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line, banked ? b : nullptr, &label_blocks, sms ? &code_labels : nullptr, &out.symbols};
         if (!s.label.empty()) {
           if (!final && !labels.emplace(s.label, pc).second) fail("E_GUEST_LABEL_DUPLICATE", at(s.line) + "the label \"" + s.label + "\" is defined twice for the revision \"" + rev.label + "\"");
           if (!final) label_blocks.emplace(s.label, b);
@@ -960,6 +963,7 @@ GuestListing listing_of(const Assembled &a, const Revision &revision) {
     out.free_ranges.push_back({f.start, f.start + f.length});
     out.free_fills.push_back(f.fill);
   }
+  out.symbols.assign(a.symbols.begin(), a.symbols.end());
   for (const OutBlock &b : a.blocks) {
     GuestBlock g;
     g.image_offset = b.offset;

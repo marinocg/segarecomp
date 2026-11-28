@@ -673,6 +673,26 @@ std::uint32_t crc(std::span<const std::uint8_t> b) { return patch::crc32(b); }
 void le16(std::vector<std::uint8_t> &o, std::uint32_t v) { o.push_back(static_cast<std::uint8_t>(v)); o.push_back(static_cast<std::uint8_t>(v >> 8U)); }
 void le32(std::vector<std::uint8_t> &o, std::uint32_t v) { le16(o, v & 0xFFFFU); le16(o, v >> 16U); }
 
+JsonLimits manifest_limits() {
+  JsonLimits limits;
+  limits.max_items = kMaxPayloads; limits.max_members = 32; limits.max_depth = 5; limits.max_number = 2147483647U;
+  limits.allow_slash_escape = false; limits.allow_whitespace = false;
+  return limits;
+}
+
+// The gate of an archive over 32 MiB: a well-formed manifest whose payloads are all disc kinds. Everything else about it is judged by the one reader afterwards.
+bool only_disc_payloads(const std::vector<std::uint8_t> &manifest) {
+  Value root;
+  std::string error;
+  if (manifest.size() > kMaxManifestBytes || !patch::detail::parse_json(std::string_view(reinterpret_cast<const char *>(manifest.data()), manifest.size()), manifest_limits(), root, error)) return false;
+  const Value *payloads = root.kind == Value::Kind::object ? root.find("payloads") : nullptr;
+  if (payloads == nullptr || payloads->kind != Value::Kind::array) return false;
+  return std::all_of(payloads->items.begin(), payloads->items.end(), [](const Value &p) {
+    const Value *kind = p.kind == Value::Kind::object ? p.find("kind") : nullptr;
+    return kind != nullptr && kind->text == "disc-extent-edit";
+  });
+}
+
 Package rejected(std::string code, std::string message) {
   Package p;
   p.rejection = Rejection{std::move(code), std::move(message)};
@@ -915,7 +935,8 @@ Package read_package(std::span<const std::uint8_t> zip) {
     policy.max_entries = kMaxArchiveEntries;
     policy.archive_limit = large ? kMaxDiscArchiveBytes : kMaxArchiveBytes;
     policy.manifest_limit = kMaxImageBytes;   // the 64 KiB manifest cap is E_MANIFEST_SYNTAX below; the archive layer only bounds memory
-    policy.entry_limit = large ? kMaxDiscPayloadBytes : kMaxImageBytes;
+    policy.entry_limit = kMaxDiscPayloadBytes;   // the largest kind cap (total_limit still bounds memory); the cartridge entry limit is applied per kind once the manifest is known
+    if (large) policy.manifest_gate = only_disc_payloads;
     policy.total_limit = large ? kMaxDiscArchiveBytes : 48U << 20U;
     policy.max_ratio = 256;
     policy.fold_case_duplicates = true;
@@ -928,9 +949,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
     const auto man = entries.find("manifest.json");
     if (man == entries.end()) return rejected("E_ARCHIVE_ENTRY", "the package has no manifest.json");
     if (man->second.data.size() > kMaxManifestBytes) return rejected("E_MANIFEST_SYNTAX", "the manifest is larger than allowed");
-    JsonLimits limits;
-    limits.max_items = kMaxPayloads; limits.max_members = 32; limits.max_depth = 5; limits.max_number = 2147483647U;
-    limits.allow_slash_escape = false; limits.allow_whitespace = false;
+    const JsonLimits limits = manifest_limits();
     Value root;
     std::string json_error;
     if (!patch::detail::parse_json(std::string_view(reinterpret_cast<const char *>(man->second.data.data()), man->second.data.size()), limits, root, json_error))
@@ -938,8 +957,10 @@ Package read_package(std::span<const std::uint8_t> zip) {
     Package out;
     out.manifest = parse_manifest(root);
     const Manifest &m = out.manifest;
-    if (large && std::any_of(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind != "disc-extent-edit"; }))
-      return rejected("E_ARCHIVE_SIZE", "an archive over 32 MiB is legal only when every payload is a disc kind");
+    for (const auto &e : entries) {
+      const bool disc_payload = std::any_of(m.payloads.begin(), m.payloads.end(), [&](const Payload &p) { return p.path == e.first && p.kind == "disc-extent-edit"; });
+      if (!disc_payload && e.second.data.size() > kMaxImageBytes) return rejected("E_ARCHIVE_SIZE", "an archive entry is larger than allowed");
+    }
 
     // archive entries must be exactly the manifest plus the declared payloads
     std::set<std::string> declared;

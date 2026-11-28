@@ -46,7 +46,7 @@ struct DiscPlan {
 };
 
 // `files` are the verified payloads of `manifest`; `disc` is the user's original disc. Classes: E_DISC_IDENTITY, E_DISC_RANGE, E_DISC_PREGAP, E_DISC_AUDIO_TARGET, E_DISC_ISO_FILE,
-// E_DISC_SECTOR_HEADER, E_DISC_ORIGINAL_MISMATCH, E_DISC_DELTA, E_DISC_PAYLOAD_SIZE, E_DISC_OVERLAP, E_GUEST_*, unsupported_code_class:layout_changing | not_disc_proven.
+// E_DISC_SECTOR_HEADER, E_DISC_METADATA, E_DISC_ORIGINAL_MISMATCH, E_DISC_DELTA, E_DISC_PAYLOAD_SIZE, E_DISC_OVERLAP, E_GUEST_*, unsupported_code_class:layout_changing | not_disc_proven.
 [[nodiscard]] DiscPlan plan_disc_patch(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, const DiscImage &disc);
 
 // Loads a CUE with the disc loader; `INDEX 02` and later are E_DISC_INDEX_UNSUPPORTED, every other loader failure E_DISC_LOAD.
