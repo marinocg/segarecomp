@@ -24,7 +24,7 @@ bool lies_inside(const fs::path &path, const fs::path &folder) {
 }
 
 std::vector<fs::path> build_output_files(const fs::path &output) {
-  return {output / "input" / "effective.rom", output / "build.log", output / "status.json", output / "set-build.log", output / "generated.c", output / "game", output / "game.exe"};
+  return {output / "input" / "effective.rom", output / "build.log", output / "status.json", output / "set-build.log", output / "generated.c", output / "compiler-version.tmp", output / "game", output / "game.exe"};
 }
 
 std::optional<std::string> build_output_conflict(const fs::path &output, const std::vector<fs::path> &inputs, const std::vector<fs::path> &extra_files) {

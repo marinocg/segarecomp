@@ -747,6 +747,24 @@ try:
     guarded("a hard link of the original at the generated image path", a, a / "out", image)
 except OSError:
     print("mod_set_test: hard links are not available here")
+# with performance reporting on, the build also writes and removes <out>/compiler-version.tmp (the compiler's version text), so that path is protected like every other fixed output
+def profiled_refused(what, root, argv):
+    before = tree(root)
+    p = subprocess.run(argv + ["--performance-report", str(root / "report.json")], text=True, capture_output=True, timeout=600)
+    cli.check(p.returncode == 1 and "class=E_OUTPUT_IS_INPUT" in p.stdout and tree(root) == before, f"{what}: rc={p.returncode} {p.stdout[-300:]} changed={tree(root) != before}")
+
+
+a = area("version-file")
+version_rom = write(a / "out" / "compiler-version.tmp", ROM)
+profiled_refused("a profiled set build with the original at compiler-version.tmp", a, direct_args(a / "out", version_rom, member_packages))
+cli.check(version_rom.is_file() and version_rom.read_bytes() == ROM, "the original's bytes are unchanged")
+guarded("the original at compiler-version.tmp", a, a / "out", version_rom)
+a = area("version-member")
+shutil.copy(member_packages[0], a / "out" / "compiler-version.tmp")
+image = write(a / "game.bin", ROM)
+profiled_refused("a profiled set build with a member package at compiler-version.tmp", a, direct_args(a / "out", image, [a / "out" / "compiler-version.tmp", member_packages[1]]))
+cli.check((a / "out" / "compiler-version.tmp").is_file() and (a / "out" / "compiler-version.tmp").read_bytes() == member_packages[0].read_bytes(), "the member package's bytes are unchanged")
+
 # a single-mod package route shares the same generated image path and the same guard
 a = area("single-route")
 single = write(a / "out" / "input" / "effective.rom", ROM)

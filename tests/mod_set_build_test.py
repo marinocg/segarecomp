@@ -262,6 +262,16 @@ cli.check(doc_rev.get("set_identity") != doc.get("set_identity") and doc_rev.get
 reordered, reordered_frames = observation(out_rev, PAD)
 cli.check([m["mod"] for m in reordered["members"]] == ["watcher", "assist", "gameplay-example"] and reordered_frames.get("final_work_ram_sha256") == first_frames.get("final_work_ram_sha256"), f"the reordered set reaches the same guest state: {reordered}")
 
+# ---------------------------------------------------------------- performance reporting still works on a package build (its compiler-version.tmp is a guarded output, written and removed as before)
+profiled_package = tmp / "profiled-member.segapatch"
+profiled_identity = ok("pack the profiled member", "mod", "pack", edit, "--out", profiled_package)["package_identity"]
+profiled_out, profiled_report = tmp / "build-profiled", tmp / "profiled-report.json"
+p = subprocess.run([sys.argv[1], "build", "--rom", str(ROM_PATH), "--output", str(profiled_out), "--cc", CC, "--runtime-dir", str(SDK / "genesis"), "--optimize", "0", "--runtime-optimize", "1",
+                    "--set-package", str(profiled_package), "--set-identity", profiled_identity, "--performance-report", str(profiled_report)], text=True, capture_output=True, timeout=900)
+report = json.loads(profiled_report.read_text()) if profiled_report.is_file() else {}
+cli.check(p.returncode == 0 and (profiled_out / "game").is_file() and report != {} and not (profiled_out / "compiler-version.tmp").exists() and ROM_PATH.read_bytes() == ROM,
+          f"a profiled package build succeeds, writes its report and leaves no compiler-version.tmp: rc={p.returncode} {p.stdout[-300:]} {sorted(report)[:6]}")
+
 # ---------------------------------------------------------------- the build never deletes a folder it did not create
 victim = tmp / "build-keeps-user-files"
 write(victim / "set-members" / "keep.txt", b"user data")
