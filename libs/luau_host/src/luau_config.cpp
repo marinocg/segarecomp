@@ -14,6 +14,7 @@ Limits limits_for(const mod::Manifest &manifest) {
 
 HostConfig host_config_for(const mod::Manifest &manifest) {
   HostConfig h;
+  h.platform = manifest.platform;
   const mod::Adapter *adapter = mod::find_adapter(manifest.platform);
   const auto grant = [&](const std::string &name) {
     const mod::CapabilityInfo *c = mod::find_capability(name);
@@ -122,6 +123,33 @@ std::vector<std::string> native_scheduled_capabilities() {
 HostConfig native_scheduled_host_config(const mod::Manifest &manifest) { return restricted_config(manifest, native_scheduled_capabilities()); }
 
 HostConfig scheduled_host_config(const mod::Manifest &manifest) { return restricted_config(manifest, scheduled_capabilities()); }
+
+namespace {
+const std::vector<std::string> kSmsScheduled = {"host.log",        "overlay.rgba",   "present.transform", "frame.work_ram", "frame.sms" "_vdp", "memory.read.z80.work_ram", "memory.read.z80.cart_ram",
+                                                "memory.write.z80.work_ram", "input.read", "input.intercept", "state.mod"};
+}
+
+std::optional<mod::Rejection> sms_scheduled_support(const mod::Package &package, bool native) {
+  const mod::Manifest &m = package.manifest;
+  if (m.platform != "master-system") return mod::Rejection{"E_LIVE_PLATFORM", "this route builds Master System programs"};
+  if (mod::trust_class(m) != (native ? "native" : "luau")) return mod::Rejection{"E_LIVE_TRUST", native ? "only a native ABI 2 package runs here" : "only a Luau-only package runs here"};
+  if (native && m.abi_native != 2) return mod::Rejection{"E_LIVE_ABI", "only the native ABI 2 provider is linked into a built program"};
+  if (!native && m.abi_native != 0) return mod::Rejection{"E_LIVE_ABI", "a native ABI 2 provider does not run here"};
+  const std::string source = native ? "native-c11" : "luau-source";
+  bool has_source = false;
+  for (const mod::Payload &p : m.payloads) has_source = has_source || p.kind == source;
+  if (!has_source) return mod::Rejection{"E_LIVE_TRUST", "the package has no " + source};
+  for (const mod::Payload &p : m.payloads)   // nothing the program does not use may be silently dropped: the scripts or units and the data that make the effective image
+    if (p.kind != source && p.kind != "rom-edit-set" && p.kind != "guest-code" && p.kind != "guest-asm" && p.kind != "bps-image")
+      return mod::Rejection{"E_LIVE_PAYLOAD", "the payload " + p.path + " (" + p.kind + ") is not used by the scheduled path; remove it or use a package without it"};
+  if (m.has_hooks) return mod::Rejection{"E_HOOK_CPU_UNSUPPORTED", "function hooks have no Z80 implementation"};
+  for (const std::string &c : m.capabilities)
+    if (std::find(kSmsScheduled.begin(), kSmsScheduled.end(), c) == kSmsScheduled.end())
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the Master System scheduled path"};
+  return std::nullopt;
+}
+
+HostConfig sms_scheduled_host_config(const mod::Manifest &manifest) { return restricted_config(manifest, kSmsScheduled); }
 
 HostConfig live_host_config(const mod::Manifest &manifest) {
   HostConfig h = host_config_for(manifest);

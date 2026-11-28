@@ -28,6 +28,11 @@ struct ApiEntry {
 };
 [[nodiscard]] std::span<const ApiEntry> api_entries();
 [[nodiscard]] const ApiEntry *find_api(std::string_view name);
+// ADR 0325: the one list serves more than one platform. A name exists on a platform or it does not (an absent name is never a silent no-op), and the capability that grants a shared name can be the platform's
+// own (a work-RAM access names that platform's memory space). `platform` is the manifest platform id. The VM, the static analysis and the declarations use ONLY these two functions.
+[[nodiscard]] bool api_on_platform(const ApiEntry &entry, std::string_view platform);
+// Any one of these declared capabilities grants the entry on `platform`; empty = no capability is needed.
+[[nodiscard]] std::vector<std::string_view> api_capabilities(const ApiEntry &entry, std::string_view platform);
 // The Luau type of one entry, e.g. "(x: number, y: number) -> ()".
 [[nodiscard]] std::string api_signature(const ApiEntry &entry);
 // The generated declaration file (`segarecomp.d.luau`) and the JSON list; both deterministic, both derived from `api_entries()` only.
@@ -54,6 +59,8 @@ struct FrameValue {
 // The guest-facing services of the phase scheduler (SEG-138-T001/T002), as plain function pointers so this library and the generated-native program never depend on the native SDK header.
 // The status codes are the SegaModStatus values (0 ok, 1 capability, 2 space, 3 range, 4 alignment, 5 readonly, 6 not_owner, 7 budget, 8 phase); the scheduler is the single authority for phase, range,
 // alignment and budget rules, so a Luau script and a native provider get identical results. `space` is the SegaGenesisSpace id (0 = unknown name).
+enum class PresentOp { rect, text, color, scroll, pattern, colors, sprite };
+enum class VdpRegion { vram, cram, registers, sprite_y, sprite_x, sprite_pattern };
 struct HostServices {
   void *ctx = nullptr;
   int (*read)(void *ctx, std::uint32_t space, std::uint32_t offset, std::uint32_t width, std::uint32_t *value) = nullptr;
@@ -63,6 +70,9 @@ struct HostServices {
   // SEG-145-T008: the declared audio interface (SegaModAudioApi). `op`: 0 play_sfx, 1 play_music, 2 stop_music (name ignored). `audio_event` writes at most 32 characters and a terminator ("" = no event).
   int (*audio_command)(void *ctx, int op, const char *name) = nullptr;
   int (*audio_event)(void *ctx, const char *mapping, char name_out[33]) = nullptr;
+  // ADR 0325 (Master System): the presentation requests of `render`, forwarded to the SAME SegaSmsRenderApi a native provider calls (a SegaModStatus), and one byte of the render-phase VDP copy.
+  int (*present)(void *ctx, PresentOp op, const std::int64_t *args, const std::uint8_t *bytes, std::uint32_t length) = nullptr;
+  int (*vdp_byte)(void *ctx, VdpRegion region, std::uint32_t index, std::uint32_t *value) = nullptr;
 };
 struct FrameInput {
   std::uint64_t number = 0;
@@ -157,7 +167,11 @@ struct OverlayCall {
 // The capabilities a VM grants (catalogue names). A binding whose capability is not here exists as a stub that faults with cause `capability`.
 struct HostConfig {
   std::vector<std::string> capabilities;
+  std::string platform = "genesis";   // the manifest platform the bindings are installed for (ADR 0325)
 };
+// ADR 0325: the scheduled path of a generated-native Master System program (headless and played): the ONE Master System scheduler. Classes as scheduled_support / native_scheduled_support.
+[[nodiscard]] std::optional<mod::Rejection> sms_scheduled_support(const mod::Package &package, bool native);
+[[nodiscard]] HostConfig sms_scheduled_host_config(const mod::Manifest &manifest);
 // The capabilities the package declared that this platform actually grants: required plus the supported optional ones.
 [[nodiscard]] HostConfig host_config_for(const mod::Manifest &manifest);
 

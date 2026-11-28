@@ -172,6 +172,9 @@ struct Options {
   std::string luau_original_sha256, luau_effective_sha256, luau_bytecode_digest, luau_mod_id, luau_capabilities;
   std::string geometry_declaration;  // SEG-139-T004 (ADR 0302): the verified package's geometry claim as the compact text the viewer host reads; "" = none declared
   fs::path luau_artifact_source;     // <output>/luau/luau_artifact.c
+  bool sms_mod = false;              // SEG-147-T004 (ADR 0325): a Master System program with a scheduled mod (Luau or native)
+  bool sms_mod_native = false;
+  std::string sms_mod_status;        // its status.json member
   bool mod_audio = false;            // SEG-145-T008: the artifact declares audio mapping rows (the scheduled-mod seam is compiled with SEGARECOMP_MOD_AUDIO)
   // SEG-125 (ADR 0273): write a versioned build performance report here (empty = profiling off: no collector is enabled and nothing changes).
   fs::path performance_report;
@@ -304,12 +307,12 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (options.luau_package.empty() != options.luau_identity.empty()) return std::nullopt;   // a package reference and its identity travel together
   if (!options.luau_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
-    if (!hex64(options.luau_identity) || !options.patch_package.empty() || options.platform == "master-system") return std::nullopt;   // one mod, Genesis view (a viewer build = the HUD seam, otherwise the scheduled headless path)
+    if (!hex64(options.luau_identity) || !options.patch_package.empty()) return std::nullopt;   // one mod; the verified package's platform selects the route (Genesis, or Master System: ADR 0325)
   }
   if (options.native_package.empty() != options.native_identity.empty()) return std::nullopt;   // a native package reference and the identity the user approved travel together
   if (!options.native_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
-    if (!hex64(options.native_identity) || !options.luau_package.empty() || !options.patch_package.empty() || options.platform == "master-system") return std::nullopt;   // one mod, Genesis
+    if (!hex64(options.native_identity) || !options.luau_package.empty() || !options.patch_package.empty()) return std::nullopt;   // one mod; the verified package's platform selects the route
   }
   return options;
 }
@@ -393,6 +396,21 @@ void resolve_cxx(Options &options) {
     return;
   }
   options.cxx = (cc.has_parent_path() ? (cc.parent_path() / (derived + suffix)).string() : derived + suffix);
+}
+
+// The link driver: the C compiler, or (a program with C++ units: the Luau VM, SEG-137-T007) the C++ driver. `stdcxx_after_objects` is set by the custom C driver fallback, where the C++ runtime library must
+// FOLLOW the objects that need it (GNU-style one-pass link order).
+std::vector<std::string> link_driver(const Options &options, bool cxx_link, bool &stdcxx_after_objects) {
+  std::vector<std::string> command{options.cc};
+  command.insert(command.end(), options.cc_args.begin(), options.cc_args.end());
+  stdcxx_after_objects = false;
+  if (!cxx_link) return command;
+  command = {options.cxx};
+  for (std::size_t i = 0; i < options.cxx_args.size(); ++i) {
+    if (options.cxx_args[i] == "-x" && i + 1 < options.cxx_args.size() && options.cxx_args[i + 1] == "c++") { ++i; command = {options.cc}; command.insert(command.end(), options.cc_args.begin(), options.cc_args.end()); stdcxx_after_objects = true; continue; }
+    if (command.front() == options.cxx) command.push_back(options.cxx_args[i]);
+  }
+  return command;
 }
 
 std::optional<std::vector<std::uint8_t>> read_exact(const fs::path &path, std::size_t size) {
@@ -547,16 +565,8 @@ struct GenesisSoundBuild {
 
   bool cxx_link = false;   // SEG-137-T007: a program with the Luau VM links with the C++ driver (the platform's C++ runtime; exceptions)
   bool link(const fs::path &executable, const std::vector<fs::path> &objects, bool with_sdl) {
-    std::vector<std::string> command{options.cc};
-    command.insert(command.end(), options.cc_args.begin(), options.cc_args.end());
-    bool stdcxx_after_objects = false;   // the custom C driver fallback: the C++ runtime library must FOLLOW the objects that need it (GNU-style one-pass link order)
-    if (cxx_link) {
-      command = {options.cxx};
-      for (std::size_t i = 0; i < options.cxx_args.size(); ++i) {
-        if (options.cxx_args[i] == "-x" && i + 1 < options.cxx_args.size() && options.cxx_args[i + 1] == "c++") { ++i; command = {options.cc}; command.insert(command.end(), options.cc_args.begin(), options.cc_args.end()); stdcxx_after_objects = true; continue; }
-        if (command.front() == options.cxx) command.push_back(options.cxx_args[i]);
-      }
-    }
+    bool stdcxx_after_objects = false;
+    std::vector<std::string> command = link_driver(options, cxx_link, stdcxx_after_objects);
     command.insert(command.end(), {"-o", executable.string()});
     for (const auto &object : objects) command.push_back(object.string());
     if (with_sdl) { command.push_back("-L" + options.sdl3_lib->string()); command.push_back("-lSDL3"); command.push_back("-lm"); }
@@ -1857,6 +1867,116 @@ int segarecomp_build_command(int argc, char **argv) {
 }
 
 namespace {
+// SEG-147-T004 (ADR 0325): a Master System package with scripts or native units: the same verification chain as the Genesis scheduled routes (identity, support, exact image, Z80 admission of injected code,
+// declared ranges of the exact revision, trusted Luau compile), then the generated artifact and the staged sources. `--rom` is replaced by the effective image; the mapper comes from the verified package.
+struct SmsModRefusal {
+  std::string message, diagnostic;
+};
+std::optional<SmsModRefusal> prepare_sms_mod(Options &options, Log &log, const segarecomp::mod::Package &package, const std::vector<std::uint8_t> &original, const std::string &original_sha, bool native) {
+  const std::string prefix = native ? "NATIVE" : "LUAU";
+  if (!options.platform.empty() && options.platform != "master-system") return SmsModRefusal{"The mod package targets another platform than --platform names.", prefix + "_PLATFORM_MISMATCH"};
+  if (const auto refusal = segarecomp::luau::sms_scheduled_support(package, native)) return SmsModRefusal{refusal->message, refusal->code};
+  const auto effective = segarecomp::mod::effective_image(package, original, &sms::admit_z80_guest);
+  if (!effective.ok) {
+    const bool own_class = effective.rejection.code != "E_IMAGE_MISMATCH";
+    return SmsModRefusal{(own_class ? "The mod package cannot be applied: " : "The image is not the one the package declares: ") + effective.rejection.message, own_class ? effective.rejection.code : prefix + "_IMAGE_MISMATCH"};
+  }
+  std::string label, mapper;
+  for (const auto &revision : package.manifest.revisions)
+    if (revision.sha256 == original_sha) { label = revision.label; mapper = revision.mapper; }
+  if (label.empty()) return SmsModRefusal{"The image is not a revision the package declares.", prefix + "_IMAGE_MISMATCH"};
+  if (options.mapper_manifest || (!options.mapper.empty() && options.mapper != mapper))
+    return SmsModRefusal{"The mod package declares the cartridge mapper \"" + mapper + "\" for this image; another mapper declaration conflicts with it.", "MOD_MAPPER_MISMATCH"};
+  const std::vector<segarecomp::mod::MemoryRange> ranges = segarecomp::mod::memory_for_revision(package.manifest, label);
+  const segarecomp::luau::HostConfig host = segarecomp::luau::sms_scheduled_host_config(package.manifest);
+  const auto granted = [&](const std::string &name) { return std::find(host.capabilities.begin(), host.capabilities.end(), name) != host.capabilities.end(); };
+  for (const char *space : {"z80.work_ram", "z80.cart_ram"}) {   // a memory capability alone never authorizes an offset
+    bool reads = false, writes = false;
+    for (const auto &r : ranges)
+      if (r.space == space) { reads = reads || r.access != "write"; writes = writes || r.access != "read"; }
+    if ((granted(std::string("memory.read.") + space) && !reads) || (granted(std::string("memory.write.") + space) && !writes))
+      return SmsModRefusal{"The package declares a memory capability but no memory range with that access for this revision.", "E_RANGE_DECLARATION"};
+  }
+  std::optional<segarecomp_cli::LuauBuild> compiled;
+  if (!native) {
+    if (const auto issues = segarecomp::luau::analyze_mod(package); !issues.empty()) return SmsModRefusal{"The Luau scripts use the API wrongly: " + issues.front().where.text(), issues.front().cls};
+    std::ifstream package_in(options.luau_package, std::ios::binary);
+    const std::vector<std::uint8_t> package_bytes((std::istreambuf_iterator<char>(package_in)), std::istreambuf_iterator<char>());
+    compiled = segarecomp_cli::build_luau(package, package_bytes);
+    if (!compiled->ok) return SmsModRefusal{"The Luau scripts do not compile: " + compiled->rejection.message, compiled->rejection.code};
+    options.luau_bytecode_digest = compiled->compiled.digest();
+  }
+  options.sms_mod = true;
+  options.sms_mod_native = native;
+  options.native_abi_minor = package.manifest.abi_minor;
+  const std::string identity = native ? options.native_identity : options.luau_identity;
+  const fs::path dir = options.output / "sms-mod";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir / "src", ec);
+  if (ec) return SmsModRefusal{"The mod artifact could not be written.", prefix + "_ARTIFACT_WRITE"};
+  options.native_mod_dir = dir;
+  options.native_mod_units.clear();
+  if (native)
+    for (const auto &payload : package.manifest.payloads) {   // staged under the package path, private to this build; every file is re-hashed immediately before the compile
+      if (payload.kind != "native-c11") continue;
+      const auto found = package.files.find(payload.path);
+      if (found == package.files.end() || payload.path.empty() || payload.path.front() == '/' || payload.path.find("..") != std::string::npos)
+        return SmsModRefusal{"A native source of the package is missing or has an unsafe path.", "NATIVE_PACKAGE_INVALID"};
+      const fs::path at = dir / "src" / payload.path;
+      fs::create_directories(at.parent_path(), ec);
+      std::ofstream staged(at, std::ios::binary | std::ios::trunc);
+      staged.write(reinterpret_cast<const char *>(found->second.data()), static_cast<std::streamsize>(found->second.size()));
+      staged.close();
+      if (ec || !staged) return SmsModRefusal{"The native sources could not be staged.", "NATIVE_ARTIFACT_WRITE"};
+      options.native_mod_units.emplace_back(at, segarecomp::sha256_hex(found->second));
+    }
+  std::string capability_names;
+  unsigned long long required[2] = {0, 0}, optional[2] = {0, 0};
+  for (const std::string &name : host.capabilities) {
+    const segarecomp::mod::CapabilityInfo *info = segarecomp::mod::find_capability(name);
+    if (info == nullptr) return SmsModRefusal{"The mod artifact could not be written.", prefix + "_ARTIFACT_WRITE"};
+    capability_names += (capability_names.empty() ? "" : ",") + name;
+    const bool is_required = std::find(package.manifest.capabilities.begin(), package.manifest.capabilities.end(), name) != package.manifest.capabilities.end();
+    (is_required ? required : optional)[info->id / 64U] |= 1ULL << (info->id % 64U);
+  }
+  std::ostringstream c;
+  c << "/* GENERATED by `segarecomp build` (ADR 0325) from a verified Master System mod package; do not edit. */\n#include <stdint.h>\n\n";
+  c << "const char segarecomp_sms_mod_identity[] = \"" << identity << "\";\nconst char segarecomp_sms_mod_effective_sha256[] = \"" << effective.effective_sha256 << "\";\n";
+  c << "const char segarecomp_sms_mod_id[] = \"" << package.manifest.id << "\";\nconst char segarecomp_sms_mod_capabilities[] = \"" << capability_names << "\";\n";
+  c << "const unsigned long long segarecomp_sms_mod_caps_required[2] = {" << required[0] << "ULL, " << required[1] << "ULL}, segarecomp_sms_mod_caps_optional[2] = {" << optional[0] << "ULL, " << optional[1] << "ULL};\n";
+  c << "const unsigned long segarecomp_sms_mod_state_schema = " << package.manifest.state_schema << "UL;\n";
+  c << "const unsigned long segarecomp_sms_mod_range_count = " << ranges.size() << "UL;\nconst unsigned long segarecomp_sms_mod_ranges[][4] = {";
+  for (const auto &r : ranges) c << "\n  {" << (r.space == "z80.cart_ram" ? 2 : 1) << "UL, " << r.offset << "UL, " << r.length << "UL, " << (r.access == "read" ? 1 : r.access == "write" ? 2 : 3) << "UL},";
+  c << "\n  {0, 0, 0, 0}};\n";
+  if (native) {   // a native provider is called in every phase (it switches on host->phase)
+    c << "uint32_t segarecomp_sms_mod_phase_mask(void) { return (1U << 1) | (1U << 2) | (1U << 3) | (1U << 4) | (1U << 7) | (1U << 8); }\nint segarecomp_sms_mod_nondeterministic(void) { return 0; }\n";
+  } else {
+    const std::vector<std::uint8_t> stored = compiled->compiled.serialize();
+    c << "const unsigned long segarecomp_luau_artifact_size = " << stored.size() << "UL;\nconst unsigned char segarecomp_luau_artifact[] = {";
+    for (std::size_t i = 0; i < stored.size(); ++i) c << (i % 24 == 0 ? "\n  " : "") << static_cast<unsigned>(stored[i]) << ",";
+    c << "0};\nconst char segarecomp_luau_bytecode_digest[] = \"" << options.luau_bytecode_digest << "\";\n";
+    c << "const unsigned long segarecomp_luau_memory_bytes = " << package.manifest.luau_memory_bytes << "UL, segarecomp_luau_budget_units = " << package.manifest.luau_budget_units << "UL;\n";
+  }
+  std::ofstream artifact(dir / "sms_mod_artifact.c", std::ios::binary | std::ios::trunc);
+  artifact << c.str();
+  artifact.close();
+  const fs::path input = options.output / "input";
+  fs::create_directories(input, ec);
+  std::ofstream image_out(input / "effective.rom", std::ios::binary | std::ios::trunc);
+  image_out.write(reinterpret_cast<const char *>(effective.image.data()), static_cast<std::streamsize>(effective.image.size()));
+  image_out.close();
+  if (!artifact || ec || !image_out) return SmsModRefusal{"The mod artifact could not be written.", prefix + "_ARTIFACT_WRITE"};
+  options.rom = input / "effective.rom";
+  options.platform = "master-system";
+  options.mapper = mapper;
+  options.sms_mod_status = std::string(",\"") + (native ? "native_mod" : "luau") + "\":{\"package_identity\":\"" + identity + "\",\"original_sha256\":\"" + original_sha + "\",\"effective_sha256\":\"" + effective.effective_sha256 +
+                           "\",\"capabilities\":\"" + capability_names + "\"" +
+                           (native ? std::string(",\"abi\":2") : ",\"bytecode_digest\":\"" + options.luau_bytecode_digest + "\",\"compiler\":\"luau-" + std::string(segarecomp::luau::compiler_pin()) + "\"") + "}";
+  log.line("sms mod: package=" + identity + " original_sha256=" + original_sha + " effective_sha256=" + effective.effective_sha256 + " capabilities=" + capability_names);
+  return std::nullopt;
+}
+
 int run_build(Options options) {
   std::error_code ec;
   fs::create_directories(options.output, ec);
@@ -1890,7 +2010,20 @@ int run_build(Options options) {
   try {
     // ---- analyze ----
     stage("analyze", "begin");
-    if (!options.native_package.empty()) {   // SEG-138-T011 (ADR 0305): a native ABI 2 package: the same verification chain as a Luau mod, then its native-c11 units are staged for the host's own compile
+    if (!options.native_package.empty() || !options.luau_package.empty()) {   // SEG-147-T004: the verified package's platform selects the Master System route; Genesis packages continue below unchanged
+      const bool native = !options.native_package.empty();
+      const auto original = segarecomp::read_binary(options.rom);
+      const std::string original_sha = segarecomp::sha256_hex(original);
+      const auto package = segarecomp::mod::read_package_file(native ? options.native_package : options.luau_package);
+      if (package.ok && package.manifest.platform == "master-system") {
+        if (package.identity != (native ? options.native_identity : options.luau_identity))
+          return fail(options, log, original_sha, "analyze", 1, "The mod package is not the one that was approved.", native ? "NATIVE_IDENTITY_CHANGED" : "LUAU_IDENTITY_CHANGED");
+        if (const auto refusal = prepare_sms_mod(options, log, package, original, original_sha, native)) return fail(options, log, original_sha, "analyze", 1, refusal->message, refusal->diagnostic);
+      } else if (options.platform == "master-system") {
+        return fail(options, log, original_sha, "analyze", 1, "The mod package is not a valid Master System package.", native ? "NATIVE_PLATFORM_MISMATCH" : "LUAU_PLATFORM_MISMATCH");
+      }
+    }
+    if (!options.native_package.empty() && !options.sms_mod) {   // SEG-138-T011 (ADR 0305): a native ABI 2 package: the same verification chain as a Luau mod, then its native-c11 units are staged for the host's own compile
       const auto original = segarecomp::read_binary(options.rom);
       const std::string original_sha = segarecomp::sha256_hex(original);
       const auto package = segarecomp::mod::read_package_file(options.native_package);
@@ -2028,7 +2161,7 @@ int run_build(Options options) {
         data_status = ",\"data_mod\":{\"package_identity\":\"" + options.data_identity + "\",\"original_sha256\":\"" + original_sha + "\",\"effective_sha256\":\"" + effective.effective_sha256 + "\"}";
       }
     }
-    if (!options.luau_package.empty()) {   // SEG-137-T007: verify the package, derive its effective image, compile its scripts; `--rom` is replaced by the effective image for the rest of the build
+    if (!options.luau_package.empty() && !options.sms_mod) {   // SEG-137-T007: verify the package, derive its effective image, compile its scripts; `--rom` is replaced by the effective image for the rest of the build
       const auto original = segarecomp::read_binary(options.rom);
       const std::string original_sha = segarecomp::sha256_hex(original);
       const auto package = segarecomp::mod::read_package_file(options.luau_package);
@@ -2312,8 +2445,14 @@ int run_build(Options options) {
     const bool play = options.sdl3_include.has_value();
     std::vector<std::string> base{options.cc};
     base.insert(base.end(), options.cc_args.begin(), options.cc_args.end());
-    struct Unit { fs::path source; std::vector<std::string> extra; };
+    struct Unit {
+      fs::path source;
+      std::vector<std::string> extra;
+      std::vector<std::string> driver = {};   // non-empty: the WHOLE command prefix of this unit (a C++ unit of the Luau VM, or an isolated native package unit) instead of `base`
+      std::string verify_sha256 = {};         // re-hashed immediately before the compile (a staged package source must still be the verified payload)
+    };
     std::vector<Unit> compile;
+    bool sms_cxx_link = false;
     if (target == Target::master_system) {
       // SMS link set (T008 headless / T009 viewer recipes): generated units + runtime + PSG device, then either the
       // headless driver and its VDP/audio wiring or the viewer core, its SDL3 adapter and its `main`. The platform
@@ -2342,6 +2481,51 @@ int run_build(Options options) {
         base.insert(base.end(), {"-I", headless.string()});
         for (const char *name : {"sms_audio.c", "sms_headless.c", "sms_devices_vdp.c"}) compile.push_back({headless / name, {}});
       }
+      if (options.sms_mod) {   // SEG-147-T004..T006 (ADR 0325): the ONE Master System mod scheduler, its host and compositor, the verified artifact and the provider (the package's C11 units, or the Luau adapter)
+        const fs::path viewer_lib = root / "libs" / "viewer", sdk = options.runtime_dir / "sdk", core_sdk = root / "platforms" / "sdk";
+        const fs::path mod_dir = options.runtime_dir / "mod";
+        base.insert(base.end(), {"-DSEGARECOMP_SMS_MOD=1", "-I", mod_dir.string(), "-I", sdk.string(), "-I", core_sdk.string(), "-I", (viewer_lib / "include").string(), "-I", (viewer_lib / "src").string(), "-I", viewer.string()});
+        for (const char *name : {"sms_mod_scheduler.c", "sms_mod_present.c", "sms_mod_host.c"}) compile.push_back({mod_dir / name, {}});
+        compile.push_back({options.native_mod_dir / "sms_mod_artifact.c", {}});
+        if (!play) {   // the viewer foundation already links the font and the viewer the snapshot codec
+          compile.push_back({options.runtime_dir / "headless" / "sms_headless_mod.c", {}});
+          compile.push_back({viewer / "sms_snapshot.c", {}});
+          for (const char *name : {"sv_font.c", "sv_font_data.c"}) compile.push_back({viewer_lib / "src" / name, {}});
+        }
+        if (options.sms_mod_native) {   // the SAME host-owned flags `mod check` / `mod build` validate with, the Master System target defines, the SDK headers and the package's own tree only
+          std::vector<std::string> isolated{options.cc};
+          isolated.insert(isolated.end(), options.cc_args.begin(), options.cc_args.end());
+          for (const std::string_view flag : segarecomp::mod::kNativeCompileFlags)
+            if (flag != "-c") isolated.emplace_back(flag);
+          isolated.insert(isolated.end(), {"-O" + options.optimize, "-DSEGA_MOD_TARGET_PLATFORM=2", "-DSEGA_MOD_TARGET_ABI_MAJOR=2U", "-DSEGA_MOD_TARGET_ABI_MINOR=" + std::to_string(options.native_abi_minor) + "U", "-I", sdk.string(),
+                                           "-I", core_sdk.string(), "-I", (options.native_mod_dir / "src").string()});
+          for (const auto &[path, digest] : options.native_mod_units)
+            if (path.extension() == ".c") compile.push_back({path, {}, isolated, digest});
+        } else {   // the Luau VM, its host API, the phase adapter and the Master System provider: C++20 with exceptions
+          resolve_cxx(options);
+          sms_cxx_link = true;
+          const fs::path luau = root / "third_party" / "luau", host = root / "libs" / "luau_host" / "src", media = root / "libs" / "media";
+          std::vector<std::string> flags{options.cxx};
+          flags.insert(flags.end(), options.cxx_args.begin(), options.cxx_args.end());
+          flags.insert(flags.end(), {"-std=c++20", "-fexceptions", "-frtti", "-O" + options.optimize, "-DSEGARECOMP_LUAU_CODEGEN=0", "-DSEGARECOMP_LUAU_PIN=\"" + std::string(segarecomp::luau::compiler_pin()) + "\"",
+                                     "-I", (luau / "Common" / "include").string(), "-I", (luau / "Ast" / "include").string(), "-I", (luau / "Bytecode" / "include").string(), "-I", (luau / "Compiler" / "include").string(),
+                                     "-I", (luau / "VM" / "include").string(), "-I", (root / "libs" / "luau_host" / "include").string(), "-I", host.string(), "-I", (media / "include").string(),
+                                     "-I", (root / "libs" / "core" / "include").string(), "-I", (viewer_lib / "include").string(), "-I", mod_dir.string(), "-I", runtime.string(), "-I", sdk.string(), "-I", core_sdk.string(),
+                                     "-I", (root / "platforms" / "genesis" / "sdk").string()});   // the shared phase adapter also knows the Genesis feature table (its audio services)
+          std::vector<std::string> vm_flags = flags;
+          vm_flags.insert(vm_flags.end(), {"-w", "-I", (luau / "VM" / "src").string(), "-I", (luau / "Bytecode" / "src").string()});
+          std::vector<fs::path> vm_sources;
+          for (const auto &entry : fs::directory_iterator(luau / "VM" / "src", ec)) {
+            const std::string name = entry.path().filename().string();
+            if (entry.path().extension() == ".cpp" && name != "linit.cpp" && name != "loslib.cpp" && name != "ldblib.cpp" && name != "lcorolib.cpp") vm_sources.push_back(entry.path());   // the libraries the policy does not allow are not compiled
+          }
+          std::sort(vm_sources.begin(), vm_sources.end());
+          for (const fs::path &source : vm_sources) compile.push_back({source, {}, vm_flags});
+          for (const char *name : {"luau_vm.cpp", "luau_api.cpp", "luau_stored.cpp", "luau_phase_provider.cpp"}) compile.push_back({host / name, {}, flags});
+          for (const char *name : {"sha256.cpp", "mod_adapter.cpp"}) compile.push_back({media / "src" / name, {}, flags});
+          compile.push_back({mod_dir / "sms_mod_luau.cpp", {}, flags});
+        }
+      }
     }
     for (const auto &unit : compile)
       if (!fs::is_regular_file(unit.source, ec))
@@ -2353,7 +2537,14 @@ int run_build(Options options) {
     std::vector<fs::path> logs, objects;
     for (std::size_t i = 0; i < compile.size(); ++i) {
       const fs::path object = object_dir / (std::to_string(i) + ".o");
-      auto command = base;
+      if (!compile[i].verify_sha256.empty()) {   // every staged file of the package (headers included, they are on the include path) must still be the verified payload
+        for (const auto &[path, digest] : options.native_mod_units) {
+          std::ifstream staged(path, std::ios::binary);
+          const std::vector<std::uint8_t> staged_bytes((std::istreambuf_iterator<char>(staged)), std::istreambuf_iterator<char>());
+          if (segarecomp::sha256_hex(staged_bytes) != digest) return fail(options, log, sha, "compile", 3, "A native source changed after it was verified.", "NATIVE_SOURCE_DIGEST");
+        }
+      }
+      auto command = compile[i].driver.empty() ? base : compile[i].driver;
       command.insert(command.end(), compile[i].extra.begin(), compile[i].extra.end());
       command.insert(command.end(), {"-c", "-o", object.string(), compile[i].source.string()});
       commands.push_back(command);
@@ -2410,11 +2601,12 @@ int run_build(Options options) {
 #else
     const fs::path executable = options.output / "game";
 #endif
-    std::vector<std::string> link{options.cc};
-    link.insert(link.end(), options.cc_args.begin(), options.cc_args.end());
+    bool stdcxx_after_objects = false;
+    std::vector<std::string> link = link_driver(options, sms_cxx_link, stdcxx_after_objects);
     link.insert(link.end(), {"-o", executable.string()});
     for (const auto &object : objects) link.push_back(object.string());
     if (play) { link.push_back("-L" + options.sdl3_lib->string()); link.push_back("-lSDL3"); link.push_back("-lm"); }
+    if (stdcxx_after_objects) link.push_back("-lstdc++");
     link.insert(link.end(), options.link_args.begin(), options.link_args.end());
     const fs::path link_log = object_dir / "link.log";
     segarecomp_cli::ProcessUsage link_usage;
@@ -2440,7 +2632,7 @@ int run_build(Options options) {
     }
     fs::remove_all(object_dir, ec);
     stage("link", "done");
-    write_status(options, sha, "ok", "done", "", sms_provenance + data_status + sms_images + aot_policy_json(options, log, sha, false));
+    write_status(options, sha, "ok", "done", "", sms_provenance + data_status + options.sms_mod_status + sms_images + aot_policy_json(options, log, sha, false));
     std::cout << "@result ok executable=" << executable.string() << std::endl;
     return 0;
   } catch (const std::exception &error) {

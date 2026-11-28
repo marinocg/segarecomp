@@ -29,6 +29,9 @@
 #include "sms_machine.h"
 #include "sms_pad.h"
 #include "sms_psg.h"
+#if defined(SEGARECOMP_SMS_MOD)
+#include "sms_headless_mod.h"
+#endif
 #if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
 #include "sms_sha256.h"
 #include "segarecomp/codegen/c11/runtime/z80_execution_coverage.h"
@@ -206,6 +209,7 @@ int main(int argc, char **argv) {
   const char *coverage_dir = NULL;
 #endif
   SmsStop stop;
+  int budget_spent = 0;
   SmsError init;
   uint8_t digest[32];
   char digest_hex[65];
@@ -223,6 +227,9 @@ int main(int argc, char **argv) {
     else if (strcmp(arg, "--artifacts") == 0 && value != NULL) artifacts = argv[++i];
 #if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
     else if (strcmp(arg, "--execution-coverage") == 0 && value != NULL) coverage_dir = argv[++i];
+#endif
+#if defined(SEGARECOMP_SMS_MOD)
+    else if (strncmp(arg, "--mod-", 6) == 0 && sms_headless_mod_option(argc, argv, &i) == 1) continue;
 #endif
     else if (strcmp(arg, "--bios") == 0) {
       printf("sms_error %s\n", sms_error_name(SMS_ERROR_BIOS_UNSUPPORTED)); /* the BIOS is never executed or supplied */
@@ -249,6 +256,9 @@ int main(int argc, char **argv) {
     psg_attached = sms_psg_attach(&psg_device, &machine, capture ? sms_audio_capture_sink : NULL, &audio);
   }
   if (machine.pad.read == NULL) sms_pad_attach(&machine, &pad_device); /* the VDP (if any) receives the H counter latch */
+#if defined(SEGARECOMP_SMS_MOD)
+  if (sms_headless_mod_attach(&machine, &pad_device) != 0) return 5;
+#endif
   if (input_path != NULL && !load_input(input_path)) return 64;
   machine.stop_on_halt_idle = cycle_budget == SMS_NO_LIMIT && frames == SMS_NO_LIMIT;
   sms_machine_reset(&machine); /* device resets run after the devices are attached */
@@ -256,7 +266,17 @@ int main(int argc, char **argv) {
   if (coverage_dir != NULL) z80_execution_coverage_attach(&z80_coverage, &machine.rt); /* after the reset: non-architectural */
 #endif
   if (frames != SMS_NO_LIMIT && frames > UINT64_MAX / SMS_CYCLES_PER_FRAME) return 64;
+#if defined(SEGARECOMP_SMS_MOD)
   {
+    const SmsHeadlessModStart start = sms_headless_mod_before_run(&machine, &psg_device, &pad_device, cycle_budget, frames);
+    if (start == SMS_HEADLESS_MOD_REFUSED) return 5;
+    budget_spent = start == SMS_HEADLESS_MOD_BUDGET_SPENT;
+  }
+#endif
+  if (budget_spent) { /* a restored mod state already past the budget: no instruction runs */
+    stop = sms_run_until_cycle(&machine, 0);
+    if (stop.kind == SMS_STOP_CYCLE) stop.kind = SMS_STOP_CYCLE_BUDGET;
+  } else {
     const uint64_t frame_limit = frames == SMS_NO_LIMIT ? SMS_NO_LIMIT : frames * SMS_CYCLES_PER_FRAME;
     const uint64_t final_cycle = cycle_budget < frame_limit ? cycle_budget : frame_limit;
     uint64_t rng = slice_seed * 6364136223846793005ull + 1442695040888963407ull;
@@ -294,6 +314,12 @@ int main(int argc, char **argv) {
 #if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
   if (coverage_dir != NULL && !write_z80_coverage(coverage_dir)) {
     fprintf(stderr, "cannot write execution coverage to %s\n", coverage_dir);
+    return 64;
+  }
+#endif
+#if defined(SEGARECOMP_SMS_MOD)
+  if (!sms_headless_mod_finish(artifacts)) {
+    fprintf(stderr, "cannot write the mod evidence to %s\n", artifacts != NULL ? artifacts : "");
     return 64;
   }
 #endif

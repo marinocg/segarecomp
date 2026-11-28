@@ -13,7 +13,8 @@
 #define DIGEST_BYTES 32U
 #define PLATFORM_ID 2U   /* the container's platform field: 2 = Master System (other consoles use their own value) */
 
-enum { SEC_CPU = 1, SEC_MEM = 2, SEC_MACHINE = 3, SEC_VDP = 4, SEC_RENDER = 5, SEC_PSG = 6, SEC_PAD = 7, SEC_LAST = SEC_PAD };
+enum { SEC_CPU = 1, SEC_MEM = 2, SEC_MACHINE = 3, SEC_VDP = 4, SEC_RENDER = 5, SEC_PSG = 6, SEC_PAD = 7, SEC_CORE_LAST = SEC_PAD, SEC_MOD = 8, SEC_LAST = SEC_MOD };
+#define MOD_HEADER_BYTES (32U + 4U + 32U) /* identity, state schema, compatibility digest */
 #define SECTION_FLAG_REQUIRED 1U
 
 /* Fixed per-section maxima: an allocation or read is never sized by a file length. */
@@ -24,7 +25,7 @@ enum { SEC_CPU = 1, SEC_MEM = 2, SEC_MACHINE = 3, SEC_VDP = 4, SEC_RENDER = 5, S
 #define RENDER_BYTES (4U + 4U + 8U + 1U + 1U + 8U + 2U * SMS_FB_MAX_BYTES)
 #define PSG_BYTES (SN76489_STATE_BYTES + 8U + 8U + 8U + 4U + 4U + 8U + 4U + 2U * SN76489_PCM_BATCH)
 #define PAD_BYTES 5U
-static const uint32_t k_section_len[SEC_LAST + 1] = {0U, CPU_BYTES, MEM_BYTES, MACHINE_BYTES, VDP_BYTES, RENDER_BYTES, PSG_BYTES, PAD_BYTES};
+static const uint32_t k_section_len[SEC_LAST + 1] = {0U, CPU_BYTES, MEM_BYTES, MACHINE_BYTES, VDP_BYTES, RENDER_BYTES, PSG_BYTES, PAD_BYTES, MOD_HEADER_BYTES + SMS_MOD_BODY_MAX};
 
 static const char k_exec_tag[] = "segarecomp.sms.smsstate.exec.v1;profile=sms2_ntsc_export";
 
@@ -46,6 +47,9 @@ const char *sms_snapshot_status_text(SmsSnapshotStatus status) {
     case SMS_SNAPSHOT_INCOMPATIBLE: return "the state does not match this game's mapper or build";
     case SMS_SNAPSHOT_INVALID_STATE: return "the state holds values the console cannot have";
     case SMS_SNAPSHOT_NOT_CAPTURABLE: return "the game is in a state that cannot be saved";
+    case SMS_SNAPSHOT_MOD_MISMATCH: return "the state was made with a different mod setup";
+    case SMS_SNAPSHOT_MOD_UNAVAILABLE: return "this mod does not support save states";
+    case SMS_SNAPSHOT_MOD_REJECTED: return "the mod could not load its saved data";
   }
   return "unknown error";
 }
@@ -325,7 +329,8 @@ SmsSnapshotStatus sms_snapshot_capture(const SmsSnapshotMachine *machine, const 
                                        SmsSnapshotBuffer *out) {
   SvcWriter w;
   uint32_t sections[SEC_LAST], starts[SEC_LAST + 1U];
-  uint32_t i, table_at, thumb_bytes = 0U;
+  uint32_t i, table_at, thumb_bytes = 0U, section_count, mod_len = 0U;
+  uint8_t *mod_body = NULL;
   int script;
   uint16_t flags;
   uint8_t fp[32], digest[32];
@@ -340,7 +345,18 @@ SmsSnapshotStatus sms_snapshot_capture(const SmsSnapshotMachine *machine, const 
     thumb_bytes = (uint32_t)thumbnail->width * thumbnail->height * 2U;
   }
   exec_fingerprint(machine, flags, fp);
+  section_count = machine->mod != NULL ? (uint32_t)SEC_MOD : (uint32_t)SEC_CORE_LAST;
   for (i = 0; i < SEC_LAST; ++i) sections[i] = i + 1U;
+  if (machine->mod != NULL) { /* the mod first: a mod that cannot be saved must produce no state at all */
+    SmsModStateStatus mod_status = SMS_MOD_STATE_NOT_CAPTURABLE;
+    mod_body = (uint8_t *)malloc(SMS_MOD_BODY_MAX);
+    if (mod_body == NULL) return SMS_SNAPSHOT_NO_MEMORY;
+    mod_len = machine->mod->put(machine->mod->context, mod_body, SMS_MOD_BODY_MAX, &mod_status);
+    if (mod_len > SMS_MOD_BODY_MAX) {
+      free(mod_body);
+      return mod_status == SMS_MOD_STATE_UNAVAILABLE ? SMS_SNAPSHOT_MOD_UNAVAILABLE : SMS_SNAPSHOT_NOT_CAPTURABLE;
+    }
+  }
   svc_w_init(&w, SMS_SNAPSHOT_MAX_FILE_BYTES);
   svc_w_bytes(&w, SMS_SNAPSHOT_MAGIC, 8U);
   svc_w_u16(&w, SMS_SNAPSHOT_CONTAINER_VERSION);
@@ -350,7 +366,7 @@ SmsSnapshotStatus sms_snapshot_capture(const SmsSnapshotMachine *machine, const 
   svc_w_u32(&w, (uint32_t)machine->machine->mem.family);
   svc_w_u32(&w, HEADER_FIXED_BYTES);
   svc_w_u32(&w, 0U);                     /* total size: patched below */
-  svc_w_u32(&w, SEC_LAST);
+  svc_w_u32(&w, section_count);
   svc_w_bytes(&w, identity->source_sha256, 32U);
   svc_w_bytes(&w, identity->variant_sha256, 32U);
   svc_w_bytes(&w, fp, 32U);
@@ -361,9 +377,9 @@ SmsSnapshotStatus sms_snapshot_capture(const SmsSnapshotMachine *machine, const 
   svc_w_u32(&w, thumb_bytes);
   svc_w_u32(&w, 0U);
   table_at = w.size;
-  for (i = 0; i < SEC_LAST * SECTION_ENTRY_BYTES; ++i) svc_w_u8(&w, 0U);
+  for (i = 0; i < section_count * SECTION_ENTRY_BYTES; ++i) svc_w_u8(&w, 0U);
   if (thumb_bytes != 0U) svc_w_bytes(&w, thumbnail->rgb565, thumb_bytes);
-  for (i = 0; i < SEC_LAST && !w.error; ++i) {
+  for (i = 0; i < section_count && !w.error; ++i) {
     starts[i] = w.size;
     switch (sections[i]) {
       case SEC_CPU: put_cpu(&w, machine->machine); break;
@@ -373,12 +389,19 @@ SmsSnapshotStatus sms_snapshot_capture(const SmsSnapshotMachine *machine, const 
       case SEC_RENDER: put_render(&w, machine->renderer); break;
       case SEC_PSG: put_psg(&w, machine->psg); break;
       case SEC_PAD: put_pad(&w, machine->pad); break;
+      case SEC_MOD:
+        svc_w_bytes(&w, machine->mod->identity, 32U);
+        svc_w_u32(&w, machine->mod->state_schema);
+        svc_w_bytes(&w, machine->mod->compat, 32U);
+        svc_w_bytes(&w, mod_body, mod_len);
+        break;
       default: break;
     }
   }
-  starts[SEC_LAST] = w.size;
+  free(mod_body);
+  starts[section_count] = w.size;
   if (w.error) { free(w.data); return SMS_SNAPSHOT_NO_MEMORY; }
-  for (i = 0; i < SEC_LAST; ++i) {
+  for (i = 0; i < section_count; ++i) {
     const uint32_t length = starts[i + 1U] - starts[i];
     if (length > k_section_len[sections[i]]) { free(w.data); return SMS_SNAPSHOT_TOO_LARGE; }
     svc_put_le16(w.data + table_at + i * SECTION_ENTRY_BYTES, (uint16_t)sections[i]);
@@ -432,7 +455,7 @@ static SmsSnapshotStatus parse_container(const uint8_t *data, size_t size, SmsSn
   count = svc_le32(data + 28);
   if (platform != PLATFORM_ID || svc_le32(data + 20) != HEADER_FIXED_BYTES || (flags & ~SMS_SNAPSHOT_FLAG_SCRIPT_INPUT) != 0U) return SMS_SNAPSHOT_BAD_LAYOUT;
   if (total != size) return total > size ? SMS_SNAPSHOT_TRUNCATED : SMS_SNAPSHOT_BAD_LAYOUT;
-  if (count != SEC_LAST) return SMS_SNAPSHOT_BAD_LAYOUT;
+  if (count != SEC_CORE_LAST && count != SEC_MOD) return SMS_SNAPSHOT_BAD_LAYOUT;
   info->machine_flags = flags;
   info->mapper_family = svc_le32(data + 16);
   memcpy(info->source_sha256, data + 32, 32U);
@@ -461,7 +484,7 @@ static SmsSnapshotStatus parse_container(const uint8_t *data, size_t size, SmsSn
   for (i = 0U; i < count; ++i) {
     const uint8_t *entry = data + HEADER_FIXED_BYTES + i * SECTION_ENTRY_BYTES;
     const uint32_t id = svc_le16(entry), sflags = svc_le16(entry + 2), offset = svc_le32(entry + 4), length = svc_le32(entry + 8);
-    if (id == 0U || id > SEC_LAST) return SMS_SNAPSHOT_UNKNOWN_SECTION;
+    if (id == 0U || id > count) return SMS_SNAPSHOT_UNKNOWN_SECTION;
     if ((sflags & SECTION_FLAG_REQUIRED) == 0U || (sflags & ~SECTION_FLAG_REQUIRED) != 0U) return SMS_SNAPSHOT_UNKNOWN_SECTION;
     if (views[id].present) return SMS_SNAPSHOT_UNKNOWN_SECTION;   /* duplicated */
     if (length > k_section_len[id]) return SMS_SNAPSHOT_BAD_LAYOUT;
@@ -472,8 +495,15 @@ static SmsSnapshotStatus parse_container(const uint8_t *data, size_t size, SmsSn
     cursor += length;
   }
   if (cursor != size - DIGEST_BYTES) return SMS_SNAPSHOT_BAD_LAYOUT;   /* no gaps or trailing bytes */
-  for (i = 1U; i <= SEC_LAST; ++i)
+  for (i = 1U; i <= count; ++i)
     if (!views[i].present) return SMS_SNAPSHOT_UNKNOWN_SECTION;
+  if (count == SEC_MOD) {
+    if (views[SEC_MOD].length < MOD_HEADER_BYTES) return SMS_SNAPSHOT_BAD_LAYOUT;
+    info->has_mod = 1;
+    memcpy(info->mod_identity, views[SEC_MOD].data, 32U);
+    info->mod_state_schema = svc_le32(views[SEC_MOD].data + 32);
+    memcpy(info->mod_compat, views[SEC_MOD].data + 36, 32U);
+  }
   info->size = (uint32_t)size;
   return SMS_SNAPSHOT_OK;
 }
@@ -504,6 +534,7 @@ static SmsSnapshotStatus restore_impl(const SmsSnapshotMachine *machine, const S
   uint8_t fp[32];
   uint16_t flags;
   int script;
+  void *mod_staged = NULL;
   if (!machine_ok(machine) || identity == NULL || data == NULL) return SMS_SNAPSHOT_BAD_ARGUMENT;
   script = machine->script_input != 0;
   status = parse_container(data, size, &info, views);
@@ -513,6 +544,9 @@ static SmsSnapshotStatus restore_impl(const SmsSnapshotMachine *machine, const S
   flags = flags_of(machine);
   exec_fingerprint(machine, flags, fp);
   if (info.machine_flags != flags || info.mapper_family != (uint32_t)machine->machine->mem.family || memcmp(info.exec_fingerprint, fp, 32U) != 0) return SMS_SNAPSHOT_INCOMPATIBLE;
+  if ((info.has_mod != 0) != (machine->mod != NULL) ||
+      (machine->mod != NULL && (memcmp(info.mod_identity, machine->mod->identity, 32U) != 0 || info.mod_state_schema != machine->mod->state_schema || memcmp(info.mod_compat, machine->mod->compat, 32U) != 0)))
+    return SMS_SNAPSHOT_MOD_MISMATCH;
 
   st = (Stage *)malloc(sizeof *st);
   if (st == NULL) return SMS_SNAPSHOT_NO_MEMORY;
@@ -548,15 +582,23 @@ static SmsSnapshotStatus restore_impl(const SmsSnapshotMachine *machine, const S
     if (st->renderer.last_frame > st->vdp.frame) goto done;
     if (st->pad.io_control != m->io_control) goto done;                               /* the machine's mirror and the pad's agree by construction */
   }
+  if (machine->mod != NULL) {
+    mod_staged = machine->mod->stage(machine->mod->context, views[SEC_MOD].data + MOD_HEADER_BYTES, views[SEC_MOD].length - MOD_HEADER_BYTES);
+    if (mod_staged == NULL) { status = SMS_SNAPSHOT_MOD_REJECTED; goto done; }
+  }
   if (!commit) { status = SMS_SNAPSHOT_OK; goto done; }   /* validation only: the staged copies are dropped, the machine is never touched */
+  /* the mod's own load is the one step that can still fail: it runs before any guest state is replaced */
+  if (mod_staged != NULL && machine->mod->apply(machine->mod->context, mod_staged) != 0) { status = SMS_SNAPSHOT_MOD_REJECTED; goto done; }
   /* ---- commit: everything above passed; the copies below cannot fail ---- */
   memcpy(machine->machine, &st->machine, sizeof st->machine);
   memcpy(machine->vdp, &st->vdp, sizeof st->vdp);
   memcpy(machine->renderer, &st->renderer, sizeof st->renderer);
   memcpy(machine->psg, &st->psg, sizeof st->psg);
   memcpy(machine->pad, &st->pad, sizeof st->pad);
+  if (mod_staged != NULL) { machine->mod->commit(machine->mod->context, mod_staged, machine->machine, machine->pad); mod_staged = NULL; }
   status = SMS_SNAPSHOT_OK;
 done:
+  if (mod_staged != NULL) machine->mod->discard(machine->mod->context, mod_staged);
   free(st);
   return status;
 }

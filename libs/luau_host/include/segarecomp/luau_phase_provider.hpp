@@ -28,6 +28,9 @@ class PhaseProvider {
   PhaseProvider(const PhaseProvider &) = delete;
   PhaseProvider &operator=(const PhaseProvider &) = delete;
 
+  // ADR 0325: the platform adapter that knows the platform's feature table supplies the platform's extra services (HostServices::present / vdp_byte). Called on the services of every callback.
+  using ServiceFill = void (*)(HostServices &services);
+  void set_service_fill(ServiceFill fill);
   [[nodiscard]] const SegaModProvider *provider() const;
   [[nodiscard]] void *state();
   // The phases whose callback the script defines (bit 1 << SegaModPhase): the scheduler's phase registration.

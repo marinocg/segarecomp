@@ -35,6 +35,7 @@ static SmsSnapshotMachine snap_of(const SmsViewerState *s) {
   m.psg = &s->cfg.rig->psg;
   m.pad = &s->cfg.rig->pad;
   m.script_input = 0;   /* the viewer's input is live (and recording sessions are refused before this adapter exists) */
+  m.mod = s->cfg.mod;
   return m;
 }
 
@@ -54,7 +55,7 @@ static int op_capture(void *ctx, uint8_t **data, uint32_t *size, char *why, size
   st = sms_snapshot_capture(&m, &s->cfg.identity, thumbnail.rgb565 != NULL ? &thumbnail : NULL, &buffer);
   if (st == SMS_SNAPSHOT_OK) { *data = buffer.data; *size = buffer.size; return SV_CAPTURE_OK; }
   set_text(why, cap, sms_snapshot_status_text(st));
-  return st == SMS_SNAPSHOT_NOT_CAPTURABLE ? SV_CAPTURE_SKIP : st == SMS_SNAPSHOT_NO_MEMORY ? SV_CAPTURE_NO_MEMORY : SV_CAPTURE_FAILED;
+  return st == SMS_SNAPSHOT_NOT_CAPTURABLE || st == SMS_SNAPSHOT_MOD_UNAVAILABLE ? SV_CAPTURE_SKIP : st == SMS_SNAPSHOT_NO_MEMORY ? SV_CAPTURE_NO_MEMORY : SV_CAPTURE_FAILED;
 }
 
 static void fill_info(const SmsSnapshotInfo *in, SvStateInfo *out) {

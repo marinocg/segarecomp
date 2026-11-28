@@ -429,6 +429,7 @@ void test_api_list() {
     }
     const mod::CapabilityInfo *cap = mod::find_capability(std::string(e.capability));
     check(cap != nullptr && cap->luau_bound, std::string("the capability of ") + std::string(e.name) + " is in the ABI 2 catalogue with a Luau binding");
+    if (!luau::api_on_platform(e, "genesis")) continue;   // ADR 0325: the other platform's names are absent here (its VM is checked end to end by the Master System mod tests)
     listed.push_back(std::string(e.name) + ":" + (e.kind == "value" ? "number" : "function"));
   }
   std::sort(listed.begin(), listed.end());

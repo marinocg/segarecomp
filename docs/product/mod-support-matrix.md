@@ -6,7 +6,7 @@ It is a *reporting* document: it never changes the launcher, the build admission
 
 The plan behind it is the Modding Platform contract set: [gap inventory](../architecture/modding-platform-gap-inventory.md), [adapters](../architecture/mod-platform-adapters.md),
 [schema 3](../architecture/segapatch-schema-3.md), [phases](../architecture/mod-execution-phases.md), [ABI 2](../architecture/native-sdk-abi-2.md), [Luau policy](../architecture/luau-trust-policy.md) and
-[audio](../architecture/modding-audio-architecture.md). **Nothing in those contracts is implemented by this page.** The only implemented mod capabilities are the pre-roadmap baseline: schema 1/2 Genesis packages and the read-only ABI 1 provider.
+[audio](../architecture/modding-audio-architecture.md). **This page implements nothing**: a row's level and its cited tests state what exists.
 
 ## Levels
 
@@ -38,16 +38,16 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Guest data/code modifications | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_test.py`, `tests/mod_sms_native_test.py` |
 | Guest data/code modifications | Sega CD | unsupported | experimental | planned: SEG-148-T002 |
 | Luau lifecycle and gameplay scripting | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/mod_luau_executable_test.py`, `tests/mod_viewer_gameplay_test.py`, `tests/mod_gameplay_example_test.py` |
-| Luau lifecycle and gameplay scripting | Master System | unsupported | supported-with-limitations | planned: SEG-147-T004 |
+| Luau lifecycle and gameplay scripting | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_lifecycle_test.py`, `tests/mod_platform_conformance_test.cpp` |
 | Luau lifecycle and gameplay scripting | Sega CD | unsupported | experimental | planned: SEG-148-T006 |
 | Native C11 extension support | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/genesis_patch_provider_build_test.py`, `tests/segapatch_native_package_test.py`, `tests/mod_native_viewer_test.py` |
-| Native C11 extension support | Master System | experimental | supported-with-limitations | `tests/mod_sources_test.py` |
+| Native C11 extension support | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_lifecycle_test.py`, `tests/mod_sources_test.py` |
 | Native C11 extension support | Sega CD | experimental | experimental | `tests/mod_sources_test.py` |
 | Input modifications | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/mod_viewer_gameplay_test.py`, `tests/mod_gameplay_example_test.py` |
-| Input modifications | Master System | unsupported | supported-with-limitations | planned: SEG-147-T004 |
+| Input modifications | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_lifecycle_test.py`, `tests/sms_mod_scheduler_test.cpp` |
 | Input modifications | Sega CD | unsupported | experimental | planned: SEG-148-T005 |
 | Memory access | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/genesis_native_compat_viewer_sdl_test.c`, `tests/mod_viewer_gameplay_test.py`, `tests/mod_native_viewer_test.py` |
-| Memory access | Master System | unsupported | supported-with-limitations | planned: SEG-147-T004 |
+| Memory access | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_lifecycle_test.py`, `tests/sms_mod_scheduler_test.cpp`, `tests/mod_platform_conformance_test.cpp` |
 | Memory access | Sega CD | unsupported | experimental | planned: SEG-148-T005 |
 | Function hooks | Genesis / Mega Drive | supported-with-limitations | spike-gated (SEG-138-T003) | `tests/mod_hooks_build_test.py`, `tests/mod_hooks_test.py`, `tests/genesis_mod_hook_scheduler_test.py` |
 | Function hooks | Master System | unsupported | spike-gated (SEG-147-T003) | planned: SEG-147-T008 |
@@ -56,13 +56,13 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Asset authoring | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_assets_test.py` |
 | Asset authoring | Sega CD | unsupported | supported-with-limitations | planned: SEG-148-T002 |
 | Graphics and HUD | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/genesis_native_compat_viewer_sdl_test.c`, `tests/mod_vsprite_viewer_test.py`, `tests/mod_vsprite_wide_test.py`, `tests/mod_vsprite_abi2_test.py` |
-| Graphics and HUD | Master System | unsupported | supported-with-limitations | planned: SEG-147-T006 |
+| Graphics and HUD | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_lifecycle_test.py`, `tests/sms_mod_scheduler_test.cpp` |
 | Graphics and HUD | Sega CD | unsupported | experimental | planned: SEG-148-T009 |
 | Widescreen presentation (16:9 today; up to 32:9 planned) | Genesis / Mega Drive | supported-with-limitations | supported-with-limitations | `tests/genesis_extension_test.cpp`, `tests/mod_vsprite_wide_test.py` |
 | Widescreen presentation (16:9 today; up to 32:9 planned) | Master System | experimental | unsupported | planned: SEG-147-T009 |
 | Widescreen presentation (16:9 today; up to 32:9 planned) | Sega CD | experimental | unsupported | planned: SEG-148-T010 |
 | Guest-native audio | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/mod_sound_workflow_test.py`, `tests/mod_audio_api_test.py`, `tests/genesis_mod_audio_test.cpp` |
-| Guest-native audio | Master System | unsupported | supported-with-limitations | planned: SEG-145-T004 |
+| Guest-native audio | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_sound_test.py` |
 | Guest-native audio | Sega CD | unsupported | experimental | planned: SEG-145-T006 |
 | Enhanced audio | Genesis / Mega Drive | unsupported | unsupported | planned: SEG-145-T009 |
 | Enhanced audio | Master System | unsupported | unsupported | planned: SEG-145-T009 |
@@ -71,7 +71,7 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Multiple-mod composition | Master System | unsupported | supported-with-limitations | planned: SEG-141-T007 |
 | Multiple-mod composition | Sega CD | unsupported | unsupported | planned: SEG-141-T008 |
 | Save states / rewind with mods | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/mod_viewer_gameplay_test.py`, `tests/mod_native_viewer_test.py` |
-| Save states / rewind with mods | Master System | unsupported | supported-with-limitations | planned: SEG-147-T005 |
+| Save states / rewind with mods | Master System | supported-with-limitations | supported-with-limitations | `tests/sms_mod_scheduler_test.cpp`, `tests/mod_sms_lifecycle_test.py`, `tests/sms_viewer_mod_test.py`, `tests/mod_platform_conformance_test.cpp` |
 | Save states / rewind with mods | Sega CD | unsupported | experimental | planned: SEG-148-T007 |
 | Developer tooling | Genesis / Mega Drive | supported-with-limitations | supported-with-limitations | `tests/segapatch_package_test.py`, `tests/mod_diff_run_test.py`, `tests/mod_gameplay_example_test.py` |
 | Developer tooling | Master System | unsupported | supported-with-limitations | planned: SEG-147-T010 |

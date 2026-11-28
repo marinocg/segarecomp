@@ -22,3 +22,11 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_target_properties(segarecomp_viewer_master_system_sdl3 PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES)
   segarecomp_enable_warnings(segarecomp_viewer_master_system_sdl3)
 endif()
+
+# SEG-147-T004 (ADR 0325): the viewer `main` of a build with a scheduled mod, compile-checked on every host.
+add_library(segarecomp_viewer_master_system_mod_main_check OBJECT sms_viewer_main.c)
+set_target_properties(segarecomp_viewer_master_system_mod_main_check PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_compile_definitions(segarecomp_viewer_master_system_mod_main_check PRIVATE SEGARECOMP_SMS_MOD=1)
+target_link_libraries(segarecomp_viewer_master_system_mod_main_check PRIVATE segarecomp::viewer_master_system segarecomp::runtime_master_system_mod)
+target_include_directories(segarecomp_viewer_master_system_mod_main_check PRIVATE ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+segarecomp_enable_warnings(segarecomp_viewer_master_system_mod_main_check)

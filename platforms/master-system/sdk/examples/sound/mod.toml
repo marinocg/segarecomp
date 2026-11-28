@@ -1,0 +1,24 @@
+[mod]
+id = "sms-sound-example"
+version = "1.0.0"
+name = "SMS original-hardware sound mod"
+license = "CC0-1.0"
+
+[target]
+platform = "master-system"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "212cb646d1620f4941a694117a32ff441a01c1d001ccd7c7f279d39132c403a8"
+mapper = "rom_only"
+
+# Data: verified sound data and the command table, replaced by typed edits.
+[[source]]
+kind = "rom-edit-set"
+path = "edits/main.edits"
+
+# Driver: a statically admitted Z80 routine in declared free space. It is compiled ahead of time like the rest of the cartridge; nothing is patched at run time.
+[[source]]
+kind = "guest-asm"
+path = "asm/main.asm"
+cpu = "z80"

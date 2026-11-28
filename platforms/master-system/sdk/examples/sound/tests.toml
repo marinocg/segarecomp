@@ -1,0 +1,8 @@
+# `segarecomp mod test` scenario of the Master System sound mod (SEG-145-T004). A data-only package: the scenario compares the PCM digest of the modded program's headless audio artifact.
+# `budget` is the Z80 cycle budget (T-states); the run is also bounded by its frame count and timeout.
+[[scenario]]
+name = "modded-sound"
+frames = 40
+budget = 3000000
+timeout = 60
+expect_pcm = "813d99f3ed7f31df8c63e90a874172b8ca37bdad1455ad8b1f7702befbd12542"

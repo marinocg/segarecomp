@@ -13,8 +13,12 @@ declare sega: {
     stop_music: () -> (),
   },
   frame: {
+    -- frame.sms_vdp (render): Master System only. One byte of the VDP copy of this frame: region "vram" (0-16383), "cram" (0-31), "register" (0-15), or "sprite_y", "sprite_x", "sprite_pattern" (sprite 0-63 of the attribute table).
+    sms_vdp: (region: string, index: number) -> number,
     -- frame.work_ram (render): Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value).
     value: (name: string) -> number?,
+    -- frame.work_ram (render): Master System only. Reads 1 or 2 bytes (little-endian) of the copy of the 8 KiB work RAM taken after frame-end.
+    work_ram: (offset: number, width: number) -> number,
   },
   input: {
     -- input.read (frame-begin,input,post-input): Reads the pad (button bits) of port 1 or 2: the previous frame's final input in frame-begin, the sample (with your staged change) in input, the final input in post-input.
@@ -43,6 +47,18 @@ declare sega: {
     text: (x: number, y: number, text: string, rgba: number) -> (),
     -- overlay.rgba (render): Width of the HUD overlay in pixels (128).
     width: number,
+  },
+  present: {
+    -- present.transform (render): Master System only. Presents every pixel whose guest colour is `cram` (0-63, --BBGGRR) as `rgb` (0xRRGGBB). Presentation only: the guest CRAM is never written.
+    color: (cram: number, rgb: number) -> (),
+    -- overlay.rgba (render): Master System only. Sets the 16 colours of your authored sprites: 32 hexadecimal digits, one --BBGGRR byte (00-3f) per colour.
+    colors: (colours: string) -> (),
+    -- overlay.rgba (render): Master System only. Writes one 8x8 pattern (0-255) of your OWN authored sprite pool: 64 hexadecimal digits, 4 bits per pixel, colour 0 transparent. The pool is one frame long and never reads or writes VRAM.
+    pattern: (index: number, rows: string) -> (),
+    -- present.transform (render): Master System only. Moves the presented picture by (dx, dy) pixels, each -255..255; vacated pixels are black and the picture size does not change. The guest scroll registers are never written.
+    scroll: (dx: number, dy: number) -> (),
+    -- overlay.rgba (render): Master System only. Draws one authored sprite over the presented picture (below the overlay): 1-4 cells wide and high, patterns row-major from `tile`; flags bit 0 horizontal flip, bit 1 vertical flip. At most 64 per frame.
+    sprite: (x: number, y: number, width_cells: number, height_cells: number, tile: number, flags: number) -> (),
   },
   -- overlay.rgba (render): Names the scene this frame belongs to (a token [a-z0-9_-], at most 32 characters; the last call wins). The host uses it only to count what was delivered per scene against the package's declared geometry; it is a claim, never inferred, and grants nothing.
   scene: (id: string) -> (),

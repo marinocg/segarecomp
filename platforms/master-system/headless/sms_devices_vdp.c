@@ -18,6 +18,10 @@ static SmsVdpTraceEntry vdp_trace[VDP_TRACE_CAPACITY];
 static SmsRenderer renderer;
 static SmsFrameRecord frame_records[FRAME_RECORD_CAPACITY];
 
+#if defined(SEGARECOMP_SMS_MOD)
+SmsRenderer *sms_headless_renderer(void) { return &renderer; }
+#endif
+
 void sms_install_devices(SmsMachine *machine) {
   sms_vdp_set_trace(&vdp, vdp_trace, VDP_TRACE_CAPACITY);
   sms_vdp_install(machine, &vdp);

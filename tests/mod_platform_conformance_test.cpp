@@ -2,8 +2,8 @@
 //
 // ONE table-driven suite runs the same scenarios for every registered platform adapter (libs/media/src/mod_adapter.cpp) with synthetic fixtures and asserts what the platform DECLARES it supports:
 // either `pass`, or the exact fail-closed diagnostic. A scenario first asks the adapter registry (check_capabilities) whether the platform grants what the scenario needs; if it does not, the
-// outcome IS the registry's diagnostic (E_CAPABILITY_UNSUPPORTED). If it does, the platform's runtime executor runs the scenario. Only Genesis has a mod scheduler today; a platform that
-// declares support but has no executor yields E_RUNTIME_UNAVAILABLE, so flipping a declaration without the runtime behind it fails the suite (the suite is the progress gate).
+// outcome IS the registry's diagnostic (E_CAPABILITY_UNSUPPORTED). If it does, the platform's runtime executor runs the scenario. Genesis and Master System (SEG-147-T004, ADR 0325) have a mod scheduler;
+// a platform that declares support but has no executor yields E_RUNTIME_UNAVAILABLE, so flipping a declaration without the runtime behind it fails the suite (the suite is the progress gate).
 // A new platform adds a row to `kRows` (and an executor when it gains a runtime), not a new suite. No commercial inputs, no ROM, no host clock.
 #include "genesis_snapshot.h"
 #include "mod_scheduler.h"
@@ -12,6 +12,11 @@
 #include "segarecomp/luau_phase_provider.hpp"
 #include "segarecomp/mod.hpp"
 #include "segarecomp/sha256.hpp"
+#undef SEGA_MOD_PLATFORM   // each platform header defines it for ITS provider; this host-side suite includes both tables
+#include "sms_mod_scheduler.h"
+#include "sms_psg.h"
+#include "sms_render.h"
+#include "sms_snapshot.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -65,7 +70,17 @@ std::vector<Row> make_rows() {
         {"input.intercept", "experimental"}, {"hook.function", "experimental"}, {"state.mod", "experimental"}, {"audio.event.read", "experimental"}, {"audio.command.send", "experimental"}};
     rows.push_back(r);
   }
-  for (const char *platform : {"master-system", "sega-cd"}) {   // lifecycle + host.log only until SEG-147 / SEG-148 raise them
+  {   // Master System (SEG-147-T004/T005/T006, ADR 0325): lifecycle, typed access, input and mod state pass on its own scheduler; the audio-command mapping flips with SEG-145-T013.
+    Row r;
+    r.platform = "master-system";
+    for (const char *s : kScenarios) r.expect[s] = "pass";
+    r.expect["audio_command_mapping"] = "E_CAPABILITY_UNSUPPORTED:declared";
+    for (const char *c : {"host.log", "frame.work_ram", "frame.sms_vdp", "overlay.rgba", "memory.read.z80.work_ram", "memory.read.z80.cart_ram", "memory.write.z80.work_ram", "input.read", "input.intercept", "state.mod",
+                          "present.transform"})
+      r.declared_capabilities[c] = "supported-with-limitations";
+    rows.push_back(r);
+  }
+  for (const char *platform : {"sega-cd"}) {   // lifecycle + host.log only until SEG-148 raises it
     Row r;
     r.platform = platform;
     for (const char *s : kScenarios) r.expect[s] = kUnsupported;
@@ -198,8 +213,98 @@ struct GenesisRig {
   }
 };
 
-std::string genesis_only(const mod::Adapter &a, const std::function<std::string()> &run) {
-  return a.platform == "genesis" ? run() : "E_RUNTIME_UNAVAILABLE";   // declared support without a runtime executor is a failing declaration
+// ---- the Master System rig: the real machine, devices, scheduler and snapshot codec over the scripted CPU above ----
+const SmsModRange kSmsRanges[] = {{SEGA_SMS_SPACE_Z80_WORK_RAM, 0x100U, 0x100U, SMS_MOD_ACCESS_READ | SMS_MOD_ACCESS_WRITE}};
+void sms_probe_phase(void *state, const SegaModHost *h) {
+  auto *p = static_cast<Probe *>(state);
+  static const char *const names[] = {"", "reset", "frame-begin", "input", "post-input", "hook-entry", "hook-exit", "frame-end", "render"};
+  p->trace.push_back(std::string(names[h->phase]) + ":" + std::to_string(h->frame));
+  if (h->phase == SEGA_MOD_PHASE_FRAME_BEGIN) {
+    ++p->n;
+    if (p->exercise_access && h->frame == 0U) {
+      h->write(SEGA_SMS_SPACE_Z80_WORK_RAM, 0x101, 2, 0x1122U);   // no alignment rule on the Z80
+      h->read(SEGA_SMS_SPACE_Z80_WORK_RAM, 0x101, 2, &p->read16);
+      h->read(SEGA_SMS_SPACE_Z80_WORK_RAM, 0x102, 1, &p->read8);
+    } else if (p->bad_range && h->frame == 1U) {
+      p->odd_status = static_cast<uint32_t>(h->write(SEGA_SMS_SPACE_Z80_WORK_RAM, 0x800, 1, 1));
+    }
+    h->write(SEGA_SMS_SPACE_Z80_WORK_RAM, 0x110, 2, p->n);
+  }
+}
+struct SmsRig {
+  std::vector<uint8_t> rom = std::vector<uint8_t>(0x8000U, 0U);
+  std::unique_ptr<SmsMachine> machine = std::make_unique<SmsMachine>();
+  std::unique_ptr<SmsVdp> vdp = std::make_unique<SmsVdp>();
+  std::unique_ptr<SmsRenderer> renderer = std::make_unique<SmsRenderer>();
+  std::unique_ptr<SmsPsg> psg = std::make_unique<SmsPsg>();
+  std::unique_ptr<SmsModScheduler> sched = std::make_unique<SmsModScheduler>();
+  SmsPad pad{};
+  Probe probe;
+  SegaModProvider provider{};
+  SmsModState state{};
+  SmsSnapshotMachine snapshot{};
+  SmsSnapshotIdentity id{};
+  std::string rejection;
+  bool attach(uint32_t phases, uint64_t caps, bool with_state) {
+    std::memset(vdp.get(), 0, sizeof(SmsVdp));
+    if (sms_machine_init(machine.get(), rom.data(), static_cast<uint32_t>(rom.size()), SMS_MAPPER_ROM_ONLY) != SMS_OK) return false;
+    sms_vdp_install(machine.get(), vdp.get());
+    sms_renderer_init(renderer.get(), vdp.get(), nullptr, 0U);
+    sms_renderer_attach(renderer.get());
+    if (!sms_psg_attach(psg.get(), machine.get(), nullptr, nullptr)) return false;
+    sms_pad_attach(machine.get(), &pad);
+    provider.size = sizeof provider;
+    provider.abi_major = SEGA_MOD_ABI_MAJOR;
+    provider.platform = SEGA_MOD_PLATFORM_MASTER_SYSTEM;
+    provider.name = "conformance";
+    provider.implementation_version = 1;
+    provider.phase = sms_probe_phase;
+    if (with_state) { provider.save_state = probe_save; provider.load_state = probe_load; }
+    SmsModConfig c{};
+    c.mod_id = "conformance";
+    c.provider = &provider;
+    c.provider_state = &probe;
+    c.phase_mask = phases;
+    c.required[0] = caps;
+    c.ranges = kSmsRanges;
+    c.range_count = (caps & (cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE))) != 0U ? 1U : 0U;
+    c.state_schema = with_state ? 1U : 0U;
+    const char *why = "";
+    const bool ok = sms_mod_scheduler_attach(sched.get(), machine.get(), &pad, vdp.get(), &c, &why) == 0;
+    rejection = why;
+    if (!ok) return false;
+    sms_machine_reset(machine.get());
+    vdp->reg[0] = 0x06U;   // Mode 4 (the scripted CPU programs nothing)
+    vdp->reg[1] = 0x80U;
+    sms_mod_scheduler_state(sched.get(), &state);
+    snapshot.machine = machine.get();
+    snapshot.vdp = vdp.get();
+    snapshot.renderer = renderer.get();
+    snapshot.psg = psg.get();
+    snapshot.pad = &pad;
+    snapshot.mod = &state;
+    std::memset(id.source_sha256, 0x77, 32U);
+    return true;
+  }
+  bool run_to_frame(uint64_t frame) {
+    const SmsStop stop = sms_run_until_frame(machine.get(), frame);
+    sms_psg_sync(psg.get(), stop.cycles);   // the snapshot barrier
+    return stop.kind == SMS_STOP_FRAME;
+  }
+  std::string hash() {
+    SmsSnapshotBuffer b{nullptr, 0};
+    if (sms_snapshot_capture(&snapshot, &id, nullptr, &b) != SMS_SNAPSHOT_OK) return "capture-failed";
+    const std::string s = sha256_hex(std::vector<std::uint8_t>(b.data, b.data + b.size));
+    sms_snapshot_buffer_free(&b);
+    return s;
+  }
+  ~SmsRig() { sms_mod_scheduler_detach(sched.get()); }
+};
+
+std::string on_platform(const mod::Adapter &a, const std::function<std::string()> &genesis, const std::function<std::string()> &master_system = nullptr) {
+  if (a.platform == "genesis") return genesis();
+  if (a.platform == "master-system" && master_system) return master_system();
+  return "E_RUNTIME_UNAVAILABLE";   // declared support without a runtime executor is a failing declaration
 }
 
 // ---- portable Luau sandbox: the same VM on every platform, with only the capabilities the platform grants (host.log) ----
@@ -284,7 +389,7 @@ std::vector<Scenario> make_scenarios() {
                }});
 
   s.push_back({"phase_ordering", [](const mod::Adapter &) { return std::vector<std::string>{"input.read"}; }, [](const mod::Adapter &a) {
-                 return genesis_only(a, []() -> std::string {
+                 return on_platform(a, []() -> std::string {
                    GenesisRig r;
                    if (!r.attach(bit(SEGA_MOD_PHASE_RESET) | bit(SEGA_MOD_PHASE_FRAME_BEGIN) | bit(SEGA_MOD_PHASE_INPUT) | bit(SEGA_MOD_PHASE_POST_INPUT) | bit(SEGA_MOD_PHASE_FRAME_END) | bit(SEGA_MOD_PHASE_RENDER),
                                  cap(SEGA_MOD_CAP_INPUT_READ) | cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE), false))
@@ -293,11 +398,20 @@ std::vector<Scenario> make_scenarios() {
                    const std::vector<std::string> expect = {"reset:0", "frame-begin:0", "input:0", "post-input:0", "frame-end:0", "render:0", "frame-begin:1", "input:1", "post-input:1", "frame-end:1", "render:1"};
                    if (r.probe.trace.size() < expect.size() || !std::equal(expect.begin(), expect.end(), r.probe.trace.begin())) return "E_ORDER:" + join(r.probe.trace);
                    return "pass";
+                 }, []() -> std::string {
+                   SmsRig r;
+                   if (!r.attach(bit(SEGA_MOD_PHASE_RESET) | bit(SEGA_MOD_PHASE_FRAME_BEGIN) | bit(SEGA_MOD_PHASE_INPUT) | bit(SEGA_MOD_PHASE_POST_INPUT) | bit(SEGA_MOD_PHASE_FRAME_END) | bit(SEGA_MOD_PHASE_RENDER),
+                                 cap(SEGA_MOD_CAP_INPUT_READ) | cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE), false))
+                     return "E_ATTACH:" + r.rejection;
+                   if (!r.run_to_frame(2U)) return "E_RUN";
+                   const std::vector<std::string> expect = {"reset:0", "frame-begin:0", "input:0", "post-input:0", "frame-end:0", "render:0", "frame-begin:1", "input:1", "post-input:1", "frame-end:1", "render:1"};
+                   if (r.probe.trace.size() < expect.size() || !std::equal(expect.begin(), expect.end(), r.probe.trace.begin())) return "E_ORDER:" + join(r.probe.trace);
+                   return "pass";
                  });
                }});
 
   s.push_back({"typed_guest_access", [space](const mod::Adapter &a) { return std::vector<std::string>{"memory.read." + space(a), "memory.write." + space(a)}; }, [](const mod::Adapter &a) {
-                 return genesis_only(a, []() -> std::string {
+                 return on_platform(a, []() -> std::string {
                    GenesisRig r;
                    r.probe.exercise_access = true;
                    if (!r.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE), false)) return "E_ATTACH:" + r.rejection;
@@ -311,11 +425,24 @@ std::vector<Scenario> make_scenarios() {
                    if (!run_to_frame(*bad.rt, 3U)) return "E_RUN";
                    if (bad.sched->fault.faulted == 0U || std::string(bad.sched->fault.cause) != "range") return "E_RANGE_NOT_ENFORCED";
                    return "pass";
+                 }, []() -> std::string {
+                   SmsRig r;
+                   r.probe.exercise_access = true;
+                   if (!r.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE), false)) return "E_ATTACH:" + r.rejection;
+                   if (!r.run_to_frame(1U)) return "E_RUN";
+                   // little-endian, width-typed, unaligned legal: the u16 0x1122 at +1 lands as 22 11
+                   if (r.machine->mem.ram[0x101] != 0x22 || r.machine->mem.ram[0x102] != 0x11 || r.probe.read16 != 0x1122U || r.probe.read8 != 0x11U) return "E_ENDIAN";
+                   SmsRig bad;
+                   bad.probe.bad_range = true;
+                   if (!bad.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE), false)) return "E_ATTACH:" + bad.rejection;
+                   if (!bad.run_to_frame(3U)) return "E_RUN";
+                   if (bad.sched->fault.faulted == 0U || std::string(bad.sched->fault.cause) != "range" || bad.machine->mem.ram[0x800] != 0U) return "E_RANGE_NOT_ENFORCED";
+                   return "pass";
                  });
                }});
 
   s.push_back({"mod_state_round_trip", [](const mod::Adapter &) { return std::vector<std::string>{"state.mod"}; }, [](const mod::Adapter &a) {
-                 return genesis_only(a, []() -> std::string {
+                 return on_platform(a, []() -> std::string {
                    GenesisRig r;
                    if (!r.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE) | cap(SEGA_MOD_CAP_STATE_MOD), true)) return "E_ATTACH:" + r.rejection;
                    if (!run_to_frame(*r.rt, 5U)) return "E_RUN";
@@ -326,6 +453,18 @@ std::vector<Scenario> make_scenarios() {
                    const bool restored = genesis_snapshot_restore(&r.machine, &r.id, s1.data, s1.size) == GENESIS_SNAPSHOT_OK;
                    genesis_snapshot_buffer_free(&s1);
                    return restored && r.hash() == saved ? "pass" : "E_ROUND_TRIP";
+                 }, []() -> std::string {
+                   SmsRig r;
+                   if (!r.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE) | cap(SEGA_MOD_CAP_STATE_MOD), true)) return "E_ATTACH:" + r.rejection;
+                   if (!r.run_to_frame(5U)) return "E_RUN";
+                   SmsSnapshotBuffer s1{nullptr, 0};
+                   if (sms_snapshot_capture(&r.snapshot, &r.id, nullptr, &s1) != SMS_SNAPSHOT_OK) return "E_CAPTURE";
+                   const std::string saved = r.hash();
+                   const uint32_t at_save = r.probe.n;
+                   if (!r.run_to_frame(12U)) { sms_snapshot_buffer_free(&s1); return "E_RUN"; }
+                   const bool restored = sms_snapshot_restore(&r.snapshot, &r.id, s1.data, s1.size) == SMS_SNAPSHOT_OK;
+                   sms_snapshot_buffer_free(&s1);
+                   return restored && r.probe.n == at_save && r.hash() == saved ? "pass" : "E_ROUND_TRIP";
                  });
                }});
 
@@ -337,6 +476,14 @@ std::vector<Scenario> make_scenarios() {
                  if (err.ok || err.cause != "error") return std::string("E_LUAU_ERROR_CLASS:") + err.cause;
                  const LuauProbe budget = luau_run_reset("function reset() while true do end end\n");
                  if (budget.ok || budget.cause != "budget") return std::string("E_LUAU_BUDGET_CLASS:") + budget.cause;
+                 if (a.platform == "master-system") {
+                   SmsRig r;
+                   r.probe.bad_range = true;
+                   if (!r.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_MEMORY_READ) | cap(SEGA_MOD_CAP_MEMORY_WRITE), false)) return "E_ATTACH:" + r.rejection;
+                   if (!r.run_to_frame(4U)) return std::string("E_RUN");
+                   if (r.sched->disabled != 1U || std::string(r.sched->fault.text) != "E_MOD_FAULT cause=range mod=conformance phase=frame-begin frame=1") return "E_FAULT_DIAGNOSTIC:" + std::string(r.sched->fault.text);
+                   return std::string("pass");
+                 }
                  if (a.platform != "genesis") return std::string("pass");
                  // Genesis: a native capability violation is the contract's E_MOD_FAULT, the guest continues
                  GenesisRig r;
@@ -369,7 +516,7 @@ std::vector<Scenario> make_scenarios() {
 
   s.push_back({"audio_command_mapping", [](const mod::Adapter &) { return std::vector<std::string>{"audio.command.send"}; }, [](const mod::Adapter &a) {
                  // declared by the registry, and SERVED (SEG-145-T008): only with a declared mapping; without one the required capability has no verified interface and is refused at attach.
-                 return genesis_only(a, []() -> std::string {
+                 return on_platform(a, []() -> std::string {
                    {
                      GenesisRig bare;
                      if (bare.attach(bit(SEGA_MOD_PHASE_FRAME_BEGIN), cap(SEGA_MOD_CAP_AUDIO_COMMAND_SEND), false)) return "E_ACCEPTED_WITHOUT_MAPPING";
@@ -445,9 +592,9 @@ int main() {
   // 2. negative tests: a deliberately wrong declaration makes the suite fail, naming the platform and the scenario
   {
     std::vector<Row> wrong = rows;
-    wrong[1].expect["mod_state_round_trip"] = "pass";   // Master System does NOT support mod state: claiming it must fail
+    wrong[2].expect["mod_state_round_trip"] = "pass";   // Sega CD does NOT support mod state: claiming it must fail
     const std::vector<std::string> r = run_rows(wrong, scenarios);
-    check(r.size() == 1U && r[0].find("master-system/mod_state_round_trip") != std::string::npos, "claiming Master System passes mod state fails exactly that row: " + join(r));
+    check(r.size() == 1U && r[0].find("sega-cd/mod_state_round_trip") != std::string::npos, "claiming Sega CD passes mod state fails exactly that row: " + join(r));
   }
   {
     std::vector<Row> wrong = rows;

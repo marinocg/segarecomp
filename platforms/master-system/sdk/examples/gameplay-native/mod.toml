@@ -1,0 +1,36 @@
+[mod]
+id = "sms-runner-native"
+author = "segarecomp examples"
+version = "1.0.0"
+name = "SMS gameplay example, native C11 twin"
+license = "CC0-1.0"
+
+[target]
+platform = "master-system"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "f5a52a6d439868bc80a5b49d39b75811d1dbaa03b60c5e6b4e0e748c2c522a4a"
+mapper = "rom_only"
+
+[abi]
+native = 2
+minor = 5
+
+[capabilities]
+required = ["frame.work_ram", "host.log", "input.intercept", "input.read", "memory.write.z80.work_ram", "overlay.rgba", "present.transform", "state.mod"]
+
+# The ONE byte the mod may write: the game's speed byte. A capability alone authorizes no offset.
+[[memory]]
+revision = "fixture"
+space = "z80.work_ram"
+offset = 22
+length = 1
+access = "write"
+
+[state]
+schema = 1
+
+[[source]]
+kind = "native-c11"
+path = "src/main.c"

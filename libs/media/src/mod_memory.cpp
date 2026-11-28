@@ -9,6 +9,7 @@ namespace segarecomp::mod {
 namespace {
 constexpr std::uint64_t kGenesisWorkRamBytes = 65536;
 constexpr std::uint64_t kRomBudgetBytes = 4096;   // ADR 0321: sum of one revision's m68k.rom read ranges
+constexpr std::uint64_t kSmsWorkRamBytes = 8192, kSmsCartRamBytes = 32768;
 
 bool has_cap(const Manifest &m, const std::string &name) {
   return std::find(m.capabilities.begin(), m.capabilities.end(), name) != m.capabilities.end() || std::find(m.capabilities_optional.begin(), m.capabilities_optional.end(), name) != m.capabilities_optional.end();
@@ -20,14 +21,24 @@ std::optional<Rejection> check_memory(const Manifest &m) {
   if (m.memory.size() > kMaxMemoryRanges) return Rejection{"E_MEMORY_COUNT", "a package declares at most 16 memory ranges"};
   for (std::size_t i = 0; i < m.memory.size(); ++i) {
     const MemoryRange &r = m.memory[i];
-    if (m.platform != "genesis") return Rejection{"E_MEMORY_SPACE", "memory ranges are implemented for the Genesis adapter only"};
-    const bool rom = r.space == "m68k.rom";
-    if (r.space != "m68k.work_ram" && !rom) return Rejection{"E_MEMORY_SPACE", "the memory space \"" + r.space + "\" is not accessible to a mod on this platform (only m68k.work_ram and m68k.rom)"};
+    if (m.platform != "genesis" && m.platform != "master-system") return Rejection{"E_MEMORY_SPACE", "memory ranges are implemented for the Genesis and Master System adapters only"};
+    const bool sms = m.platform == "master-system";
+    const bool rom = !sms && r.space == "m68k.rom";
+    const bool cart = sms && r.space == "z80.cart_ram";
+    if (sms && r.space != "z80.work_ram" && !cart) return Rejection{"E_MEMORY_SPACE", "the memory space \"" + r.space + "\" is not accessible to a mod on this platform (only z80.work_ram and z80.cart_ram)"};
+    if (!sms && r.space != "m68k.work_ram" && !rom) return Rejection{"E_MEMORY_SPACE", "the memory space \"" + r.space + "\" is not accessible to a mod on this platform (only m68k.work_ram and m68k.rom)"};
     if (std::none_of(std::begin(kMemoryAccess), std::end(kMemoryAccess), [&](std::string_view a) { return a == r.access; })) return Rejection{"E_MEMORY_ACCESS", "memory access must be read, write or read-write"};
     if (rom) {   // ADR 0321: offsets are byte offsets into the revision's effective image, read-only, build-time materialised
       if (r.access != "read") return Rejection{"E_MEMORY_ACCESS", "an m68k.rom range is read-only (access = read)"};
       if (r.revision.empty()) return Rejection{"E_MEMORY_REVISION", "an m68k.rom range names its revision (offsets are revision-specific)"};
       if (r.length == 0) return Rejection{"E_MEMORY_RANGE", "an m68k.rom range must be non-empty"};
+    } else if (cart) {   // ADR 0325: mapper-aware and read-only: only the Sega mapper has cartridge RAM, and writing it would alter the game's saves
+      if (r.access != "read") return Rejection{"E_MEMORY_ACCESS", "a z80.cart_ram range is read-only (access = read)"};
+      if (r.length == 0 || static_cast<std::uint64_t>(r.offset) + r.length > kSmsCartRamBytes) return Rejection{"E_MEMORY_RANGE", "a memory range must be non-empty and lie inside z80.cart_ram (32 KiB)"};
+      for (const Revision &v : m.revisions)
+        if ((r.revision.empty() || r.revision == v.label) && v.mapper != "sega") return Rejection{"E_MEMORY_SPACE", "z80.cart_ram exists only with the sega mapper; revision \"" + v.label + "\" declares another one"};
+    } else if (sms) {
+      if (r.length == 0 || static_cast<std::uint64_t>(r.offset) + r.length > kSmsWorkRamBytes) return Rejection{"E_MEMORY_RANGE", "a memory range must be non-empty and lie inside z80.work_ram (8 KiB)"};
     } else if (r.length == 0 || static_cast<std::uint64_t>(r.offset) + r.length > kGenesisWorkRamBytes) return Rejection{"E_MEMORY_RANGE", "a memory range must be non-empty and lie inside m68k.work_ram (64 KiB)"};
     if (!r.revision.empty() && std::none_of(m.revisions.begin(), m.revisions.end(), [&](const Revision &v) { return v.label == r.revision; })) return Rejection{"E_MEMORY_REVISION", "a memory range names the undeclared revision \"" + r.revision + "\""};
     const bool read = r.access != "write", write = r.access != "read";

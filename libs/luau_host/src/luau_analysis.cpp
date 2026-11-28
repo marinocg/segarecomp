@@ -86,8 +86,13 @@ struct Checker : Luau::AstVisitor {
       report(at, "E_LUAU_API", path + " is not part of the Luau API");
       return nullptr;
     }
-    if (!e->capability.empty() && declared.count(std::string(e->capability)) == 0) {
-      report(at, "E_LUAU_CAPABILITY", path + " needs the capability " + std::string(e->capability) + ", which the manifest does not declare");
+    if (!api_on_platform(*e, manifest.platform)) {
+      report(at, "E_LUAU_API", path + " is not part of the Luau API on " + manifest.platform);
+      return nullptr;
+    }
+    if (const std::vector<std::string_view> any = api_capabilities(*e, manifest.platform);
+        !any.empty() && std::none_of(any.begin(), any.end(), [&](std::string_view c) { return declared.count(std::string(c)) != 0; })) {
+      report(at, "E_LUAU_CAPABILITY", path + " needs the capability " + std::string(any.front()) + ", which the manifest does not declare");
       return nullptr;
     }
     return e;

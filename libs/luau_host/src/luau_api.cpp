@@ -13,7 +13,7 @@ namespace segarecomp::luau {
 namespace {
 
 // The ONLY list of host names a script can reach. A name is added here, in a new ABI minor if it needs a capability the catalogue does not have (native-sdk-abi-2.md section 7).
-constexpr std::array<ApiEntry, 29> kApi = {{
+constexpr std::array<ApiEntry, 36> kApi = {{
     {"sega.log", "host.log", "function", "message:string", "", "all", "Appends one line to the host log (at most 256 bytes, 16 lines per callback; printable ASCII)."},
     {"sega.frame.value", "frame.work_ram", "function", "name:string", "number?", "render",
      "Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value)."},
@@ -57,6 +57,20 @@ constexpr std::array<ApiEntry, 29> kApi = {{
      "Sends the value named \"stop\" of the declared command mapping \"music\" (a fault when the mapping declares none)."},
     {"sega.audio.event", "audio.event.read", "function", "mapping:string", "string?", "frame-end,render",
      "Reads which declared event of the event mapping `mapping` the observed location holds now (nil when none matches); a level, not a queue. Read-only; render sees the copy taken after frame-end."},
+    {"sega.present.color", "present.transform", "function", "cram:number,rgb:number", "", "render",
+     "Master System only. Presents every pixel whose guest colour is `cram` (0-63, --BBGGRR) as `rgb` (0xRRGGBB). Presentation only: the guest CRAM is never written."},
+    {"sega.present.scroll", "present.transform", "function", "dx:number,dy:number", "", "render",
+     "Master System only. Moves the presented picture by (dx, dy) pixels, each -255..255; vacated pixels are black and the picture size does not change. The guest scroll registers are never written."},
+    {"sega.present.pattern", "overlay.rgba", "function", "index:number,rows:string", "", "render",
+     "Master System only. Writes one 8x8 pattern (0-255) of your OWN authored sprite pool: 64 hexadecimal digits, 4 bits per pixel, colour 0 transparent. The pool is one frame long and never reads or writes VRAM."},
+    {"sega.present.colors", "overlay.rgba", "function", "colours:string", "", "render",
+     "Master System only. Sets the 16 colours of your authored sprites: 32 hexadecimal digits, one --BBGGRR byte (00-3f) per colour."},
+    {"sega.present.sprite", "overlay.rgba", "function", "x:number,y:number,width_cells:number,height_cells:number,tile:number,flags:number", "", "render",
+     "Master System only. Draws one authored sprite over the presented picture (below the overlay): 1-4 cells wide and high, patterns row-major from `tile`; flags bit 0 horizontal flip, bit 1 vertical flip. At most 64 per frame."},
+    {"sega.frame.work_ram", "frame.work_ram", "function", "offset:number,width:number", "number", "render",
+     "Master System only. Reads 1 or 2 bytes (little-endian) of the copy of the 8 KiB work RAM taken after frame-end."},
+    {"sega.frame.sms" "_vdp", "frame.sms" "_vdp", "function", "region:string,index:number", "number", "render",
+     "Master System only. One byte of the VDP copy of this frame: region \"vram\" (0-16383), \"cram\" (0-31), \"register\" (0-15), or \"sprite_y\", \"sprite_x\", \"sprite_pattern\" (sprite 0-63 of the attribute table)."},
     {"reset", "", "callback", "", "", "reset", "Optional. Called once before the first frame."},
     {"frame_begin", "", "callback", "frame:number", "", "frame-begin", "Optional. Called at the start of each guest frame, before its input sample."},
     {"input", "", "callback", "frame:number", "", "input", "Optional. Called after the pad was sampled for the frame and before the guest can read it."},
@@ -113,6 +127,25 @@ void emit(const Node &n, int depth, std::string &out) {
 }
 
 }  // namespace
+
+namespace {
+bool starts_with(std::string_view s, std::string_view prefix) { return s.substr(0, prefix.size()) == prefix; }
+constexpr std::string_view kSmsPlatform = "master-system";
+}  // namespace
+
+bool api_on_platform(const ApiEntry &e, std::string_view platform) {
+  const bool sms_only = starts_with(e.name, "sega.present.") || e.name == "sega.frame.work_ram" || starts_with(e.name, "sega.frame.sms");
+  const bool genesis_only = e.name == "sega.frame.value" || e.name == "sega.overlay.layer" || e.name == "sega.overlay.target" || starts_with(e.name, "sega.sprite.") || e.name == "sega.scene" ||
+                            starts_with(e.name, "sega.audio.");
+  return platform == kSmsPlatform ? !genesis_only : !sms_only;
+}
+
+std::vector<std::string_view> api_capabilities(const ApiEntry &e, std::string_view platform) {
+  if (e.capability.empty()) return {};
+  if (platform == kSmsPlatform && e.name == "sega.mem.read") return {"memory.read.z80.work_ram", "memory.read.z80.cart_ram"};
+  if (platform == kSmsPlatform && e.name == "sega.mem.write") return {"memory.write.z80.work_ram"};
+  return {e.capability};
+}
 
 std::span<const ApiEntry> api_entries() { return kApi; }
 

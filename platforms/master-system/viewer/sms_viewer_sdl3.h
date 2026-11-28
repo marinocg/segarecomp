@@ -18,6 +18,10 @@ int sms_sdl3_viewer_attach_extension(SmsSdl3Viewer *viewer, SmsViewerRig *rig);
 SmsExtension *sms_sdl3_viewer_extension(SmsSdl3Viewer *viewer);
 struct SvHost *sms_sdl3_viewer_sv_host(SmsSdl3Viewer *viewer);
 void sms_sdl3_viewer_host(SmsSdl3Viewer *viewer, SmsViewerHost *host);
+/* SEG-147-T006 (ADR 0325): a presentation-only composer (a scheduled mod's). It is asked for every presented frame; when it returns 1 it has written the 256 x height RGB888 picture to show (the widescreen
+ * extension is then not used for that frame); 0 leaves the viewer's own picture exactly as it was. It receives only the finished framebuffer. NULL detaches. */
+typedef int (*SmsSdl3Composer)(const uint8_t *framebuffer, uint32_t height, uint8_t *rgb);
+void sms_sdl3_viewer_set_composer(SmsSdl3Viewer *viewer, SmsSdl3Composer composer);
 /* SEG-125 (ADR 0273): attaches the performance collector (sv_perf.h) to the shared host; NULL detaches. Presentation-side observation only. */
 struct SvPerf;
 void sms_sdl3_viewer_set_perf(SmsSdl3Viewer *viewer, struct SvPerf *perf);

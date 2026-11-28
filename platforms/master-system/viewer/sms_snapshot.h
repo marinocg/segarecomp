@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "sms_machine.h"
+#include "sms_mod_state.h"
 #include "sms_pad.h"
 #include "sms_psg.h"
 #include "sms_render.h"
@@ -54,7 +55,10 @@ typedef enum SmsSnapshotStatus {
   SMS_SNAPSHOT_WRONG_CARTRIDGE,   /* source or variant identity differs from the running machine's */
   SMS_SNAPSHOT_INCOMPATIBLE,      /* mapper declaration, ROM size, PSG configuration, input mode or execution fingerprint differs */
   SMS_SNAPSHOT_INVALID_STATE,     /* a value is outside what the device can hold */
-  SMS_SNAPSHOT_NOT_CAPTURABLE     /* the machine is in a latched stop (typed error, dead machine): never snapshot it */
+  SMS_SNAPSHOT_NOT_CAPTURABLE,    /* the machine is in a latched stop (typed error, dead machine): never snapshot it */
+  SMS_SNAPSHOT_MOD_MISMATCH,      /* E_STATE_MOD_MISMATCH: the state was written with another mod (identity, schema or configuration), or only one side has a mod */
+  SMS_SNAPSHOT_MOD_UNAVAILABLE,   /* E_STATE_UNAVAILABLE: a guest-affecting mod without `state.mod`, or whose state cannot be saved: no state is ever produced */
+  SMS_SNAPSHOT_MOD_REJECTED       /* E_STATE_MOD_REJECTED: a malformed mod body or a mod that refuses its own state; the guest state is unchanged */
 } SmsSnapshotStatus;
 
 /* A short, user-presentable reason. Never NULL. */
@@ -68,6 +72,7 @@ typedef struct SmsSnapshotMachine {
   SmsPsg *psg;
   SmsPad *pad;
   int script_input;   /* 1: a scripted-input schedule drives the machine (its cursor and consumed-prefix digest are state); 0: live input (the viewer) */
+  const SmsModState *mod; /* SEG-147-T005 (ADR 0325): NULL = no mod (the container is byte-for-byte what it was); else the state carries a MODSTATE section bound to this mod */
 } SmsSnapshotMachine;
 
 /* Who the state belongs to: the digest of the cartridge image the program was built from (the effective, possibly patched, image) and the variant identity
@@ -98,6 +103,9 @@ typedef struct SmsSnapshotInfo {
   uint16_t thumb_width, thumb_height;
   const uint8_t *thumb_rgb565;    /* refers into the inspected bytes, or NULL */
   uint32_t size;
+  int has_mod;                    /* the container carries a MODSTATE section; the three fields below are its header */
+  uint8_t mod_identity[32], mod_compat[32];
+  uint32_t mod_state_schema;
 } SmsSnapshotInfo;
 
 /* Builds a snapshot at the barrier. Does not modify the machine. */

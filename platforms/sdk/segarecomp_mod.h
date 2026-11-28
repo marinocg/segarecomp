@@ -14,7 +14,7 @@
 #include <stdint.h>
 
 #define SEGA_MOD_ABI_MAJOR 2U
-#define SEGA_MOD_ABI_MINOR 4U /* a host with a larger minor accepts a provider requiring a smaller or equal minor. Minor 1 (ADR 0320, SEG-152-T003): the exact-frame view and VDP helpers of the Genesis table; minor 2 (SEG-152-T007): SegaGenesisRenderApi::scenery_generic_rows; minor 3 (SEG-152-T017): SegaGenesisRenderApi::scenery_row_origin; minor 4 (SEG-145-T008): the audio API (SegaModAudioApi, SegaGenesisFeatures::audio) and the two audio status values */
+#define SEGA_MOD_ABI_MINOR 5U /* a host with a larger minor accepts a provider requiring a smaller or equal minor. Minor 1 (ADR 0320, SEG-152-T003): the exact-frame view and VDP helpers of the Genesis table; minor 2 (SEG-152-T007): SegaGenesisRenderApi::scenery_generic_rows; minor 3 (SEG-152-T017): SegaGenesisRenderApi::scenery_row_origin; minor 4 (SEG-145-T008): the audio API (SegaModAudioApi, SegaGenesisFeatures::audio) and the two audio status values; minor 5 (SEG-147-T004/T006): the Master System render API and VDP view (SegaMasterSystemFeatures::render, ::vdp) and the present.transform capability */
 
 #if defined(SEGA_MOD_TARGET_ABI_MAJOR) && (SEGA_MOD_TARGET_ABI_MAJOR != SEGA_MOD_ABI_MAJOR)
 #error "E_ABI_HEADER_MISMATCH: the manifest abi.native differs from SEGA_MOD_ABI_MAJOR of this header"
@@ -77,7 +77,8 @@ enum {
   SEGA_MOD_CAP_STATE_MOD = 12,
   SEGA_MOD_CAP_AUDIO_EVENT_READ = 13,
   SEGA_MOD_CAP_AUDIO_COMMAND_SEND = 14,
-  SEGA_MOD_CAP_AUDIO_HOST_PLAY = 15
+  SEGA_MOD_CAP_AUDIO_HOST_PLAY = 15,
+  SEGA_MOD_CAP_PRESENT_TRANSFORM = 16 /* minor 5: presentation-only palette mapping and picture offset */
 };
 
 /* SEG-145-T008 (ABI minor 4, docs/architecture/modding-audio-architecture.md section 10): the cross-platform audio API. It knows no sound chip, driver or id: every call resolves a NAME through a mapping the

@@ -14,6 +14,9 @@
 #include "sms_viewer_state.h"
 #include "sv_host.h"
 #include "sv_perf.h"
+#if defined(SEGARECOMP_SMS_MOD)
+#include "sms_mod_host.h"
+#endif
 
 extern const uint8_t sms_rom_data[];
 extern const uint32_t sms_rom_size;
@@ -154,9 +157,19 @@ static void state_setup(SmsSdl3Viewer *viewer, const SmsViewerOptions *options) 
   cfg.rewind_interval_ms = env_u32("SEGARECOMP_REWIND_INTERVAL_MS", 50U, 60000U, cfg.rewind_interval_ms);
   cfg.rewind_target_ms = env_u32("SEGARECOMP_REWIND_TARGET_MS", 500U, 3600000U, cfg.rewind_target_ms);
   cfg.after_restore = viewer_after_restore;
+#if defined(SEGARECOMP_SMS_MOD)
+  cfg.mod = sms_mod_host_state(); /* SEG-147-T005: the mod's state rides every slot and rewind moment */
+#endif
   {  /* the identity is the same whether or not a save folder exists: a state taken in memory (rewind) and one on disk describe the same game */
-    const int have_source = parse_hex32(getenv("SEGARECOMP_ROM_SHA256"), cfg.identity.source_sha256);
-    const int have_variant = variant == NULL || *variant == '\0' || strcmp(variant, "vanilla") == 0 || parse_hex32(variant, cfg.identity.variant_sha256);
+    int have_source = parse_hex32(getenv("SEGARECOMP_ROM_SHA256"), cfg.identity.source_sha256);
+    int have_variant = variant == NULL || *variant == '\0' || strcmp(variant, "vanilla") == 0 || parse_hex32(variant, cfg.identity.variant_sha256);
+#if defined(SEGARECOMP_SMS_MOD)
+    /* A program with a mod knows its own identity (the effective image it was built from and the package it links), and that identity is authoritative: external SEGARECOMP_ROM_SHA256 and
+     * SEGARECOMP_SAVE_VARIANT values are ignored, so no environment can record this program's states as another game or version. */
+    sms_mod_host_identity(cfg.identity.source_sha256, cfg.identity.variant_sha256);
+    have_source = 1;
+    have_variant = 1;
+#endif
     if (options->record != NULL) {   /* a recording describes the run since the last reset: a restore would rewrite the history it describes */
       slots_reason = "Save states are not available while input is being recorded.";
       cfg.rewind_unavailable_reason = slots_reason;
@@ -203,12 +216,19 @@ int main(int argc, char **argv) {
     printf("sms_error %s\n", sms_error_name(error));
     return 4;
   }
+#if defined(SEGARECOMP_SMS_MOD)
+  if (sms_mod_host_attach(&rig.machine, &rig.pad, &rig.vdp, &rig.renderer) != 0) return 5;
+  sms_viewer_rig_reset(&rig); /* the mod's session starts with the machine's */
+#endif
   viewer = sms_sdl3_viewer_open("segarecomp Master System", (int)options.scale, !options.mute);
   if (viewer == NULL) {
     fprintf(stderr, "cannot open the SDL3 window\n");
     return 5;
   }
   sms_sdl3_viewer_attach_extension(viewer, &rig); /* Level 2 (presentation only); a failure leaves the viewer Original */
+#if defined(SEGARECOMP_SMS_MOD)
+  sms_sdl3_viewer_set_composer(viewer, sms_mod_host_compose);
+#endif
   sms_sdl3_viewer_host(viewer, &host);
   sms_pacer_init(&g_pacer, options.unthrottled);
   g_inner = host;
@@ -253,6 +273,9 @@ int main(int argc, char **argv) {
       }
     }
   }
+#if defined(SEGARECOMP_SMS_MOD)
+  sms_mod_host_summary(stderr, "");
+#endif
   if (g_state != NULL) {   /* observed rewind statistics (counts, not estimates) for the measurement tools */
     SvStateServiceStats st;
     sms_viewer_state_stats(g_state, &st);

@@ -54,7 +54,7 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | `[build]` | `header_repair` = `genesis-checksum` (Genesis) \| `sms-checksum` (Master System) \| `none` (ADR 0293, 0324; absent = repair only a verifying original that the build changed) |
 | `[geometry]`, `[[scene]]` | `aspect_max` (and optional `aspect_min`, default `"4:3"`): the aspect range the package claims, `N:M` inside 4:3 to 32:9; one `[[scene]]` per named scene with `id` (token) and `components` (`actors`, `hud`, `scenery`). A scene needs `aspect_max`. A claim the viewer checks per frame, never a grant; part of the package identity (ADR 0302). `scenes = []` alone stays accepted and claims nothing |
 | `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`, `guest-asm`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
-| `[[memory]]` | `revision` (a declared label; absent = every revision), `space` (`m68k.work_ram`), `offset`, `length` (decimal), `access` (`read`, `write` or `read-write`, backed by the matching `memory.*` capability). The ONLY guest memory a scheduled mod may touch; part of the package identity ([gameplay example](gameplay-example.md), ADR 0300) |
+| `[[memory]]` | `revision` (a declared label; absent = every revision), `space` (`m68k.work_ram`; Master System: `z80.work_ram`, or read-only `z80.cart_ram` on a `sega`-mapper revision, [guide](master-system-mods.md)), `offset`, `length` (decimal), `access` (`read`, `write` or `read-write`, backed by the matching `memory.*` capability). The ONLY guest memory a scheduled mod may touch; part of the package identity ([gameplay example](gameplay-example.md), ADR 0300) |
 | `[[symbol]]` | `name` (token), `revision` (a declared label), `address` (string `"0x..."`, below `0x01000000`), `provenance` (`manual`, `verified`, `imported-hint`); one per (name, revision). Only `verified` entries may be an edit site |
 | `[[audio.mapping]]`, `[[audio.mapping.value]]` | declared audio mappings: [audio architecture](../architecture/modding-audio-architecture.md) sections 5, 9 and 10 (the Genesis audio API and sound-mod workflow: [Genesis sound mods](genesis-sound-mods.md)) |
 
@@ -142,7 +142,7 @@ strict C11 flags the **host** owns (`-std=c11 -Wall -Wextra -pedantic -Werror`) 
 
 ## Support today
 
-Genesis is the supported adapter. Master System also supports data-only packages (typed edits, BPS, Z80 injection, assets; above). Its runtime capabilities, like Sega CD's, are `host.log` only; a package that needs any other capability, or a Sega CD disc source, is refused (`E_CAPABILITY_UNSUPPORTED`, `E_SOURCE_KIND_RESERVED`). Commercial ROMs, discs, BIOS images and game audio never belong in a project that is committed or shared.
+Genesis is the supported adapter. Master System also supports data-only packages (typed edits, BPS, Z80 injection, assets; above) and scheduled Luau / C11 mods ([Master System mods](master-system-mods.md)). Sega CD's only runtime capability is `host.log`; a package that needs a capability its platform lacks, or a Sega CD disc source, is refused (`E_CAPABILITY_UNSUPPORTED`, `E_SOURCE_KIND_RESERVED`). Commercial ROMs, discs, BIOS images and game audio never belong in a project that is committed or shared.
 
 ## Linking a native ABI 2 package into a program (SEG-138-T011, ADR 0305)
 
