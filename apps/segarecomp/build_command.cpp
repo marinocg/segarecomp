@@ -2629,12 +2629,23 @@ int run_build(Options options) {
         const fs::path mod_dir = options.runtime_dir / "mod";
         base.insert(base.end(), {"-DSEGARECOMP_SMS_MOD=1", "-I", mod_dir.string(), "-I", sdk.string(), "-I", core_sdk.string(), "-I", (viewer_lib / "include").string(), "-I", (viewer_lib / "src").string(), "-I", viewer.string()});
         for (const char *name : {"sms_mod_scheduler.c", "sms_mod_present.c", "sms_mod_host.c"}) compile.push_back({mod_dir / name, {}});
-        compile.push_back({options.native_mod_dir / "sms_mod_artifact.c", {}});
+        compile.push_back({options.mod_set ? options.set_artifact : options.native_mod_dir / "sms_mod_artifact.c", {}});
+        if (options.mod_set) base.push_back("-DSEGARECOMP_SMS_MOD_SET=1");
         if (!play) {   // the viewer foundation already links the font and the viewer the snapshot codec
           compile.push_back({options.runtime_dir / "headless" / "sms_headless_mod.c", {}});
           compile.push_back({viewer / "sms_snapshot.c", {}});
           for (const char *name : {"sv_font.c", "sv_font_data.c"}) compile.push_back({viewer_lib / "src" / name, {}});
         }
+        if (options.mod_set)   // ADR 0327: every native member's units, each with its own ABI minor, include path and renamed entry symbol; the Luau VM below is always linked into a set program
+          for (const auto &unit : options.set_units) {
+            std::vector<std::string> isolated{options.cc};
+            isolated.insert(isolated.end(), options.cc_args.begin(), options.cc_args.end());
+            for (const std::string_view flag : segarecomp::mod::kNativeCompileFlags)
+              if (flag != "-c") isolated.emplace_back(flag);
+            isolated.insert(isolated.end(), {"-O" + options.optimize, "-DSEGA_MOD_TARGET_PLATFORM=2", "-DSEGA_MOD_TARGET_ABI_MAJOR=2U", "-DSEGA_MOD_TARGET_ABI_MINOR=" + std::to_string(unit.abi_minor) + "U", "-I", sdk.string(),
+                                             "-I", core_sdk.string(), "-I", unit.include.string(), "-Dsegarecomp_mod_provider=segarecomp_mod_provider_m" + std::to_string(unit.member)});
+            compile.push_back({unit.source, {}, isolated, unit.digest});
+          }
         if (options.sms_mod_native) {   // the SAME host-owned flags `mod check` / `mod build` validate with, the Master System target defines, the SDK headers and the package's own tree only
           std::vector<std::string> isolated{options.cc};
           isolated.insert(isolated.end(), options.cc_args.begin(), options.cc_args.end());
@@ -2666,7 +2677,9 @@ int run_build(Options options) {
           for (const fs::path &source : vm_sources) compile.push_back({source, {}, vm_flags});
           for (const char *name : {"luau_vm.cpp", "luau_api.cpp", "luau_stored.cpp", "luau_phase_provider.cpp"}) compile.push_back({host / name, {}, flags});
           for (const char *name : {"sha256.cpp", "mod_adapter.cpp"}) compile.push_back({media / "src" / name, {}, flags});
-          compile.push_back({mod_dir / "sms_mod_luau.cpp", {}, flags});
+          std::vector<std::string> adapter_flags = flags;
+          if (options.mod_set) adapter_flags.push_back("-DSEGARECOMP_SMS_MOD_SET=1");
+          compile.push_back({mod_dir / "sms_mod_luau.cpp", {}, adapter_flags});
         }
       }
     }
@@ -2763,7 +2776,10 @@ int run_build(Options options) {
     log.line("$ (link)");
     log.line("# link target=" + executable.filename().string());
     log.append_file(link_log);
-    if (link_rc != 0) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
+    if (link_rc != 0)
+      return options.mod_set && options.set_units.size() > 1
+                 ? fail(options, log, sha, "link", 3, "The mod set program could not be linked: two native mods may define the same external symbol (see build.log).", "E_SET_NATIVE_LINK")
+                 : fail(options, log, sha, "link", 3, "The native program could not be linked.");
     if (g_profile.enabled()) {
       std::vector<std::string> final_set;
       std::uint64_t generated_c = 0;

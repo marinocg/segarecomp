@@ -210,7 +210,7 @@ static void record_fault(SmsModScheduler *s, const char *cause) {
   (void)snprintf(s->fault.cause, sizeof s->fault.cause, "%s", cause);
   (void)snprintf(s->fault.text, sizeof s->fault.text, "E_MOD_FAULT cause=%s mod=%s phase=%s frame=%llu", s->fault.cause, s->mod_id, phase_name(s->phase), (unsigned long long)s->frame);
   s->presentation_valid = 0U;
-  stop_intercepting(s); /* the guest goes on with the physical pad */
+  if (!s->in_set) stop_intercepting(s); /* the guest goes on with the physical pad (in a set another member may still own the interception: the set decides) */
   emit(s, s->fault.text);
 }
 
@@ -299,18 +299,22 @@ static void run_render(SmsModScheduler *s, uint64_t frame) {
   }
 }
 
+static void reset_session(SmsModScheduler *s, uint64_t frame) {
+  s->started = 1U;
+  if (!s->disabled && s->config.provider->init != NULL) {
+    int failed;
+    begin_callback(s, SEGA_MOD_PHASE_RESET, frame);
+    failed = s->config.provider->init(s->config.provider_state, &s->host) != 0;
+    finish_callback(s, failed);
+  }
+  run_phase(s, SEGA_MOD_PHASE_RESET, frame);
+}
+
 static void hook_boundary(void *context, SmsMachine *machine, uint64_t frame) {
   SmsModScheduler *s = (SmsModScheduler *)context;
   (void)machine;
   if (!s->started) {
-    s->started = 1U;
-    if (!s->disabled && s->config.provider->init != NULL) {
-      int failed;
-      begin_callback(s, SEGA_MOD_PHASE_RESET, frame);
-      failed = s->config.provider->init(s->config.provider_state, &s->host) != 0;
-      finish_callback(s, failed);
-    }
-    run_phase(s, SEGA_MOD_PHASE_RESET, frame);
+    reset_session(s, frame);
   } else if (frame != 0U) {
     run_phase(s, SEGA_MOD_PHASE_FRAME_END, frame - 1U);
     run_render(s, frame - 1U);
@@ -341,9 +345,7 @@ static void hook_sampled(void *context, SmsMachine *machine, uint64_t frame) {
 }
 
 /* A machine reset starts the guest session over: `reset` runs again before the next frame. A faulted mod stays disabled (phases section 6.1). */
-static void hook_reset(void *context, SmsMachine *machine) {
-  SmsModScheduler *s = (SmsModScheduler *)context;
-  (void)machine;
+static void forget_session(SmsModScheduler *s) {
   s->started = 0U;
   s->presentation_valid = 0U;
   /* the replay witness describes the run since the last reset, as the viewer's input recording does */
@@ -353,6 +355,12 @@ static void hook_reset(void *context, SmsMachine *machine) {
   memset(s->final_pad, 0, sizeof s->final_pad);
   memset(s->previous_final, 0, sizeof s->previous_final);
   memset(s->sampled, 0, sizeof s->sampled);
+}
+
+static void hook_reset(void *context, SmsMachine *machine) {
+  SmsModScheduler *s = (SmsModScheduler *)context;
+  (void)machine;
+  forget_session(s);
   stop_intercepting(s);
 }
 
@@ -519,20 +527,24 @@ typedef struct Staged {
 
 #define STREAM_RECORD_BYTES 28U /* frame u64 + phase, space, offset, width, value u32 */
 
+static int live_input(const SmsModScheduler *s) { return !s->disabled && s->started && (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_INPUT)) != 0U; }
+
 static int guest_affecting(const SmsModScheduler *s) { return granted(s, SEGA_MOD_CAP_MEMORY_WRITE) || granted(s, SEGA_MOD_CAP_INPUT_INTERCEPT); }
 
 static uint32_t state_put(void *context, uint8_t *out, uint32_t cap, SmsModStateStatus *status) {
   SmsModScheduler *s = (SmsModScheduler *)context;
   Out o;
   unsigned i;
+  uint8_t latched;
   const uint32_t fail = UINT32_MAX;
   o.p = out; o.cap = cap; o.n = 0U; o.error = 0;
   *status = SMS_MOD_STATE_NOT_CAPTURABLE;
   if (s->machine == NULL || s->in_callback) return fail;
   if (guest_affecting(s) && !granted(s, SEGA_MOD_CAP_STATE_MOD)) { *status = SMS_MOD_STATE_UNAVAILABLE; return fail; } /* never a state that silently drops the mod's effect */
-  out_u8(&o, s->disabled); out_u8(&o, s->started); out_u8(&o, (uint8_t)s->fault.faulted); out_u8(&o, s->intercepting);
+  latched = (uint8_t)(s->intercepting && (!s->in_set || live_input(s))); /* in a set only a member that takes part in the interception saves it */
+  out_u8(&o, s->disabled); out_u8(&o, s->started); out_u8(&o, (uint8_t)s->fault.faulted); out_u8(&o, latched);
   out_bytes(&o, s->sampled, 2U); out_bytes(&o, s->final_pad, 2U); out_bytes(&o, s->previous_final, 2U);
-  out_u8(&o, s->intercepting ? s->guest_input.p1 : 0U); out_u8(&o, s->intercepting ? s->guest_input.p2 : 0U);
+  out_u8(&o, latched ? s->guest_input.p1 : 0U); out_u8(&o, latched ? s->guest_input.p2 : 0U);
   out_u64(&o, s->callbacks_run);
   if (s->fault.faulted) {
     out_u32(&o, s->fault.phase);
@@ -690,4 +702,298 @@ void sms_mod_scheduler_state(SmsModScheduler *s, SmsModState *out) {
   out->apply = state_apply;
   out->commit = state_commit;
   out->discard = state_discard;
+}
+
+/* ---- SEG-141-T007 (ADR 0327): the set. It calls the single-mod runner above; nothing here grants, checks or commits anything itself. ---- */
+static void set_run_all(SmsModSet *set, uint32_t phase, uint64_t frame) {
+  uint32_t i;
+  for (i = 0U; i < set->count; ++i) run_phase(set->members[i], phase, frame);
+}
+
+static void set_release_pad(SmsModSet *set) {
+  uint32_t i;
+  for (i = 0U; i < set->count; ++i)
+    if (live_input(set->members[i])) return;
+  if (set->pad != NULL) set->pad->intercept = NULL;
+}
+
+static void set_boundary(void *context, SmsMachine *machine, uint64_t frame) {
+  SmsModSet *set = (SmsModSet *)context;
+  uint32_t i;
+  (void)machine;
+  if (!set->members[0]->started) {
+    for (i = 0U; i < set->count; ++i) reset_session(set->members[i], frame);
+  } else if (frame != 0U) {
+    set_run_all(set, SEGA_MOD_PHASE_FRAME_END, frame - 1U);
+    for (i = 0U; i < set->count; ++i) run_render(set->members[i], frame - 1U);
+    if (set->frame_done != NULL) set->frame_done(set->frame_done_context, frame - 1U);
+  }
+  for (i = 0U; i < set->count; ++i) {
+    set->members[i]->previous_final[0] = set->members[i]->final_pad[0];
+    set->members[i]->previous_final[1] = set->members[i]->final_pad[1];
+  }
+  set_run_all(set, SEGA_MOD_PHASE_FRAME_BEGIN, frame);
+  set_release_pad(set);
+}
+
+static void set_sampled(void *context, SmsMachine *machine, uint64_t frame) {
+  SmsModSet *set = (SmsModSet *)context;
+  uint8_t chain[2];
+  uint32_t i;
+  int latch = 0;
+  chain[0] = machine->input.p1;
+  chain[1] = machine->input.p2;
+  for (i = 0U; i < set->count; ++i) {
+    SmsModScheduler *s = set->members[i];
+    s->sampled[0] = machine->input.p1;
+    s->sampled[1] = machine->input.p2;
+    s->final_pad[0] = chain[0];
+    s->final_pad[1] = chain[1];
+    run_phase(s, SEGA_MOD_PHASE_INPUT, frame); /* a faulted callback leaves final_pad as it was */
+    chain[0] = s->final_pad[0];
+    chain[1] = s->final_pad[1];
+  }
+  set->guest_input.p1 = chain[0];
+  set->guest_input.p2 = chain[1];
+  set->guest_input.pause = machine->input.pause;
+  for (i = 0U; i < set->count; ++i) {
+    SmsModScheduler *s = set->members[i];
+    s->final_pad[0] = chain[0];
+    s->final_pad[1] = chain[1];
+    s->guest_input = set->guest_input;
+    s->intercepting = (uint8_t)(live_input(s) && set->pad != NULL);
+    latch = latch || s->intercepting != 0U;
+  }
+  if (set->pad != NULL) set->pad->intercept = latch ? &set->guest_input : NULL;
+  set_run_all(set, SEGA_MOD_PHASE_POST_INPUT, frame);
+  set_release_pad(set);
+}
+
+static void set_reset(void *context, SmsMachine *machine) {
+  SmsModSet *set = (SmsModSet *)context;
+  uint32_t i;
+  (void)machine;
+  for (i = 0U; i < set->count; ++i) {
+    forget_session(set->members[i]);
+    set->members[i]->intercepting = 0U;
+  }
+  if (set->pad != NULL) set->pad->intercept = NULL;
+}
+
+void sms_mod_set_detach(SmsModSet *set) {
+  uint32_t i;
+  if (set == NULL || set->machine == NULL) return;
+  if (set->machine->frame_hooks == &set->hooks) set->machine->frame_hooks = NULL;
+  if (set->pad != NULL) set->pad->intercept = NULL;
+  for (i = 0U; i < set->count; ++i) {
+    set->members[i]->intercepting = 0U;
+    set->members[i]->machine = NULL;
+  }
+  set->machine = NULL;
+  set->count = 0U;
+}
+
+int sms_mod_set_attach(SmsModSet *set, SmsMachine *machine, SmsPad *pad, const SmsVdp *vdp, SmsModScheduler *const *schedulers, const SmsModConfig *configs, uint32_t count, const uint8_t identity[32],
+                       void (*frame_done)(void *context, uint64_t frame), void *frame_done_context, const char **rejection, uint32_t *member) {
+  const char *dummy = NULL;
+  uint32_t dummy_member = 0U, i, j, any = 0U;
+  if (rejection == NULL) rejection = &dummy;
+  if (member == NULL) member = &dummy_member;
+  *rejection = "";
+  *member = count;
+  if (set == NULL || machine == NULL || pad == NULL || schedulers == NULL || configs == NULL || identity == NULL || count == 0U || count > SMS_MOD_SET_MEMBERS_MAX) {
+    *rejection = "E_SET_SIZE";
+    return 1;
+  }
+  for (i = 0U; i < 32U; ++i) any |= identity[i];
+  if (any == 0U) {
+    *rejection = "E_SET_IDENTITY";
+    return 1;
+  }
+  if (machine->frame_hooks != NULL) {
+    *rejection = "E_SCHEDULER_BUSY";
+    return 1;
+  }
+  memset(set, 0, sizeof *set);
+  memcpy(set->identity, identity, 32U);
+  set->machine = machine;
+  set->pad = pad;
+  for (i = 0U; i < count; ++i) {
+    SmsModScheduler *s = schedulers[i];
+    *member = i;
+    for (j = 0U; j < i; ++j)
+      if (schedulers[j] == s) {
+        *rejection = "E_PROVIDER_ENTRY";
+        goto refused;
+      }
+    if (sms_mod_scheduler_attach(s, machine, pad, vdp, &configs[i], rejection) != 0) goto refused;
+    machine->frame_hooks = NULL; /* the set installs its own once every member is accepted */
+    s->in_set = 1U;
+    set->members[set->count++] = s;
+    for (j = 0U; j < i; ++j)
+      if (strcmp(set->members[j]->mod_id, s->mod_id) == 0) {
+        *rejection = "E_SET_DUPLICATE_MOD";
+        goto refused;
+      }
+  }
+  set->frame_done = frame_done;
+  set->frame_done_context = frame_done_context;
+  set->hooks.context = set;
+  set->hooks.reset = set_reset;
+  set->hooks.boundary = set_boundary;
+  set->hooks.sampled = set_sampled;
+  machine->frame_hooks = &set->hooks;
+  *member = count;
+  return 0;
+refused:
+  sms_mod_set_detach(set);
+  return 1;
+}
+
+/* body: member_count u32 | per member (length u32, the member's own body) */
+static uint32_t set_state_put(void *context, uint8_t *out, uint32_t cap, SmsModStateStatus *status) {
+  SmsModSet *set = (SmsModSet *)context;
+  Out o;
+  uint8_t *scratch;
+  uint32_t i;
+  o.p = out; o.cap = cap; o.n = 0U; o.error = 0;
+  *status = SMS_MOD_STATE_NOT_CAPTURABLE;
+  if (set->machine == NULL) return UINT32_MAX;
+  scratch = (uint8_t *)malloc(SMS_MOD_BODY_MAX);
+  if (scratch == NULL) return UINT32_MAX;
+  out_u32(&o, set->count);
+  for (i = 0U; i < set->count; ++i) {
+    const uint32_t n = state_put(set->members[i], scratch, SMS_MOD_BODY_MAX, status);
+    if (n > SMS_MOD_BODY_MAX) {
+      free(scratch);
+      return UINT32_MAX;
+    }
+    out_u32(&o, n);
+    out_bytes(&o, scratch, n);
+  }
+  free(scratch);
+  if (o.error) {
+    *status = SMS_MOD_STATE_UNAVAILABLE;
+    return UINT32_MAX;
+  }
+  *status = SMS_MOD_STATE_OK;
+  return o.n;
+}
+
+typedef struct StagedSet { void *members[SMS_MOD_SET_MEMBERS_MAX]; } StagedSet;
+
+static void set_state_discard(void *context, void *staged) {
+  StagedSet *st = (StagedSet *)staged;
+  uint32_t i;
+  (void)context;
+  if (st == NULL) return;
+  for (i = 0U; i < SMS_MOD_SET_MEMBERS_MAX; ++i) free(st->members[i]);
+  free(st);
+}
+
+static void *set_state_stage(void *context, const uint8_t *body, uint32_t length) {
+  SmsModSet *set = (SmsModSet *)context;
+  StagedSet *st;
+  In in;
+  uint32_t i;
+  if (set->machine == NULL) return NULL;
+  st = (StagedSet *)calloc(1U, sizeof *st);
+  if (st == NULL) return NULL;
+  in.p = body; in.size = length; in.off = 0U; in.error = 0;
+  if (in_u32(&in) != set->count || in.error) goto bad;
+  for (i = 0U; i < set->count; ++i) {
+    const uint32_t n = in_u32(&in);
+    if (in.error || n > in.size - in.off) goto bad;
+    st->members[i] = state_stage(set->members[i], in.p + in.off, n);
+    if (st->members[i] == NULL || ((const Staged *)st->members[i])->started != ((const Staged *)st->members[0])->started) goto bad;
+    in.off += n;
+  }
+  if (in.off != in.size) goto bad;
+  return st;
+bad:
+  set_state_discard(context, st);
+  return NULL;
+}
+
+static int set_state_apply(void *context, void *staged) {
+  SmsModSet *set = (SmsModSet *)context;
+  StagedSet *st = (StagedSet *)staged;
+  uint8_t *prior[SMS_MOD_SET_MEMBERS_MAX] = {NULL};
+  uint32_t prior_len[SMS_MOD_SET_MEMBERS_MAX] = {0U};
+  uint32_t i, j;
+  int failed = 0;
+  for (i = 0U; !failed && i < set->count; ++i) { /* the running members' blobs, taken before any of them changes */
+    SmsModScheduler *s = set->members[i];
+    if (!granted(s, SEGA_MOD_CAP_STATE_MOD) || s->disabled) continue;
+    prior[i] = (uint8_t *)malloc(SMS_MOD_BLOB_MAX);
+    if (prior[i] == NULL) failed = 1;
+    else if (s->config.provider->save_state(s->config.provider_state, prior[i], SMS_MOD_BLOB_MAX, &prior_len[i]) != 0 || prior_len[i] > SMS_MOD_BLOB_MAX) {
+      free(prior[i]);
+      prior[i] = NULL;
+    }
+  }
+  for (i = 0U; !failed && i < set->count; ++i) {
+    if (state_apply(set->members[i], st->members[i]) == 0) continue;
+    failed = 1;
+    for (j = 0U; j < i; ++j) { /* put back the members that had already loaded the other state */
+      SmsModScheduler *s = set->members[j];
+      if (!granted(s, SEGA_MOD_CAP_STATE_MOD) || ((const Staged *)st->members[j])->disabled != 0U || s->disabled) continue;
+      if (prior[j] == NULL || s->config.provider->load_state(s->config.provider_state, prior[j], prior_len[j]) != 0) {
+        s->phase = SEGA_MOD_PHASE_RESET;
+        s->frame = set->machine->rt.state.cycles / SMS_CYCLES_PER_FRAME;
+        record_fault(s, "state");
+      }
+    }
+  }
+  for (i = 0U; i < set->count; ++i) free(prior[i]);
+  if (failed) set_release_pad(set);
+  return failed;
+}
+
+static void set_state_commit(void *context, void *staged, SmsMachine *machine, SmsPad *pad) {
+  SmsModSet *set = (SmsModSet *)context;
+  StagedSet *st = (StagedSet *)staged;
+  uint8_t active = 0U, p1 = 0U, p2 = 0U;
+  uint32_t i;
+  for (i = 0U; i < set->count; ++i) {
+    const Staged *m = (const Staged *)st->members[i];
+    if (m->intercepting != 0U) {
+      active = 1U;
+      p1 = m->guest[0];
+      p2 = m->guest[1];
+    }
+    state_commit(set->members[i], st->members[i], machine, pad); /* frees the member's staged state */
+    st->members[i] = NULL;
+  }
+  set->guest_input.p1 = p1;
+  set->guest_input.p2 = p2;
+  set->guest_input.pause = machine->input.pause;
+  pad->intercept = active ? &set->guest_input : NULL;
+  free(st);
+}
+
+void sms_mod_set_state(SmsModSet *set, SmsModState *out) {
+  static const char tag[] = "segarecomp.sms.mod.set.compat.v1";
+  SmsSha256 sha;
+  uint32_t i;
+  memset(out, 0, sizeof *out);
+  out->context = set;
+  memcpy(out->identity, set->identity, 32U);
+  out->state_schema = 1U; /* the set body format; each member's declared schema is part of `compat` */
+  sms_sha256_init(&sha);
+  sms_sha256_update(&sha, tag, sizeof tag - 1U);
+  sms_sha256_update_u32(&sha, set->count);
+  for (i = 0U; i < set->count; ++i) {
+    uint8_t member_compat[32];
+    compat_digest(set->members[i], member_compat);
+    sms_sha256_update(&sha, set->members[i]->config.identity_sha256, 32U);
+    sms_sha256_update_u32(&sha, set->members[i]->config.state_schema);
+    sms_sha256_update(&sha, member_compat, 32U);
+  }
+  sms_sha256_final(&sha, out->compat);
+  out->put = set_state_put;
+  out->stage = set_state_stage;
+  out->apply = set_state_apply;
+  out->commit = set_state_commit;
+  out->discard = set_state_discard;
 }

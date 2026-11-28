@@ -86,6 +86,7 @@ typedef struct SmsModScheduler {
   SmsInputState guest_input;   /* what the guest reads while `intercepting` */
   uint8_t intercepting;
   uint8_t started, disabled, in_callback;
+  uint8_t in_set; /* SEG-141-T007: a member of an SmsModSet: the set owns the machine hooks and the pad interception */
   uint32_t phase;
   uint64_t frame;
   uint8_t final_pad[2], previous_final[2], sampled[2];
@@ -124,6 +125,34 @@ void sms_mod_write_log_digest(const SmsModScheduler *s, uint8_t out[32]);
 void sms_mod_fault_current(const char *cause);
 /* Fills the snapshot seam of this scheduler. */
 void sms_mod_scheduler_state(SmsModScheduler *s, SmsModState *out);
+
+/*
+ * SEG-141-T007 (ADR 0327): several mods on ONE Master System machine, with the SAME ordering, input-chain, isolation and combined-state rules as the Genesis set (there are no function hooks here). Every
+ * member is an ordinary SmsModScheduler; the set owns the machine's frame hooks and the one pad interception. MEMBER INDEX IS THE COMPOSITE ORDER. Each phase runs for all members before the next; a
+ * later member observes earlier members' committed writes; `input` chains the pad; a faulted member is disabled alone and the interception is released only when no live member has `input`.
+ * `frame_done` is the set's one observer, called after every member's frame-end and render.
+ */
+#define SMS_MOD_SET_MEMBERS_MAX 16U
+
+typedef struct SmsModSet {
+  SmsModScheduler *members[SMS_MOD_SET_MEMBERS_MAX]; /* caller storage */
+  uint32_t count;
+  SmsMachine *machine;
+  SmsPad *pad;
+  SmsFrameHooks hooks;
+  SmsInputState guest_input;
+  uint8_t identity[32]; /* the composite identity: a saved state restores only into a set with exactly this identity */
+  void (*frame_done)(void *context, uint64_t frame);
+  void *frame_done_context;
+} SmsModSet;
+
+/* Attaches schedulers[i] with configs[i] (every rule of sms_mod_scheduler_attach; a member's own frame_done is ignored). Returns 0, or 1 with *rejection a stable class and *member the index concerned
+ * (`count` for a set-level refusal): E_SET_SIZE, E_SET_IDENTITY, E_SET_DUPLICATE_MOD or a member's own class. Nothing stays attached on rejection. */
+int sms_mod_set_attach(SmsModSet *set, SmsMachine *machine, SmsPad *pad, const SmsVdp *vdp, SmsModScheduler *const *schedulers, const SmsModConfig *configs, uint32_t count, const uint8_t identity[32],
+                       void (*frame_done)(void *context, uint64_t frame), void *frame_done_context, const char **rejection, uint32_t *member);
+void sms_mod_set_detach(SmsModSet *set);
+/* One MODSTATE section bound to the composite identity, holding every member's state in order. The members' blobs share the section's one bound. Restore is all-or-nothing for the guest. */
+void sms_mod_set_state(SmsModSet *set, SmsModState *out);
 
 #ifdef __cplusplus
 }

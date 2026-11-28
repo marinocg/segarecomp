@@ -2615,6 +2615,11 @@ add_test(NAME mod_set_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_S
 set_property(TEST mod_set_build_test APPEND PROPERTY LABELS full)   # many generated-native builds: CI full tier and --focus, not the local fast preset
 set_property(TEST mod_set_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST mod_set_build_test PROPERTY TIMEOUT 1500)
+# SEG-141-T007 (ADR 0327): built Master System mod sets on the shared engine and set dispatcher; the played section needs SDL3.
+add_test(NAME mod_set_sms_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_set_sms_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST mod_set_sms_test APPEND PROPERTY LABELS full)
+set_property(TEST mod_set_sms_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST mod_set_sms_test PROPERTY TIMEOUT 1500)
 add_test(NAME mod_gameplay_example_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_gameplay_example_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST mod_diff_run_test mod_gameplay_example_test PROPERTY TIMEOUT 900)
 foreach(_mod_test mod_package_test mod_project_test mod_sources_test mod_audio_test mod_workflow_test mod_edits_test mod_hooks_test mod_guest_test mod_guest_exec_test mod_diff_run_test mod_gameplay_example_test)
