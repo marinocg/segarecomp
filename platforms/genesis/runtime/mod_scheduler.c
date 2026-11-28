@@ -114,7 +114,7 @@ static int service_reg_read(GenesisModScheduler *s, uint32_t slot, uint32_t widt
   }
   if (!granted(s, SEGA_MOD_CAP_HOOK_FUNCTION)) return violation(s, SEGA_MOD_E_CAPABILITY);
   if (!in_hook_phase(s)) return violation(s, SEGA_MOD_E_PHASE);
-  if (((s->hook_site->reads >> slot) & 1U) == 0U) return violation(s, SEGA_MOD_E_RANGE); /* only the slots the declaration named */
+  if (((s->hook_reads >> slot) & 1U) == 0U) return violation(s, SEGA_MOD_E_RANGE); /* only the slots this mod's declaration named */
   if (s->staged_reg_set >> slot & 1U) { *value = s->staged_reg[slot]; return SEGA_MOD_OK; } /* reads observe this callback's staged results */
   if (!genesis_hook_reg_read(s->runtime, s->hook_entry_sp, slot, value)) return violation(s, SEGA_MOD_E_RANGE);
   return SEGA_MOD_OK;
@@ -514,15 +514,20 @@ static const GenesisModHookBinding *find_binding(const GenesisModScheduler *s, c
   return NULL;
 }
 
+static const GenesisModHookScope *scope_of(const GenesisModScheduler *s, const GenesisModHookBinding *binding) { return &s->scopes[binding - s->bindings]; }
+static int scope_has(const GenesisModScheduler *s, const GenesisModHookBinding *binding, uint32_t modes) { return scope_of(s, binding)->modes == 0U || (scope_of(s, binding)->modes & modes) != 0U; }
+static uint32_t scope_reads(const GenesisModScheduler *s, const GenesisModHookBinding *binding, const GenesisHookSiteInfo *site) { return scope_of(s, binding)->modes != 0U ? scope_of(s, binding)->reads : site->reads; }
+
 static int hook_enter(void *ctx, GenesisRuntime *rt, const GenesisHookSiteInfo *site, uint32_t entry_sp) {
   GenesisModScheduler *s = (GenesisModScheduler *)ctx;
   const GenesisModHookBinding *binding;
   int result, replaced_requested;
   if (!s->started || s->disabled || (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_HOOK_ENTRY)) == 0U) return 0;
   binding = find_binding(s, site);
-  if (binding == NULL) return 0;
+  if (binding == NULL || !scope_has(s, binding, GENESIS_HOOK_MODE_BEFORE | GENESIS_HOOK_MODE_REPLACE)) return 0;
   begin_callback(s, SEGA_MOD_PHASE_HOOK_ENTRY, rt->virtual_frame_count);
   s->hook_site = site;
+  s->hook_reads = scope_reads(s, binding, site);
   s->hook_entry_sp = entry_sp;
   s->hook_replaced = 0U;
   ++s->hook_calls[0];
@@ -548,9 +553,10 @@ static void hook_leave(void *ctx, GenesisRuntime *rt, const GenesisHookSiteInfo 
   int result;
   if (!s->started || s->disabled || (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_HOOK_EXIT)) == 0U) return;
   binding = find_binding(s, site);
-  if (binding == NULL) return;
+  if (binding == NULL || !scope_has(s, binding, GENESIS_HOOK_MODE_AFTER)) return;
   begin_callback(s, SEGA_MOD_PHASE_HOOK_EXIT, rt->virtual_frame_count);
   s->hook_site = site;
+  s->hook_reads = scope_reads(s, binding, site);
   s->hook_entry_sp = entry_sp;
   s->hook_replaced = 0U;
   ++s->hook_calls[1];
@@ -721,6 +727,7 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
         return 1;
       }
     s->bindings[i] = config->hooks[i];
+    if (config->hook_scopes != NULL) s->scopes[i] = config->hook_scopes[i];
   }
   if (sega_mod_is_granted(&s->host, SEGA_MOD_CAP_STATE_MOD)) { /* ADR 0299: a mod with state must supply both entries and declare its schema */
     if (config->provider->save_state == NULL || config->provider->load_state == NULL) {
@@ -819,6 +826,7 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
     }
   }
   s->config.hooks = s->bindings; /* the scheduler owns copies: the caller's array need not outlive attach */
+  s->config.hook_scopes = NULL;
   if ((config->phase_mask & HOOK_PHASES) != 0U) {
     s->function_hooks.ctx = s;
     s->function_hooks.enter = hook_enter;
@@ -1149,6 +1157,10 @@ static void compat_digest(const GenesisModScheduler *s, uint8_t out[32]) {
     sha_u32(&sha, n);
     genesis_sha256_update(&sha, (const uint8_t *)s->bindings[i].id, n);
     sha_u32(&sha, s->bindings[i].hook_id);
+    if (s->scopes[i].modes != 0U) { /* only a scoped (shared-site) binding, so other digests are unchanged */
+      sha_u32(&sha, s->scopes[i].modes);
+      sha_u32(&sha, s->scopes[i].reads);
+    }
   }
   /* The generated hook site table decides how saved hook-frame indices are read: its size and, in table order, each site's entry, id and mode. */
   site_count = s->config.sites != NULL && s->config.site_count <= GENESIS_MOD_HOOKS_MAX ? s->config.site_count : 0U; /* an unattached/rejected config contributes nothing */

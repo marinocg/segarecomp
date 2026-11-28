@@ -65,6 +65,12 @@ typedef struct GenesisModHookBinding {
   const char *id;
   uint32_t hook_id;
 } GenesisModHookBinding;
+/* SEG-141-T003 (ADR 0327): what THIS mod declared for binding i when the generated site is shared with other mods of a set. `modes` = GENESIS_HOOK_MODE_* bits (0 = the whole site, as in a single-mod
+ * program); `reads` = the register-view slots this mod may read there (used only when `modes` is non-zero). A mod never receives a callback or reads a register it did not declare. */
+typedef struct GenesisModHookScope {
+  uint32_t modes;
+  uint32_t reads;
+} GenesisModHookScope;
 #define GENESIS_MOD_HOOKS_MAX 64U
 
 typedef struct GenesisModConfig {
@@ -80,6 +86,7 @@ typedef struct GenesisModConfig {
   uint32_t rom_data_bytes;
   const GenesisModHookBinding *hooks; /* function hooks this mod implements (T004); NULL/0 = none */
   uint32_t hook_count;
+  const GenesisModHookScope *hook_scopes; /* NULL, or hook_count entries parallel to `hooks` (copied at attach) */
   GenesisModLogSink log_sink; /* host.log lines and fault diagnostics; NULL = discarded */
   void *log_ctx;
   /* ---- mod state (SEG-138-T006, ADR 0299) ---- */
@@ -134,6 +141,7 @@ typedef struct GenesisModScheduler {
   GenesisRuntime *runtime;
   GenesisFunctionHooks function_hooks; /* the callback set and call-frame stack of the static function hooks (runtime->function_hooks points here when hook phases are registered) */
   GenesisModHookBinding bindings[GENESIS_MOD_HOOKS_MAX];
+  GenesisModHookScope scopes[GENESIS_MOD_HOOKS_MAX];
   uint8_t identity[32];     /* the effective identity (config or derived) */
   char fault_cause_store[32]; /* backing storage of fault.cause after a restore (the live value otherwise points at a static string) */
   /* ---- session ---- */
@@ -162,6 +170,7 @@ typedef struct GenesisModScheduler {
   /* ---- the function hook in flight (hook-entry / hook-exit callbacks) ---- */
   const GenesisHookSiteInfo *hook_site;
   uint32_t hook_entry_sp;
+  uint32_t hook_reads;         /* the register-view slots the in-flight mod may read */
   uint8_t hook_replaced;       /* the in-flight hook-entry callback asked to replace the function (decided when the callback returns) */
   uint32_t staged_reg_set;     /* register-view slots a replacement staged (bit per slot) */
   uint32_t staged_reg[32];

@@ -172,7 +172,8 @@ struct Rig {
   uint32_t bad_member = 0;
   int result = -1;
   // `digits` are the members in composite order. `identity_byte` stands for the composite identity.
-  void attach(const std::vector<Mod> &spec, uint8_t identity_byte = 7, uint32_t mask = kAllPhases, const std::vector<GenesisHookSiteInfo> *sites = nullptr, const std::vector<std::vector<GenesisModHookBinding>> *bindings = nullptr) {
+  void attach(const std::vector<Mod> &spec, uint8_t identity_byte = 7, uint32_t mask = kAllPhases, const std::vector<GenesisHookSiteInfo> *sites = nullptr, const std::vector<std::vector<GenesisModHookBinding>> *bindings = nullptr,
+              const std::vector<std::vector<GenesisModHookScope>> *scoped = nullptr) {
     setup(rt);
     rt.pad1 = 0x05U;
     std::vector<GenesisModConfig> configs;
@@ -197,6 +198,7 @@ struct Rig {
         c.required[0] |= cap(SEGA_MOD_CAP_HOOK_FUNCTION);
         c.phase_mask |= bit(SEGA_MOD_PHASE_HOOK_ENTRY) | bit(SEGA_MOD_PHASE_HOOK_EXIT);
         c.hooks = (*bindings)[i].data();
+        if (scoped != nullptr) c.hook_scopes = (*scoped)[i].data();
         c.hook_count = static_cast<uint32_t>((*bindings)[i].size());
         c.sites = sites->data();
         c.site_count = static_cast<uint32_t>(sites->size());
@@ -304,6 +306,23 @@ void hooks() {
     h->leave(h->ctx, &r.rt, &sites[0], 0x00FFFF00U);
     const std::string first = std::to_string(a.digit), second = std::to_string(b.digit);
     check(log == std::vector<std::string>{first + "e", second + "e", first + "x", second + "x"}, "shared hooks run in composite order");
+  }
+  {   // a shared generated site delivers to each mod only the phases that mod declared
+    std::vector<std::string> log;
+    Mod a = member(1), b = member(2);
+    a.order = b.order = &log;
+    const std::vector<std::vector<GenesisModHookBinding>> bind = {{{"watch", 1U}}, {{"watch", 1U}}};
+    Rig r;
+    const std::vector<std::vector<GenesisModHookScope>> scopes = {{{GENESIS_HOOK_MODE_BEFORE, 0U}}, {{GENESIS_HOOK_MODE_AFTER, 0U}}};
+    r.attach({a, b}, 7, kAllPhases, &sites, &bind, &scopes);
+    check(r.result == 0, "attach scoped bindings");
+    if (r.result == 0) {
+      run_frames(r.rt, 1U);
+      GenesisFunctionHooks *h = r.rt.function_hooks;
+      (void)h->enter(h->ctx, &r.rt, &sites[0], 0x00FFFF00U);
+      h->leave(h->ctx, &r.rt, &sites[0], 0x00FFFF00U);
+      check(log == std::vector<std::string>{"1e", "2x"}, "a before-only and an after-only mod each get only their own phase");
+    }
   }
   {
     const std::vector<std::vector<GenesisModHookBinding>> bind = {{{"swap", 1U}}, {{"swap", 1U}}};

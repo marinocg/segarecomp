@@ -3,6 +3,7 @@
 // trusted Luau compiler over its Luau sources (SEG-137-T003; the bytecode is never packaged and never run by `build`).
 #include "luau_build.hpp"
 #include "mod_run.hpp"
+#include "mod_set_build.hpp"
 #include "process_run.hpp"
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/luau_host.hpp"
@@ -55,6 +56,10 @@ std::string json_list(const std::vector<std::string> &v) {
 // The trusted compile step for a package with Luau is shared with `segarecomp build` (luau_build.cpp).
 using segarecomp_cli::LuauBuild;
 using segarecomp_cli::build_luau;
+using segarecomp_cli::prepare_mod_set;
+using segarecomp_cli::run_process;
+using segarecomp_cli::self_executable;
+using segarecomp_cli::SetBuild;
 bool write_atomic(const fs::path &out, std::span<const std::uint8_t> bytes);
 std::string slurp(const fs::path &p);
 
@@ -621,6 +626,7 @@ int run_session(const fs::path &target, const fs::path &rom, std::uint64_t frame
 }
 
 // ---- mod sets (SEG-141, ADR 0326) ----
+int set_usage();
 std::string violations_json(const std::vector<mod::SetViolation> &violations) {
   std::string o = "[";
   for (std::size_t i = 0; i < violations.size(); ++i)
@@ -812,17 +818,132 @@ int set_variant(const fs::path &library, const std::string &name, const fs::path
   return 0;
 }
 
+// `mod set build`: the program of the ordered set. The members are project folders or package files (IN SET ORDER), or a stored definition (--library --name). Every refusal that does not need a compiler is
+// reported here, as `mod set check` reports it (class, message, every violation); the program itself is built by the one `segarecomp build` route with the verified packages pinned by identity. Native code is
+// compiled only for an identity the user approved: `--approve <identity>` per native member (a stored set uses the library's recorded approvals).
+struct SetBuildOptions {
+  std::vector<fs::path> targets;
+  std::vector<std::string> approvals;
+  std::string library, name, cc, sdk, out;
+  fs::path rom;
+  std::vector<std::string> passthrough;   // --sdl3-include, --sdl3-lib, --optimize, --runtime-optimize, --jobs
+};
+
+int set_build(const SetBuildOptions &o) {
+  std::vector<mod::Package> packages;
+  std::vector<std::vector<std::uint8_t>> archives;
+  std::vector<std::string> approvals = o.approvals;
+  if (!o.library.empty()) {
+    mod::SetDefinition definition;
+    if (const auto r = load_definition(o.library, o.name, definition)) return refuse(*r);
+    if (const auto r = load_members(o.library, definition, packages, archives)) return refuse(*r);
+    for (const mod::Package &p : packages)
+      if (slurp(fs::path(o.library) / "mods" / (p.identity + ".approved")) == p.identity + "\n") approvals.push_back(p.identity);
+  } else {
+    if (o.targets.size() > mod::kMaxSetMembers) return refuse_set({{"E_SET_SIZE", {}, "a mod set holds 1 to 16 mods"}});
+    for (const fs::path &target : o.targets) {
+      std::error_code ec;
+      mod::Package p;
+      std::vector<std::uint8_t> bytes;
+      if (fs::is_directory(target, ec)) {
+        mod::Checked c = mod::check_project(target);
+        if (!c.ok) return refuse({c.rejection.code, target.filename().string() + ": " + c.rejection.message});
+        p = std::move(c.reread);
+        bytes = std::move(c.package);
+      } else {
+        if (!read_all(target, mod::kMaxArchiveBytes, bytes)) return refuse({"E_ARCHIVE_ENTRY", target.filename().string() + ": the package cannot be read"});
+        p = mod::read_package(bytes);
+        if (!p.ok) return refuse({p.rejection.code, target.filename().string() + ": " + p.rejection.message});
+      }
+      if (const auto r = mod::check_guest_admission(p.manifest, p.files, kAdmit)) return refuse({r->code, target.filename().string() + ": " + r->message});
+      packages.push_back(std::move(p));
+      archives.push_back(std::move(bytes));
+    }
+  }
+  if (const std::vector<mod::SetViolation> violations = relations_of(packages); !violations.empty()) return refuse_set(violations);
+  for (const mod::Package &p : packages)
+    if (mod::trust_class(p.manifest) == "native" && std::find(approvals.begin(), approvals.end(), p.identity) == approvals.end())
+      return refuse_set({{"E_NOT_APPROVED", {p.manifest.id}, "the mod \"" + p.manifest.id + "\" carries native code and needs the approval of its exact identity (--approve " + p.identity + ")"}});
+  std::vector<std::uint8_t> image;
+  if (!read_all(o.rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
+  std::vector<fs::path> inputs = o.targets;
+  inputs.push_back(o.rom);
+  if (const auto g = output_clobbers_input(o.out, inputs)) return refuse(*g);
+  const fs::path out(o.out);
+  const fs::path stage = out / "set-members";
+  std::error_code ec;
+  fs::remove_all(stage, ec);
+  fs::create_directories(stage, ec);
+  std::vector<fs::path> files;
+  std::vector<std::string> identities;
+  for (std::size_t i = 0; i < packages.size(); ++i) {
+    files.push_back(stage / (std::to_string(i) + ".segapatch"));
+    identities.push_back(packages[i].identity);
+    if (ec || !write_atomic(files.back(), archives[i])) return refuse({"E_ARCHIVE_ENTRY", "the build folder cannot be written"});
+  }
+  const SetBuild prepared = prepare_mod_set(files, identities, image);   // everything that can be refused before a compiler runs
+  if (!prepared.ok) return refuse_set(prepared.violations);
+  const fs::path runtime = fs::path(o.sdk) / prepared.platform;
+  std::vector<std::string> argv{self_executable().string(), "build", "--rom", o.rom.string(), "--output", o.out, "--cc", o.cc, "--runtime-dir", runtime.string()};
+  for (std::size_t i = 0; i < files.size(); ++i) argv.insert(argv.end(), {"--set-package", files[i].string(), "--set-identity", identities[i]});
+  argv.insert(argv.end(), o.passthrough.begin(), o.passthrough.end());
+  const fs::path log = out / "set-build.log";
+  const int rc = run_process(argv, log, {}, 3600);
+  const std::string status = slurp(out / "status.json");
+  if (rc != 0) {
+    const auto field = [&](const std::string &key) {
+      const std::string k = "\"" + key + "\":\"";
+      const std::size_t at = status.find(k);
+      return at == std::string::npos ? std::string() : status.substr(at + k.size(), status.find('"', at + k.size()) - at - k.size());
+    };
+    const std::string klass = field("diagnostic"), message = field("message");
+    return refuse({klass.empty() ? "E_BUILD_FAILED" : klass, message.empty() ? "the program did not build (see " + log.string() + ")" : message});
+  }
+  fs::remove_all(stage, ec);
+#if defined(_WIN32)
+  const fs::path executable = out / "game.exe";
+#else
+  const fs::path executable = out / "game";
+#endif
+  std::cout << "{\"ok\":true,\"platform\":\"" << prepared.platform << "\",\"set_identity\":\"" << prepared.identity << "\",\"effective_sha256\":\"" << prepared.effective_sha256 << "\",\"running\":" << prepared.runtime.size()
+            << ",\"members\":" << members_json(packages) << ",\"executable\":\"" << esc(executable.generic_string()) << "\"}\n";
+  return 0;
+}
+
+int set_build_command(int argc, char **argv) {
+  SetBuildOptions o;
+  for (int i = 4; i < argc; ++i) {
+    const std::string_view a = argv[i];
+    if (a.substr(0, 2) != "--") { o.targets.emplace_back(std::string(a)); continue; }
+    if (i + 1 >= argc) return set_usage();
+    const std::string value = argv[++i];
+    std::string *once = a == "--name" ? &o.name : a == "--cc" ? &o.cc : a == "--library" ? &o.library : a == "--out" ? &o.out : a == "--sdk-dir" ? &o.sdk : nullptr;
+    if (once != nullptr) { if (!once->empty()) return set_usage(); *once = value; }
+    else if (a == "--rom") { if (!o.rom.empty()) return set_usage(); o.rom = value; }
+    else if (a == "--approve") o.approvals.push_back(value);
+    else if (a == "--sdl3-include" || a == "--sdl3-lib" || a == "--optimize" || a == "--runtime-optimize" || a == "--jobs" || a == "--test-frame-seam") o.passthrough.insert(o.passthrough.end(), {std::string(a), value});
+    else return set_usage();
+  }
+  const bool stored = !o.library.empty() || !o.name.empty();
+  if (o.rom.empty() || o.out.empty() || o.cc.empty() || o.sdk.empty() || (stored ? o.library.empty() || o.name.empty() || !o.targets.empty() : o.targets.empty())) return set_usage();
+  if (stored && !mod::set_name_ok(o.name)) return refuse({"E_FIELD_VALUE", "a mod set name is lower-case a-z 0-9 with single dashes, at most 64 characters"});
+  return set_build(o);
+}
+
 int set_usage() {
   std::cerr << "usage: segarecomp mod set check <dir|package.segapatch>... [--rom <original-image>]   (members in set order)\n"
                "       segarecomp mod set apply <dir|package.segapatch>... --rom <original-image> --out <composed-image>\n"
                "       segarecomp mod set save --library <dir> --name <set-name> --identity <package-identity>...   (installed packages, in set order)\n"
                "       segarecomp mod set show --library <dir> --name <set-name>\n"
-               "       segarecomp mod set variant --library <dir> --name <set-name> --rom <original-image> [--cc <compiler> --sdk-dir <platforms-dir>]\n";
+               "       segarecomp mod set variant --library <dir> --name <set-name> --rom <original-image> [--cc <compiler> --sdk-dir <platforms-dir>]\n"
+               "       segarecomp mod set build (<dir|package.segapatch>... | --library <dir> --name <set-name>) --rom <original-image> --out <build-dir> --cc <compiler> --sdk-dir <platforms-dir>\n"
+               "                 [--approve <package-identity>]... [--sdl3-include <dir> --sdl3-lib <dir>] [--optimize 0|1|2] [--runtime-optimize 0|1|2] [--jobs <n>]\n";
   return 2;
 }
 
 int set_command(int argc, char **argv) {
   const std::string_view verb = argc >= 4 ? argv[3] : "";
+  if (verb == "build") return set_build_command(argc, argv);
   std::vector<fs::path> targets, roms;
   std::vector<std::string> identities;
   std::string name, cc, library, out, sdk;
@@ -873,7 +994,7 @@ int usage() {
                "       segarecomp mod bps <dir|package.segapatch> --rom <original-image> --out <patch.bps>\n"
                "       segarecomp mod verify-bps <dir|package.segapatch> --rom <original-image> --bps <patch.bps>\n"
                "       segarecomp mod import-hints <dir> --revision <label> --from <hint-file>\n"
-               "       segarecomp mod set <check|apply|save|show|variant> ...   (ordered mod sets; `segarecomp mod set` prints the forms)\n"
+               "       segarecomp mod set <check|apply|save|show|variant|build> ...   (ordered mod sets; `segarecomp mod set` prints the forms)\n"
                "       segarecomp mod api [--declarations]\n"
                "       segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <last-frame.bmp>]   (DIAGNOSTIC: synthetic picture, not the Genesis machine)\n";
   return 2;
