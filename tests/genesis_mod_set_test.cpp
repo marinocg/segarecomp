@@ -171,6 +171,9 @@ struct Rig {
   const char *rejection = "";
   uint32_t bad_member = 0;
   int result = -1;
+  uint64_t extra_required_first = 0;   // member 0 additionally requires these capabilities
+  bool second_without_input = false;
+  SegaGenesisVdpHelpers helpers{};
   // `digits` are the members in composite order. `identity_byte` stands for the composite identity.
   void attach(const std::vector<Mod> &spec, uint8_t identity_byte = 7, uint32_t mask = kAllPhases, const std::vector<GenesisHookSiteInfo> *sites = nullptr, const std::vector<std::vector<GenesisModHookBinding>> *bindings = nullptr,
               const std::vector<std::vector<GenesisModHookScope>> *scoped = nullptr) {
@@ -189,7 +192,9 @@ struct Rig {
       c.provider = &provider;
       c.provider_state = mods.back().get();
       c.phase_mask = mask;
-      c.required[0] = kCaps;
+      c.required[0] = kCaps | (i == 0 ? extra_required_first : 0U);
+      if (i == 0 && extra_required_first != 0U) c.vdp_helpers = &helpers;
+      if (i == 1 && second_without_input) c.phase_mask &= ~bit(SEGA_MOD_PHASE_INPUT);
       c.ranges = kRanges;
       c.range_count = 1U;
       c.state_schema = 1U;
@@ -275,6 +280,27 @@ void failure_isolation() {
   r.attach({only});
   run_frames(r.rt, 2U);
   check(r.schedulers[0]->disabled && r.rt.mod_pad_active == 0U && r.rt.d[1] != 0U, "no live input mod: the latch is released");
+}
+
+// A fault at the exact-frame producer seam (outside the set's frame hooks) releases the latch at once when no other live mod has `input`.
+void exact_frame_fault_releases_pad() {
+  for (const bool other_input : {false, true}) {
+    Mod exact = member(1, 3);
+    exact.fault_phase = SEGA_MOD_PHASE_RENDER;
+    Rig r;
+    r.extra_required_first = cap(SEGA_MOD_CAP_FRAME_VDP);
+    r.second_without_input = !other_input;
+    r.attach({exact, member(2, 5)});
+    check(r.result == 0, std::string("attach an exact-frame member: ") + r.rejection);
+    if (r.result != 0) return;
+    run_frames(r.rt, 2U);
+    check(r.rt.mod_pad_active == 1U, "the latch is held before the fault");
+    static uint8_t vram[65536];
+    GenesisModExactFrame frame{};
+    frame.vram = vram;
+    check(genesis_mod_scheduler_present(r.schedulers[0].get(), &frame) == 0 && r.schedulers[0]->disabled, "the exact-frame callback faulted");
+    check(r.rt.mod_pad_active == (other_input ? 1U : 0U), other_input ? "another live input mod keeps the latch" : "the latch is released with the last input mod, immediately");
+  }
 }
 
 void attach_refusals() {
@@ -460,6 +486,7 @@ void overhead() {
 int main() {
   ordering_permutations();
   failure_isolation();
+  exact_frame_fault_releases_pad();
   attach_refusals();
   hooks();
   state();

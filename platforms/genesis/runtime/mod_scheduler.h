@@ -130,6 +130,8 @@ typedef struct GenesisModAudioRow {
   uint32_t kind, offset, width, value;
 } GenesisModAudioRow;
 
+struct GenesisModSet;
+
 typedef struct GenesisModScheduler {
   /* ---- fixed after attach ---- */
   GenesisModConfig config;
@@ -146,6 +148,7 @@ typedef struct GenesisModScheduler {
   char fault_cause_store[32]; /* backing storage of fault.cause after a restore (the live value otherwise points at a static string) */
   /* ---- session ---- */
   uint8_t started, disabled;
+  struct GenesisModSet *set_owner; /* the set of a member (NULL for a single mod) */
   uint8_t in_set; /* SEG-141-T003: a member of a GenesisModSet. The set owns the runtime hooks and the pad latch; the member keeps everything else (grants, ranges, staged effects, fault, witness, state). */
   uint64_t callbacks_run;
   struct {

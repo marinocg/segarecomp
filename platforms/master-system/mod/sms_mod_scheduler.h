@@ -127,7 +127,7 @@ void sms_mod_fault_current(const char *cause);
 void sms_mod_scheduler_state(SmsModScheduler *s, SmsModState *out);
 
 /*
- * SEG-141-T007 (ADR 0327): several mods on ONE Master System machine, with the SAME ordering, input-chain, isolation and combined-state rules as the Genesis set (there are no function hooks here). Every
+ * SEG-141-T007 (ADR 0327): several mods on ONE Master System machine, with the ordering, input-chain, isolation and combined-state rules of ADR 0327 (there are no function hooks here). Every
  * member is an ordinary SmsModScheduler; the set owns the machine's frame hooks and the one pad interception. MEMBER INDEX IS THE COMPOSITE ORDER. Each phase runs for all members before the next; a
  * later member observes earlier members' committed writes; `input` chains the pad; a faulted member is disabled alone and the interception is released only when no live member has `input`.
  * `frame_done` is the set's one observer, called after every member's frame-end and render.

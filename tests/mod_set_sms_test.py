@@ -262,6 +262,36 @@ if sys.platform == "linux" and bridge.find_sdl3() is not None:
     _, loaded_report, events, loaded_tags = session(70, "10 2M\n11 2\n", save)
     cli.check(bool(events) and events[0]["event"] == "load" and events[0]["status"] == "ok" and loaded_report is not None and plain is not None and loaded_report["canonical_sha256"] == plain["canonical_sha256"],
               f"a separate process loads the set state and reaches the same canonical state: {events} {loaded_report} {plain}")
+    # data-only sets (no script or native member): the set's identity is still the variant, whatever the environment says (SEG-141-T005)
+    one, two = edit_mod("data-one", 0x31, at=0x6010), edit_mod("data-two", 0x32, at=0x6020)
+    data = {}
+    for name, members_ in (("data-ab", [one, two]), ("data-ba", [two, one])):
+        args, data_out = build_args(members_, name, ())
+        doc_ = ok(f"the played {name} set builds", *args, "--sdl3-include", include, "--sdl3-lib", lib)
+        data[name] = (data_out, doc_.get("set_identity", ""), doc_.get("effective_sha256", ""))
+    cli.check(data["data-ab"][2] == data["data-ba"][2] and data["data-ab"][1] != data["data-ba"][1], "same image, different sets")
+    shared = tmp / "data-saves"
+
+    def data_session(name, script):
+        played_out, _, image = data[name]
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SEGARECOMP_")}
+        env.update(SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SEGARECOMP_VIEWER_SETTINGS=str(work / "viewer-settings.cfg"), LD_LIBRARY_PATH=lib + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""),
+                   SEGARECOMP_SAVE_DIR=str(shared), SEGARECOMP_ROM_SHA256=image, SEGARECOMP_SAVE_VARIANT="f" * 64)
+        (work / "pad.txt").write_text(script)
+        env["SEGARECOMP_VIEWER_PAD_SCRIPT"] = str(work / "pad.txt")
+        p = subprocess.run([str(played_out / "game"), "--viewer-unthrottled", "--viewer-mute", "--viewer-frames", "70"], text=True, capture_output=True, env=env, timeout=180)
+        return [json.loads(x.split(" ", 1)[1]) for x in p.stderr.splitlines() if x.startswith("VIEWER_STATE ")], p.stderr
+
+    events, log = data_session("data-ab", "30 K\n31 -\n")
+    slot = shared / "sets" / data["data-ab"][1] / "states" / "quick.sgstate"
+    cli.check(bool(events) and events[0]["status"] == "ok" and slot.is_file() and slot.read_bytes()[64:96] == bytes.fromhex(data["data-ab"][1]), f"a data-only set records its own identity: {events} {log[-500:]}")
+    other_slot = shared / "sets" / data["data-ba"][1] / "states" / "quick.sgstate"
+    other_slot.parent.mkdir(parents=True, exist_ok=True)
+    other_slot.write_bytes(slot.read_bytes() if slot.is_file() else b"")
+    events, _ = data_session("data-ba", "10 M\n11 -\n")
+    cli.check(bool(events) and events[0]["event"] == "load" and events[0]["status"] == "failed", f"another data-only set rejects the copied state: {events}")
+    events, _ = data_session("data-ab", "10 M\n11 -\n")
+    cli.check(bool(events) and events[0]["status"] == "ok", f"the same data-only set loads it: {events}")
     print("mod_set_sms_test: SDL3 viewer section ran")
 
 shutil.rmtree(tmp, ignore_errors=True)

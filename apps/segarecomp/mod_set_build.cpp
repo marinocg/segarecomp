@@ -162,6 +162,8 @@ SetBuild prepare_mod_set(const std::vector<fs::path> &packages, const std::vecto
     if (!compiled.ok) return refused(out, compiled.rejection.code, "the mod " + named(p) + ": " + compiled.rejection.message);
     alone.push_back(mod::variant_identity(p, composition.original_sha256, composition.member_effective[i], compiled.compiled.empty() ? std::string_view{} : std::string_view(compiled.compiled.digest())));
     if (trust == "data") {
+      if (!mod::geometry_declaration_text(p.manifest).empty())
+        return refused(out, "E_SET_GEOMETRY_UNSUPPORTED", "the mod " + named(p) + " is data-only and declares a geometry, which a built set does not apply; declare it in the mod that draws");
       if (p.manifest.has_hooks) return refused(out, "E_HOOK_CALLBACK_UNSUPPORTED", "the mod " + named(p) + " declares function hooks but has no native provider");
       continue;
     }
@@ -211,9 +213,17 @@ SetBuild prepare_mod_set(const std::vector<fs::path> &packages, const std::vecto
 
 bool stage_set_sources(SetBuild &set, const fs::path &dir) {
   std::error_code ec;
-  fs::remove_all(dir, ec);
+  // `dir` is rebuilt from scratch, but only when an earlier set build of this output created it (it carries the marker) or it does not exist. Any other folder of that name belongs to the user and is refused.
+  constexpr const char *kMarker = ".segarecomp-set-staging";
+  if (fs::symlink_status(dir, ec).type() != fs::file_type::not_found) {
+    if (!fs::is_directory(fs::symlink_status(dir, ec)) || !fs::is_regular_file(fs::symlink_status(dir / kMarker, ec))) return false;
+    fs::remove_all(dir, ec);
+    if (ec) return false;
+  }
+  ec.clear();
   fs::create_directories(dir, ec);
   if (ec) return false;
+  if (!(std::ofstream(dir / kMarker, std::ios::binary) << "segarecomp set build staging\n")) return false;
   for (SetRuntimeMember &r : set.runtime) {
     if (!r.native) continue;
     const mod::Package &p = set.packages[r.index];

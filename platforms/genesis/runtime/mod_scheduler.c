@@ -603,6 +603,8 @@ static void hook_after_snapshot(void *ctx, GenesisRuntime *rt) {
   open_frame(s, rt);
 }
 
+static void set_release_pad(GenesisModSet *set);
+
 int genesis_mod_scheduler_present(GenesisModScheduler *s, const GenesisModExactFrame *f) {
   uint32_t lines;
   if (s == NULL || f == NULL || !s->exact_frame || s->disabled || s->runtime == NULL || s->in_callback || (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_RENDER)) == 0U) return 0;
@@ -633,6 +635,7 @@ int genesis_mod_scheduler_present(GenesisModScheduler *s, const GenesisModExactF
   s->audio_observed_valid = 0U;
   s->features.frame = NULL;
   s->render_copy_valid = 0U;
+  if (s->disabled && s->set_owner != NULL) set_release_pad(s->set_owner); /* this seam is outside the set's frame hooks: the latch follows the fault at once, as in a single-mod program */
   return s->disabled ? 0 : 1;
 }
 
@@ -1335,6 +1338,7 @@ int genesis_mod_set_attach(GenesisModSet *set, GenesisRuntime *rt, GenesisModSch
     rt->frame_hooks = NULL; /* the set installs its own once every member is accepted */
     rt->function_hooks = NULL;
     s->in_set = 1U;
+    s->set_owner = set;
     set->members[set->count++] = s;
     for (j = 0; j < i; ++j)
       if (strcmp(set->members[j]->config.mod_id, s->config.mod_id) == 0) {

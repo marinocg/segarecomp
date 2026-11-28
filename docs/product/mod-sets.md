@@ -21,7 +21,8 @@ segarecomp mod set build (<dir|package.segapatch>... | --library <dir> --name <s
 | Rule | Refusal |
 | --- | --- |
 | Members: typed edits, injected code, a BPS under the composition rules, Luau scripts, native ABI 2 providers; any number of each | each member's own class |
-| At most **one** member draws (overlay, virtual sprites, scenery, exact frame, Master System picture transforms, or a geometry declaration) | `E_SET_PRESENTATION_CONFLICT` |
+| At most **one** member draws (overlay, virtual sprites, scenery, exact frame, Master System picture transforms, or a geometry declaration of a script or native member) | `E_SET_PRESENTATION_CONFLICT` |
+| A data-only member declares no geometry (a built set would not apply it) | `E_SET_GEOMETRY_UNSUPPORTED` |
 | No member uses the audio API (`audio.command.send`, `audio.event.read`) | `E_SET_AUDIO_UNSUPPORTED` |
 | Native members must not define the same external symbol (make helpers `static`) | `E_SET_NATIVE_LINK` |
 | Function hooks (Genesis native only): a replaced function has one owner; `before`/`after` hooks may share it, with the same anchor | `E_SET_HOOK_OWNER`, `E_SET_HOOK_ANCHOR` |

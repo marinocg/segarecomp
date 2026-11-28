@@ -262,6 +262,26 @@ cli.check(doc_rev.get("set_identity") != doc.get("set_identity") and doc_rev.get
 reordered, reordered_frames = observation(out_rev, PAD)
 cli.check([m["mod"] for m in reordered["members"]] == ["watcher", "assist", "gameplay-example"] and reordered_frames.get("final_work_ram_sha256") == first_frames.get("final_work_ram_sha256"), f"the reordered set reaches the same guest state: {reordered}")
 
+# ---------------------------------------------------------------- the build never deletes a folder it did not create
+victim = tmp / "build-keeps-user-files"
+write(victim / "set-members" / "keep.txt", b"user data")
+args, _ = build("keeps user files", [watcher], name="keeps-user-files")
+ok("a user folder named set-members is left alone", *args)
+cli.check((victim / "set-members" / "keep.txt").read_bytes() == b"user data" and not list(victim.glob(".set-members-*")), "the user's set-members folder survives and this build's staging is gone")
+ok("rebuilding into the same folder reuses its own marked staging", *args)
+occupied = tmp / "build-occupied"
+write(occupied / "set-mod" / "keep.txt", b"user data")
+args, _ = build("occupied", [watcher], name="occupied")
+refused("a user folder named set-mod is refused, not deleted", "E_SET_ARTIFACT_WRITE", *args)
+cli.check(sorted(p.name for p in (occupied / "set-mod").iterdir()) == ["keep.txt"] and not (occupied / "game").exists(), "the user's set-mod folder is untouched")
+
+# one native MOD with an unresolved symbol is an ordinary link failure, not a collision between two mods
+broken = native_mod("broken-link", ASSIST.replace('"assist"', '"broken-link"') + "\nextern int set_missing_symbol(void);\nint set_use_missing(void) { return set_missing_symbol(); }\n",
+                    ["input.intercept", "input.read", "memory.write.m68k.work_ram", "state.mod"], "\n[state]\nschema = 1\n" + memory(0x46, 2))
+args, out_x = build("an unresolved symbol", [broken, assist], name="broken-link", approve=(identity(broken), ids["assist"]))
+rc, link_doc, _ = cli.run(*args)
+cli.check(rc == 1 and link_doc and link_doc.get("class") != "E_SET_NATIVE_LINK" and not (out_x / "game").exists(), f"an unresolved symbol is not reported as a collision: {link_doc}")
+
 # ---------------------------------------------------------------- state: round trip inside the set; loads only into the same set
 state_file = tmp / "set.state"
 saved, saved_frames = observation(out, PAD, {"SEGARECOMP_MOD_CHECKPOINT": "12", "SEGARECOMP_MOD_SAVE": str(state_file)})

@@ -15,7 +15,7 @@
 ## Built programs (SEG-141-T006)
 
 7. `segarecomp build --set-package <p> --set-identity <id>...` (and `segarecomp mod set build`, which runs the same preparation first so every refusal that needs no compiler is reported like `mod set check`) verifies the pinned packages once, runs the F19 composition, compiles the composed image, and links one generated member table. The program's identity is the F19 composite key (equal to `mod set variant`'s). Each native member is compiled with the host's strict flags, its own ABI minor and include tree, and its entry symbol renamed per member; there is no symbol localisation, so two members that define the same external symbol do not link (`E_SET_NATIVE_LINK`).
-8. **Supported combinations are explicit; everything else fails closed.** One member at most may have presentation output or a geometry declaration (`E_SET_PRESENTATION_CONFLICT`): composing two mods' pictures is not defined. The audio API is refused in sets (`E_SET_AUDIO_UNSUPPORTED`): the sound gate and mapping identity are single-mod. Sega CD sets of more than one mod are refused by the engine's relation check (`E_SET_PLATFORM_UNSUPPORTED`); disc packages are still reserved in schema 3, so this rule is exercised at engine level only.
+8. **Supported combinations are explicit; everything else fails closed.** One script or native member at most may have presentation output or a geometry declaration (`E_SET_PRESENTATION_CONFLICT`): composing two mods' pictures is not defined. A data-only member that declares a geometry is refused (`E_SET_GEOMETRY_UNSUPPORTED`) rather than dropped. The audio API is refused in sets (`E_SET_AUDIO_UNSUPPORTED`): the sound gate and mapping identity are single-mod. Sega CD sets of more than one mod are refused by the engine's relation check (`E_SET_PLATFORM_UNSUPPORTED`); disc packages are still reserved in schema 3, so this rule is exercised at engine level only.
 9. Runtime memory writes of different mods are not arbitrated (order decides). Disjoint bytes and a successful build do not prove that mods work together.
 
 ## Settings and saves (SEG-141-T005)
@@ -25,7 +25,9 @@
 
 ## Diagnostics
 
-12. Every composition and set-build class has a pinned exact diagnostic (`tests/data/mod_set_diagnostics.json`) except `E_SET_NATIVE_LINK` (class tested with a real link), `E_SET_PLATFORM_UNSUPPORTED` (engine test), and `E_SET_HOOK_SITE_ID` and `E_SET_ARTIFACT_WRITE` (not exercised). The launcher has its own plain-language text per class (`mod_set_class_text`), used by its set store/verify errors. It has **no mod-set screen**.
+12. `tests/data/mod_set_diagnostics.json` pins the exact diagnostic of the composition, definition and set-build classes that a test can produce without a compiler, including the member-verification and hook/range classes. Not pinned there: `E_SET_NATIVE_LINK` (message pinned in the build test with a real link), `E_SET_PLATFORM_UNSUPPORTED` (pinned in the engine test), and `E_SET_HOOK_SITE_ID` and `E_SET_ARTIFACT_WRITE` (the first is not exercised; the second is checked by class only). A member's own package, edit and compile classes are the single-mod ones and are covered by the single-mod tests. The launcher has its own plain-language text for the set classes (`mod_set_class_text`), used by its set store/verify errors. It has **no mod-set screen**.
+13. `mod set build` always compiles: it reuses nothing but the identity. "The same set reuses the build" means, as in ADR 0289/0326, the validated variant record of `mod set variant`, keyed by the same identity.
+14. A build removes only folders it created: the member staging is a fresh folder per run, and `<out>/set-mod` is replaced only when an earlier set build marked it.
 
 ## Dispatch overhead
 

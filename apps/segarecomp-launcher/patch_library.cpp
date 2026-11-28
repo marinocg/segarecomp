@@ -249,6 +249,7 @@ ModSetClassText mod_set_class_text(const std::string &code) {
       {"E_HEADER_FIELD_COLLISION", {"A header repair would discard a mod's change", "Remove one of the two."}},
       {"E_EDIT_EXPECTED_MISMATCH", {"A mod does not fit the original game", "A mod cannot depend on bytes another mod writes. Remove it or choose a matching version."}},
       {"E_SET_PRESENTATION_CONFLICT", {"Two mods draw on the screen", "Keep one mod that draws (overlay, scenery or picture changes)."}},
+      {"E_SET_GEOMETRY_UNSUPPORTED", {"A data mod's screen claim cannot be combined", "Use that mod on its own, or choose a version without a geometry declaration."}},
       {"E_SET_AUDIO_UNSUPPORTED", {"A mod's sound features cannot be combined yet", "Use that mod on its own."}},
       {"E_SET_NATIVE_LINK", {"Two native mods cannot be built together", "Remove one of them, or ask their authors to make internal names private."}},
       {"E_NOT_APPROVED", {"A mod with executable code is not approved", "Install it again and approve it, or remove it from the set."}},

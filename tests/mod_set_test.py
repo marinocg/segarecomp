@@ -9,6 +9,7 @@ import json
 import os
 import re
 import struct
+import subprocess
 import sys
 import zipfile
 
@@ -103,7 +104,7 @@ def refused(what, code, *args, says=(), mods=None):
     rc, doc, p = cli.run(*args)
     cli.check(rc == 1 and doc and doc.get("ok") is False and doc.get("class") == code, f"{what}: expected {code}, got rc={rc} {doc and (doc.get('class'), doc.get('error'))} {p.stderr[-300:]}")
     doc = doc or {}
-    if code.startswith(("E_SET_", "E_HEADER_FIELD", "E_EDIT_EXPECTED", "E_NOT_APPROVED")):
+    if code.startswith(("E_SET_", "E_HEADER_FIELD", "E_EDIT_EXPECTED", "E_NOT_APPROVED")) or (list(args[:2]) == ["mod", "set"] and code in ("E_PACKAGE_CHANGED", "E_PLATFORM_UNKNOWN", "E_RANGE_DECLARATION", "E_MEMORY_RANGE", "E_HOOK_REVISION", "E_HOOK_COUNT", "E_HOOK_CALLBACK_UNSUPPORTED")):
         GOLDEN.setdefault(code, []).append(normalised({"case": what, "class": doc.get("class"), "error": doc.get("error"), "violations": doc.get("violations", [])}))
     for word in says:
         cli.check(word in doc.get("error", ""), f"{what}: the diagnostic says {word!r}: {doc.get('error')}")
@@ -596,6 +597,59 @@ plain_hook = project("hook-plain", native=True, hooks=HOOK, symbols=(("fn", "0x0
 anchored = project("hook-anchored", native=True, hooks=HOOK + 'anchor = "other"\n', symbols=(("fn", "0x00000600"), ("other", "0x00000700")))
 build_refused("hooked functions declared with different anchors", "E_SET_HOOK_ANCHOR", [plain_hook, anchored], identity_of(plain_hook), identity_of(anchored))
 build_refused("a composition refusal reads the same from build", "E_SET_BPS_CONFLICT", [bps_a, edit_a])
+geometry = project("wide-data", edits=f"rev-a u8 0x00000710 0x{ROM[0x710]:02x} 0x00\n", extra='\n[geometry]\naspect_max = "16:9"\n')
+build_refused("a data-only geometry claim is refused, never dropped", "E_SET_GEOMETRY_UNSUPPORTED", [geometry, code_c])
+
+
+def two_revisions(d, extra):
+    """The project with a second declared revision `rev-b` and `extra` appended."""
+    toml = d / "mod.toml"
+    write(toml, (toml.read_text() + f'\n[[target.revision]]\nlabel = "rev-b"\nsha256 = "{sha(OTHER)}"\n' + extra).encode())
+    return d
+
+
+def with_caps(d, caps):
+    toml = d / "mod.toml"
+    write(toml, toml.read_text().replace('required = ["host.log"]', f"required = [{caps}]").encode())
+    return d
+
+
+script_hook = project("script-hook", luau=True, extra=HOOK, symbols=(("fn", "0x00000600"),))
+build_refused("a script hook has no callback", "E_HOOK_CALLBACK_UNSUPPORTED", [edit_a, with_caps(script_hook, '"hook.function", "host.log"')])
+elsewhere_range = two_revisions(with_caps(project("range-elsewhere", luau=True), '"host.log", "memory.write.m68k.work_ram"'),
+                                '\n[[memory]]\nrevision = "rev-b"\nspace = "m68k.work_ram"\noffset = 16\nlength = 2\naccess = "write"\n')
+build_refused("a memory capability without a range for this revision", "E_RANGE_DECLARATION", [edit_a, elsewhere_range])
+rom_reader = project("rom-reader", native=True)
+write(rom_reader / "mod.toml", ((rom_reader / "mod.toml").read_text() + '\n[capabilities]\nrequired = ["memory.read.m68k.rom"]\n\n[[memory]]\nrevision = "rev-a"\nspace = "m68k.rom"\noffset = 8176\nlength = 64\naccess = "read"\n').encode())
+build_refused("a ROM range beyond the composed image", "E_MEMORY_RANGE", [edit_a, rom_reader], identity_of(rom_reader))
+other_hook = two_revisions(project("hook-elsewhere", native=True, hooks=HOOK.replace('id = "watch"', 'id = "watch"\nrevision = "rev-b"'), symbols=(("fn", "0x00000600"),)),
+                           '\n[[symbol]]\nname = "fn"\nrevision = "rev-b"\naddress = "0x00000600"\nprovenance = "verified"\n')
+build_refused("hooks that apply to no function of this revision", "E_HOOK_REVISION", [edit_a, other_hook], identity_of(other_hook))
+
+
+def many_hooks(mod_id, base):
+    names = [(f"fn{i}", f"0x{base + 4 * i:08x}") for i in range(40)]
+    return project(mod_id, native=True, hooks="".join(f'\n[[hook]]\nid = "{mod_id}-{i:02d}"\nsymbol = "fn{i}"\nmode = "before"\nreads = ["d0"]\n' for i in range(40)), symbols=names)
+
+
+crowd = [many_hooks("crowd-a", 0x400), many_hooks("crowd-b", 0x600)]
+build_refused("more than 64 hooked functions across a set", "E_HOOK_COUNT", crowd, identity_of(crowd[0]), identity_of(crowd[1]))
+
+
+def direct_build_refused(what, code, package, identity):
+    """The two member-verification refusals only `segarecomp build --set-package` can reach (mod set build pins what it just read)."""
+    out = tmp / ("direct-" + code)
+    p = subprocess.run([sys.argv[1], "build", "--rom", str(ROM_PATH), "--output", str(out), "--cc", CC, "--runtime-dir", str(Path(PLATFORMS) / "genesis"), "--set-package", str(package), "--set-identity", identity],
+                       text=True, capture_output=True, timeout=600)
+    status = json.loads((out / "status.json").read_text()) if (out / "status.json").is_file() else {}
+    cli.check(p.returncode != 0 and status.get("diagnostic") == code and not (out / "game").exists(), f"{what}: expected {code}, got {status}")
+    GOLDEN.setdefault(code + " (build)", []).append(normalised({"case": what, "diagnostic": status.get("diagnostic"), "message": status.get("message")}))
+
+
+packed_edit = tmp / "direct-member.segapatch"
+ok("pack the direct member", "mod", "pack", edit_a, "--out", packed_edit)
+direct_build_refused("a member that is not the pinned package", "E_PACKAGE_CHANGED", packed_edit, "0" * 64)
+direct_build_refused("a member that cannot be read", "E_ARCHIVE_ENTRY", tmp / "no-such.segapatch", "0" * 64)
 
 if os.environ.get("SEGARECOMP_UPDATE_GOLDEN") == "1":
     write(GOLDEN_PATH, (json.dumps(GOLDEN, indent=1, sort_keys=True) + "\n").encode())

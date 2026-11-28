@@ -337,6 +337,16 @@ std::optional<Options> parse_options(int argc, char **argv) {
   return options;
 }
 
+// ADR 0327: E_SET_NATIVE_LINK names ONE cause: two native members define the same symbol. Any other link failure keeps the ordinary diagnostic.
+bool set_symbol_collision(const Options &options, const fs::path &link_log) {
+  std::set<std::size_t> native_members;
+  for (const auto &unit : options.set_units) native_members.insert(unit.member);
+  if (!options.mod_set || native_members.size() < 2U) return false;
+  std::ifstream in(link_log, std::ios::binary);
+  const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  return text.find("multiple definition") != std::string::npos || text.find("duplicate symbol") != std::string::npos || text.find("already defined") != std::string::npos;
+}
+
 // Runs every compile job with a small worker pool; returns the first failing job index or -1.
 struct JobTiming { bool started = false; double wall_ms = 0; segarecomp_cli::ProcessUsage usage; };
 
@@ -1821,7 +1831,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
 #endif
   build.cxx_link = options.luau || options.native_mod || options.mod_set;
   if (!build.link(executable, objects, build.play))
-    return options.mod_set && options.set_units.size() > 1
+    return set_symbol_collision(options, build.object_dir / (executable.filename().string() + ".link.log"))
                ? fail(options, log, sha, "link", 3, "The mod set program could not be linked: two native mods may define the same external symbol (see build.log).", "E_SET_NATIVE_LINK")
                : fail(options, log, sha, "link", 3, "The native program could not be linked.");
   const std::uint64_t exe_bytes = fs::file_size(executable, ec);
@@ -2073,7 +2083,8 @@ std::optional<SmsModRefusal> prepare_set_route(Options &options, Log &log, const
     if (r.native && std::find(r.granted.begin(), r.granted.end(), "frame.vdp") != r.granted.end() && set.packages[r.index].manifest.abi_minor < (sms_set ? 0U : 1U))
       return SmsModRefusal{"A package that requires frame.vdp must declare abi.minor 1.", "E_CAPABILITY_INCONSISTENT"};
   const fs::path dir = options.output / "set-mod";
-  if (!segarecomp_cli::stage_set_sources(set, dir)) return SmsModRefusal{"The native sources could not be staged.", "E_SET_ARTIFACT_WRITE"};
+  if (!segarecomp_cli::stage_set_sources(set, dir))
+    return SmsModRefusal{"The native sources could not be staged: the output folder may already hold a set-mod folder this build did not create (it is never deleted), or it cannot be written.", "E_SET_ARTIFACT_WRITE"};
   options.mod_set = true;
   options.set_units.clear();
   options.native_mod_units.clear();
@@ -2781,7 +2792,7 @@ int run_build(Options options) {
     log.line("# link target=" + executable.filename().string());
     log.append_file(link_log);
     if (link_rc != 0)
-      return options.mod_set && options.set_units.size() > 1
+      return set_symbol_collision(options, link_log)
                  ? fail(options, log, sha, "link", 3, "The mod set program could not be linked: two native mods may define the same external symbol (see build.log).", "E_SET_NATIVE_LINK")
                  : fail(options, log, sha, "link", 3, "The native program could not be linked.");
     if (g_profile.enabled()) {

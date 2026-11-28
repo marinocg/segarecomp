@@ -870,10 +870,17 @@ int set_build(const SetBuildOptions &o) {
   inputs.push_back(o.rom);
   if (const auto g = output_clobbers_input(o.out, inputs)) return refuse(*g);
   const fs::path out(o.out);
-  const fs::path stage = out / "set-members";
   std::error_code ec;
-  fs::remove_all(stage, ec);
-  fs::create_directories(stage, ec);
+  fs::create_directories(out, ec);
+  // the pinned member copies go into a folder this run CREATES (create_directory is false for an existing one), so only that folder is ever removed: nothing of the user's is touched
+  fs::path stage;
+  std::random_device random;
+  for (int attempt = 0; attempt < 16 && stage.empty(); ++attempt) {
+    const fs::path candidate = out / (".set-members-" + std::to_string(random()));
+    if (fs::create_directory(candidate, ec) && !ec) stage = candidate;
+  }
+  if (stage.empty()) return refuse({"E_ARCHIVE_ENTRY", "the build folder cannot be written"});
+  struct Staging { fs::path dir; ~Staging() { std::error_code e; fs::remove_all(dir, e); } } staging{stage};
   std::vector<fs::path> files;
   std::vector<std::string> identities;
   for (std::size_t i = 0; i < packages.size(); ++i) {
@@ -899,7 +906,6 @@ int set_build(const SetBuildOptions &o) {
     const std::string klass = field("diagnostic"), message = field("message");
     return refuse({klass.empty() ? "E_BUILD_FAILED" : klass, message.empty() ? "the program did not build (see " + log.string() + ")" : message});
   }
-  fs::remove_all(stage, ec);
 #if defined(_WIN32)
   const fs::path executable = out / "game.exe";
 #else

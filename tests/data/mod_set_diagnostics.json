@@ -1,4 +1,11 @@
 {
+ "E_ARCHIVE_ENTRY (build)": [
+  {
+   "case": "a member that cannot be read",
+   "diagnostic": "E_ARCHIVE_ENTRY",
+   "message": "The mod set cannot be built: member 1 of the set cannot be read"
+  }
+ ],
  "E_EDIT_EXPECTED_MISMATCH": [
   {
    "case": "relying on another mod's bytes",
@@ -46,6 +53,62 @@
    ]
   }
  ],
+ "E_HOOK_CALLBACK_UNSUPPORTED": [
+  {
+   "case": "a script hook has no callback",
+   "class": "E_HOOK_CALLBACK_UNSUPPORTED",
+   "error": "the mod \"script-hook\": function hook callbacks are native ABI 2 only; a Luau callback for a hook is not supported",
+   "violations": [
+    {
+     "class": "E_HOOK_CALLBACK_UNSUPPORTED",
+     "message": "the mod \"script-hook\": function hook callbacks are native ABI 2 only; a Luau callback for a hook is not supported",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_HOOK_COUNT": [
+  {
+   "case": "more than 64 hooked functions across a set",
+   "class": "E_HOOK_COUNT",
+   "error": "the set hooks more than 64 functions",
+   "violations": [
+    {
+     "class": "E_HOOK_COUNT",
+     "message": "the set hooks more than 64 functions",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_HOOK_REVISION": [
+  {
+   "case": "hooks that apply to no function of this revision",
+   "class": "E_HOOK_REVISION",
+   "error": "the mod \"hook-elsewhere\" declares function hooks but none applies to this revision",
+   "violations": [
+    {
+     "class": "E_HOOK_REVISION",
+     "message": "the mod \"hook-elsewhere\" declares function hooks but none applies to this revision",
+     "mods": []
+    }
+   ]
+  }
+ ],
+ "E_MEMORY_RANGE": [
+  {
+   "case": "a ROM range beyond the composed image",
+   "class": "E_MEMORY_RANGE",
+   "error": "the mod \"rom-reader\" declares an m68k.rom range outside the composed image",
+   "violations": [
+    {
+     "class": "E_MEMORY_RANGE",
+     "message": "the mod \"rom-reader\" declares an m68k.rom range outside the composed image",
+     "mods": []
+    }
+   ]
+  }
+ ],
  "E_NOT_APPROVED": [
   {
    "case": "a native member without approval",
@@ -64,6 +127,43 @@
      "mods": [
       "needs-approval"
      ]
+    }
+   ]
+  }
+ ],
+ "E_PACKAGE_CHANGED": [
+  {
+   "case": "a replaced installed package",
+   "class": "E_PACKAGE_CHANGED",
+   "error": "the installed package no longer has the identity <digest>",
+   "violations": []
+  }
+ ],
+ "E_PACKAGE_CHANGED (build)": [
+  {
+   "case": "a member that is not the pinned package",
+   "diagnostic": "E_PACKAGE_CHANGED",
+   "message": "The mod set cannot be built: member 1 of the set: the installed package no longer has the identity <digest>"
+  }
+ ],
+ "E_PLATFORM_UNKNOWN": [
+  {
+   "case": "a stored definition: an unknown platform",
+   "class": "E_PLATFORM_UNKNOWN",
+   "error": "the mod set names a platform that has no registered adapter",
+   "violations": []
+  }
+ ],
+ "E_RANGE_DECLARATION": [
+  {
+   "case": "a memory capability without a range for this revision",
+   "class": "E_RANGE_DECLARATION",
+   "error": "the mod \"range-elsewhere\" declares a memory capability but no memory range with that access for this revision",
+   "violations": [
+    {
+     "class": "E_RANGE_DECLARATION",
+     "message": "the mod \"range-elsewhere\" declares a memory capability but no memory range with that access for this revision",
+     "mods": []
     }
    ]
   }
@@ -344,6 +444,20 @@
       "sms-a",
       "sms-b"
      ]
+    }
+   ]
+  }
+ ],
+ "E_SET_GEOMETRY_UNSUPPORTED": [
+  {
+   "case": "a data-only geometry claim is refused, never dropped",
+   "class": "E_SET_GEOMETRY_UNSUPPORTED",
+   "error": "the mod \"wide-data\" is data-only and declares a geometry, which a built set does not apply; declare it in the mod that draws",
+   "violations": [
+    {
+     "class": "E_SET_GEOMETRY_UNSUPPORTED",
+     "message": "the mod \"wide-data\" is data-only and declares a geometry, which a built set does not apply; declare it in the mod that draws",
+     "mods": []
     }
    ]
   }
