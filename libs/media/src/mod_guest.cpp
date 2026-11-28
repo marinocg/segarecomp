@@ -1066,6 +1066,76 @@ std::optional<Rejection> check_guest_asm(const Manifest &m, std::string_view cpu
 
 bool has_target_edits(const Manifest &m) { return payload_of(m, "rom-edit-set") != nullptr || payload_of(m, "guest-asm") != nullptr; }
 
+HeaderRepair repair_header(std::string_view platform, std::string_view policy, std::span<const std::uint8_t> original, std::vector<std::uint8_t> &image, std::span<const Range> authored) {
+  HeaderRepair out;
+  try {
+    // only the documented header of the platform; `none` is an explicit opt-out; absent = repair when the original verifies and the image changed
+    const bool changed = !std::equal(image.begin(), image.end(), original.begin(), original.end());
+    const bool genesis = platform == "genesis", sms = platform == "master-system";
+    const bool original_ok = genesis ? genesis_header_verifies(original) : sms && sms_header_verifies(original);
+    const bool explicit_repair = policy == "genesis-checksum" || policy == "sms-checksum";
+    if ((policy == "genesis-checksum" && !genesis) || (policy == "sms-checksum" && !sms)) fail("E_HEADER_UNSUPPORTED", "the header repair \"" + std::string(policy) + "\" does not exist on " + std::string(platform));
+    const bool repairs_checksum = explicit_repair || (policy.empty() && changed && original_ok);
+    // Header fields the selected policy will rewrite must not also be authored: the repair would silently discard that write (ADR 0293 section 5).
+    const bool repairs_end = policy == "genesis-checksum";
+    for (const Range &a : authored) {
+      if (repairs_checksum && genesis && ((a.start < 0x190 && 0x18E < a.end) || (repairs_end && a.start < 0x1A8 && 0x1A4 < a.end)))
+        fail("E_HEADER_FIELD_COLLISION", "an edit or injected block overlaps a header field that the selected header repair rewrites (checksum 0x18E-0x18F" + std::string(repairs_end ? ", ROM end 0x1A4-0x1A7" : "") + "); declare header_repair = \"none\" to write it yourself");
+      if (repairs_checksum && sms && a.start < 0x7FFC && 0x7FFA < a.end)
+        fail("E_HEADER_FIELD_COLLISION", "an edit or injected block overlaps the header checksum (0x7FFA-0x7FFB) that the selected header repair rewrites; declare header_repair = \"none\" to write it yourself");
+    }
+    const auto write_genesis_checksum = [&] {
+      const std::uint16_t sum = genesis_checksum(image, static_cast<std::uint32_t>(image.size()));
+      image[0x18E] = static_cast<std::uint8_t>(sum >> 8U);
+      image[0x18F] = static_cast<std::uint8_t>(sum);
+      out.repaired = true;
+    };
+    if (policy == "genesis-checksum") {
+      if (image.size() < 0x200 || (image.size() & 1) != 0 || image.size() > 0x400000 || be32(image, 0x1A0) != 0) fail("E_HEADER_UNSUPPORTED", "the image does not carry a supported Genesis header (even size 0x200..4 MiB, ROM start 0)");
+      if (ssf_mapper(original)) fail("E_MAPPER_UNSUPPORTED", "the image uses a bank-switched cartridge mapper; its header cannot be repaired");
+      set_be32(image, 0x1A4, static_cast<std::uint32_t>(image.size() - 1));
+      write_genesis_checksum();
+    } else if (sms && repairs_checksum) {
+      const auto sum = sms_header_checksum(image);
+      if (sum) {
+        image[0x7FFA] = static_cast<std::uint8_t>(*sum);
+        image[0x7FFB] = static_cast<std::uint8_t>(*sum >> 8U);
+        out.repaired = true;
+      } else if (explicit_repair) {
+        fail("E_HEADER_UNSUPPORTED", "the image does not carry a supported Master System header (`TMR SEGA` at 0x7FF0 with a size code whose range lies inside the image)");
+      } else {
+        out.warnings.push_back("W_CHECKSUM_NOT_REPAIRED");   // the mod removed or redefined the header it was relying on
+      }
+    } else if (genesis && repairs_checksum) {
+      write_genesis_checksum();
+    } else if (policy == "none" && changed && original_ok && !(genesis ? genesis_header_verifies(image) : sms_header_verifies(image))) {
+      out.warnings.push_back("W_CHECKSUM_NOT_REPAIRED");
+    }
+    out.ok = true;
+  } catch (const Fail &f) {
+    out.rejection = {f.code, f.message};
+  }
+  return out;
+}
+
+GuestListingResult guest_listing(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, std::string_view revision) {
+  GuestListingResult out;
+  const Payload *gp = payload_of(m, "guest-asm");
+  const auto rev = std::find_if(m.revisions.begin(), m.revisions.end(), [&](const Revision &r) { return r.label == revision; });
+  if (gp == nullptr || rev == m.revisions.end()) { out.rejection = {"E_FIELD_MISSING", "no guest-asm payload for that revision"}; return out; }
+  try {
+    const Cpu cpu = cpu_of(m, gp->cpu);
+    const Source src = parse_source(file_of(files, gp), m);
+    const Assembled a = assemble_revision(m, cpu, src, *rev);
+    for (const OutBlock &b : a.blocks) validate_block(m, cpu, b);
+    out.listing = listing_of(a, *rev);
+    out.ok = true;
+  } catch (const Fail &f) {
+    out.rejection = {f.code, f.message};
+  }
+  return out;
+}
+
 TargetImage build_target_image(const Manifest &m, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original, GuestAdmitter admit) {
   TargetImage out;
   try {
@@ -1112,48 +1182,11 @@ TargetImage build_target_image(const Manifest &m, const std::map<std::string, st
         out.injected_bytes += b.bytes.size();
       }
     }
-    // header repair (ADR 0293, ADR 0324): only the documented header of the platform; `none` is an explicit opt-out; absent = repair when the original verifies and the image changed
-    const bool changed = !std::equal(out.image.begin(), out.image.end(), original.begin(), original.end());
-    const bool genesis = m.platform == "genesis", sms = m.platform == "master-system";
-    const bool original_ok = genesis ? genesis_header_verifies(original) : sms && sms_header_verifies(original);
-    const bool explicit_repair = m.header_repair == "genesis-checksum" || m.header_repair == "sms-checksum";
-    if ((m.header_repair == "genesis-checksum" && !genesis) || (m.header_repair == "sms-checksum" && !sms)) fail("E_HEADER_UNSUPPORTED", "the header repair \"" + m.header_repair + "\" does not exist on " + m.platform);
-    const bool repairs_checksum = explicit_repair || (m.header_repair.empty() && changed && original_ok);
-    // Header fields the selected policy will rewrite must not also be authored: the repair would silently discard that write (ADR 0293 section 5).
-    const bool repairs_end = m.header_repair == "genesis-checksum";
-    for (const Range &a : authored) {
-      if (repairs_checksum && genesis && ((a.start < 0x190 && 0x18E < a.end) || (repairs_end && a.start < 0x1A8 && 0x1A4 < a.end)))
-        fail("E_HEADER_FIELD_COLLISION", "an edit or injected block overlaps a header field that the selected header repair rewrites (checksum 0x18E-0x18F" + std::string(repairs_end ? ", ROM end 0x1A4-0x1A7" : "") + "); declare header_repair = \"none\" to write it yourself");
-      if (repairs_checksum && sms && a.start < 0x7FFC && 0x7FFA < a.end)
-        fail("E_HEADER_FIELD_COLLISION", "an edit or injected block overlaps the header checksum (0x7FFA-0x7FFB) that the selected header repair rewrites; declare header_repair = \"none\" to write it yourself");
-    }
-    const auto write_genesis_checksum = [&] {
-      const std::uint16_t sum = genesis_checksum(out.image, static_cast<std::uint32_t>(out.image.size()));
-      out.image[0x18E] = static_cast<std::uint8_t>(sum >> 8U);
-      out.image[0x18F] = static_cast<std::uint8_t>(sum);
-      out.header_repaired = true;
-    };
-    if (m.header_repair == "genesis-checksum") {
-      if (out.image.size() < 0x200 || (out.image.size() & 1) != 0 || out.image.size() > 0x400000 || be32(out.image, 0x1A0) != 0) fail("E_HEADER_UNSUPPORTED", "the image does not carry a supported Genesis header (even size 0x200..4 MiB, ROM start 0)");
-      if (ssf_mapper(original)) fail("E_MAPPER_UNSUPPORTED", "the image uses a bank-switched cartridge mapper; its header cannot be repaired");
-      set_be32(out.image, 0x1A4, static_cast<std::uint32_t>(out.image.size() - 1));
-      write_genesis_checksum();
-    } else if (sms && repairs_checksum) {
-      const auto sum = sms_header_checksum(out.image);
-      if (sum) {
-        out.image[0x7FFA] = static_cast<std::uint8_t>(*sum);
-        out.image[0x7FFB] = static_cast<std::uint8_t>(*sum >> 8U);
-        out.header_repaired = true;
-      } else if (explicit_repair) {
-        fail("E_HEADER_UNSUPPORTED", "the image does not carry a supported Master System header (`TMR SEGA` at 0x7FF0 with a size code whose range lies inside the image)");
-      } else {
-        out.warnings.push_back("W_CHECKSUM_NOT_REPAIRED");   // the mod removed or redefined the header it was relying on
-      }
-    } else if (genesis && repairs_checksum) {
-      write_genesis_checksum();
-    } else if (m.header_repair == "none" && changed && original_ok && !(genesis ? genesis_header_verifies(out.image) : sms_header_verifies(out.image))) {
-      out.warnings.push_back("W_CHECKSUM_NOT_REPAIRED");
-    }
+    out.written = authored;
+    const HeaderRepair header = repair_header(m.platform, m.header_repair, original, out.image, authored);
+    if (!header.ok) { out.rejection = header.rejection; out.image.clear(); return out; }
+    out.header_repaired = header.repaired;
+    out.warnings = header.warnings;
     out.ok = true;
   } catch (const Fail &f) {
     out.rejection = {f.code, f.message};

@@ -8,6 +8,7 @@
 #include "segarecomp/luau_host.hpp"
 #include "segarecomp/machine/master_system/z80_guest_admission.hpp"
 #include "segarecomp/mod.hpp"
+#include "segarecomp/mod_set.hpp"
 #include "segarecomp/patch.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -115,13 +116,21 @@ std::string package_json(const mod::Manifest &m, const std::string &identity, co
       rom_read = ",\"rom_read\":{\"ranges\":[" + list + "],\"totals\":[" + t + "],\"limit_bytes\":4096}";
     }
   }
+  std::string relations;   // ADR 0326: shown only when declared, so every other inspect output is unchanged
+  for (const bool required : {true, false}) {
+    const std::vector<mod::ModRelation> &list = required ? m.dependencies : m.incompatibilities;
+    if (list.empty()) continue;
+    relations += required ? ",\"dependencies\":[" : ",\"incompatibilities\":[";
+    for (std::size_t i = 0; i < list.size(); ++i) relations += std::string(i ? "," : "") + "{\"id\":\"" + esc(list[i].id) + "\",\"version\":\"" + esc(list[i].version) + "\"}";
+    relations += "]";
+  }
   std::string revs = "[";
   for (std::size_t i = 0; i < m.revisions.size(); ++i) revs += std::string(i ? "," : "") + "{\"label\":\"" + esc(m.revisions[i].label) + "\",\"sha256\":\"" + m.revisions[i].sha256 + "\"}";
   revs += "]";
   return "\"id\":\"" + esc(m.id) + "\",\"version\":\"" + esc(m.version) + "\",\"name\":\"" + esc(m.name) + "\",\"platform\":\"" + m.platform + "\",\"source_identity_kind\":\"" + m.source_kind +
          "\",\"revisions\":" + revs + ",\"trust_class\":\"" + mod::trust_class(m) + "\",\"capabilities\":" + json_list(m.capabilities) + ",\"capabilities_optional\":" + json_list(m.capabilities_optional) +
          ",\"abi_native\":" + std::to_string(m.abi_native) + ",\"payloads\":{\"native\":" + std::to_string(native) + ",\"luau\":" + std::to_string(luau) + ",\"assets\":" + std::to_string(assets) +
-         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + hooks + geometry + rom_read + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
+         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + hooks + geometry + rom_read + relations + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
 }
 
 bool read_all(const fs::path &path, std::size_t limit, std::vector<std::uint8_t> &out) {
@@ -413,6 +422,7 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
   const mod::Package p = mod::read_package_file(installed);
   if (!p.ok) return refuse(p.rejection);
   if (p.identity != identity) return refuse({"E_PACKAGE_CHANGED", "the installed package no longer has the identity that was installed"});
+  if (const auto r = mod::check_standalone(p.manifest)) return refuse(*r);   // ADR 0326: a mod used alone is a one-member set; a declared requirement is never silently ignored
   const bool native = mod::trust_class(p.manifest) == "native";
   if (native && slurp(library / "mods" / (identity + ".approved")) != identity + "\n") return refuse({"E_NOT_APPROVED", "a package with native code needs the approval of its exact identity"});
   std::vector<std::uint8_t> image;
@@ -564,6 +574,253 @@ int run_session(const fs::path &target, const fs::path &rom, std::uint64_t frame
   return 0;
 }
 
+// ---- mod sets (SEG-141, ADR 0326) ----
+std::string violations_json(const std::vector<mod::SetViolation> &violations) {
+  std::string o = "[";
+  for (std::size_t i = 0; i < violations.size(); ++i)
+    o += std::string(i ? "," : "") + "{\"class\":\"" + esc(violations[i].code) + "\",\"mods\":" + json_list(violations[i].mods) + ",\"message\":\"" + esc(violations[i].message) + "\"}";
+  return o + "]";
+}
+
+// A refused set names the first violated rule as the class and lists EVERY violation.
+int refuse_set(const std::vector<mod::SetViolation> &violations) {
+  std::cout << "{\"ok\":false,\"class\":\"" << esc(violations.front().code) << "\",\"error\":\"" << esc(violations.front().message) << "\",\"violations\":" << violations_json(violations) << "}\n";
+  return 1;
+}
+
+std::string members_json(const std::vector<mod::Package> &packages) {
+  std::string o = "[";
+  for (std::size_t i = 0; i < packages.size(); ++i) {
+    const mod::Manifest &m = packages[i].manifest;
+    o += std::string(i ? "," : "") + "{\"id\":\"" + esc(m.id) + "\",\"version\":\"" + esc(m.version) + "\",\"package_identity\":\"" + packages[i].identity + "\",\"trust_class\":\"" + mod::trust_class(m) + "\"}";
+  }
+  return o + "]";
+}
+
+std::vector<const mod::Package *> pointers(const std::vector<mod::Package> &packages) {
+  std::vector<const mod::Package *> out;
+  for (const mod::Package &p : packages) out.push_back(&p);
+  return out;
+}
+
+std::vector<mod::SetViolation> relations_of(const std::vector<mod::Package> &packages) {
+  std::vector<const mod::Manifest *> manifests;
+  for (const mod::Package &p : packages) manifests.push_back(&p.manifest);
+  return mod::check_set_relations(manifests);
+}
+
+// `mod set check` (and `apply`, which also writes the composed image): the members are project folders or package files, IN SET ORDER. Without --rom only the declared relations are checked.
+int set_check(const std::vector<fs::path> &targets, const fs::path &rom, const fs::path &out) {
+  if (!out.empty()) {
+    std::vector<fs::path> inputs = targets;
+    inputs.push_back(rom);
+    if (const auto g = output_clobbers_input(out, inputs)) return refuse(*g);
+  }
+  if (targets.size() > mod::kMaxSetMembers) return refuse_set({{"E_SET_SIZE", {}, "a mod set holds 1 to 16 mods"}});
+  std::vector<mod::Package> packages(targets.size());
+  for (std::size_t i = 0; i < targets.size(); ++i)
+    if (const auto r = load_package(targets[i], packages[i])) return refuse({r->code, targets[i].filename().string() + ": " + r->message});
+  std::string composed;
+  if (rom.empty()) {
+    const std::vector<mod::SetViolation> violations = relations_of(packages);
+    if (!violations.empty()) return refuse_set(violations);
+    composed = ",\"composed\":false";
+  } else {
+    std::vector<std::uint8_t> image;
+    if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
+    const std::vector<const mod::Package *> members = pointers(packages);
+    const mod::SetComposition c = mod::compose_set(members, image, kAdmit);
+    if (!c.ok) return refuse_set(c.violations);
+    if (!out.empty() && !write_atomic(out, c.image)) return refuse({"E_ARCHIVE_ENTRY", "the composed image cannot be written"});
+    composed = ",\"composed\":true,\"original_sha256\":\"" + c.original_sha256 + "\",\"effective_sha256\":\"" + c.effective_sha256 + "\",\"write_ranges\":" +
+               std::to_string(std::count_if(c.claims.begin(), c.claims.end(), [](const mod::SetClaim &x) { return x.kind == "write"; })) + ",\"header_repaired\":" + (c.header_repaired ? "true" : "false") + ",\"warnings\":" + warnings_json(c.warnings);
+  }
+  std::cout << "{\"ok\":true,\"platform\":\"" << packages.front().manifest.platform << "\",\"members\":" << members_json(packages) << composed << "}\n";
+  return 0;
+}
+
+fs::path set_path(const fs::path &library, const std::string &name) { return library / "mod-sets" / (name + ".modset"); }
+
+// The installed package of an exact identity, re-verified: what a stored definition refers to.
+std::optional<mod::Rejection> load_installed(const fs::path &library, const std::string &identity, mod::Package &p) {
+  const fs::path installed = library / "mods" / (identity + ".segapatch");
+  std::error_code ec;
+  if (!fs::is_regular_file(installed, ec)) return mod::Rejection{"E_NOT_INSTALLED", "no package with the identity " + identity + " is installed"};
+  p = mod::read_package_file(installed);
+  if (!p.ok) return p.rejection;
+  if (p.identity != identity) return mod::Rejection{"E_PACKAGE_CHANGED", "the installed package no longer has the identity " + identity};
+  return std::nullopt;
+}
+
+std::optional<mod::Rejection> load_definition(const fs::path &library, const std::string &name, mod::SetDefinition &definition) {
+  std::vector<std::uint8_t> raw;
+  if (!read_all(set_path(library, name), mod::kMaxSetDefinitionBytes, raw)) return mod::Rejection{"E_SET_UNKNOWN", "no mod set of this name is stored (or it is larger than allowed)"};
+  const mod::SetDefinitionResult parsed = mod::parse_set_definition(std::string_view(reinterpret_cast<const char *>(raw.data()), raw.size()));
+  if (!parsed.ok) return parsed.rejection;
+  definition = parsed.definition;
+  return std::nullopt;
+}
+
+std::optional<mod::Rejection> load_members(const fs::path &library, const mod::SetDefinition &definition, std::vector<mod::Package> &packages) {
+  packages.assign(definition.members.size(), {});
+  for (std::size_t i = 0; i < definition.members.size(); ++i) {
+    if (const auto r = load_installed(library, definition.members[i], packages[i])) return r;
+    if (packages[i].manifest.platform != definition.platform) return mod::Rejection{"E_SET_PLATFORM", "the mod \"" + packages[i].manifest.id + "\" is not for the platform of the set (" + definition.platform + ")"};
+  }
+  return std::nullopt;
+}
+
+// `mod set save`: stores the ORDERED definition under a name. Only installed packages that satisfy each other's declared relations are saved; saving an existing name replaces that definition.
+int set_save(const fs::path &library, const std::string &name, const std::vector<std::string> &identities) {
+  if (identities.empty() || identities.size() > mod::kMaxSetMembers) return refuse_set({{"E_SET_SIZE", {}, "a mod set holds 1 to 16 mods"}});
+  std::vector<mod::Package> packages(identities.size());
+  for (std::size_t i = 0; i < identities.size(); ++i) {
+    if (!hex64(identities[i])) return refuse({"E_FIELD_VALUE", "--identity must be a 64 digit package identity"});
+    if (std::find(identities.begin(), identities.begin() + static_cast<std::ptrdiff_t>(i), identities[i]) != identities.begin() + static_cast<std::ptrdiff_t>(i)) return refuse({"E_SET_DUPLICATE_MOD", "a mod set names a package twice"});
+    if (const auto r = load_installed(library, identities[i], packages[i])) return refuse(*r);
+  }
+  if (const std::vector<mod::SetViolation> violations = relations_of(packages); !violations.empty()) return refuse_set(violations);
+  const mod::SetDefinition definition{packages.front().manifest.platform, identities};
+  std::error_code ec;
+  fs::create_directories(library / "mod-sets", ec);
+  if (!write_text(set_path(library, name), mod::serialize_set_definition(definition))) return refuse({"E_ARCHIVE_ENTRY", "the mod set cannot be stored"});
+  std::cout << "{\"ok\":true,\"set\":\"" << name << "\",\"platform\":\"" << definition.platform << "\",\"members\":" << members_json(packages) << "}\n";
+  return 0;
+}
+
+int set_show(const fs::path &library, const std::string &name) {
+  mod::SetDefinition definition;
+  if (const auto r = load_definition(library, name, definition)) return refuse(*r);
+  std::vector<mod::Package> packages;
+  if (const auto r = load_members(library, definition, packages)) return refuse(*r);
+  if (const std::vector<mod::SetViolation> violations = relations_of(packages); !violations.empty()) return refuse_set(violations);
+  std::cout << "{\"ok\":true,\"set\":\"" << name << "\",\"format\":" << mod::kSetDefinitionFormat << ",\"platform\":\"" << definition.platform << "\",\"members\":" << members_json(packages) << "}\n";
+  return 0;
+}
+
+// `mod set variant`: the composite counterpart of `mod variant` (a validated variant RECORD cache, not an executable cache: ADR 0289 decision 6, ADR 0326). A one-member set IS that single mod: the same
+// key and the same cache entry. A larger set is keyed by its ordered composite identity; nothing outside <library>/cache/variants is written and a failed build publishes nothing.
+int set_variant(const fs::path &library, const std::string &name, const fs::path &rom, const std::string &cc, const fs::path &sdk) {
+  mod::SetDefinition definition;
+  if (const auto r = load_definition(library, name, definition)) return refuse(*r);
+  std::vector<mod::Package> packages;
+  if (const auto r = load_members(library, definition, packages)) return refuse(*r);
+  if (packages.size() == 1) return variant(library, definition.members.front(), rom, cc, sdk);
+  for (const mod::Package &p : packages)
+    if (mod::trust_class(p.manifest) == "native" && slurp(library / "mods" / (p.identity + ".approved")) != p.identity + "\n")
+      return refuse({"E_NOT_APPROVED", "the mod \"" + p.manifest.id + "\" carries native code and needs the approval of its exact identity"});
+  std::vector<std::uint8_t> image;
+  if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
+  const std::vector<const mod::Package *> members = pointers(packages);
+  const mod::SetComposition composition = mod::compose_set(members, image, kAdmit);
+  if (!composition.ok) return refuse_set(composition.violations);
+
+  std::vector<std::vector<std::uint8_t>> raw(packages.size());
+  std::vector<LuauBuild> luau_builds;
+  std::vector<mod::VariantIdentity> alone;
+  for (std::size_t i = 0; i < packages.size(); ++i) {
+    if (!read_all(library / "mods" / (packages[i].identity + ".segapatch"), mod::kMaxArchiveBytes, raw[i])) return refuse({"E_ARCHIVE_ENTRY", "an installed package cannot be read"});
+    luau_builds.push_back(build_luau(packages[i], raw[i]));
+    const LuauBuild &lb = luau_builds.back();
+    if (!lb.ok) return refuse(lb.rejection);
+    alone.push_back(mod::variant_identity(packages[i], composition.original_sha256, composition.member_effective[i], lb.compiled.empty() ? std::string_view{} : std::string_view(lb.compiled.digest())));
+  }
+  const mod::VariantIdentity v = mod::set_identity(members, alone, composition);
+  if (v.key.empty()) return refuse({"E_SET_SYNTAX", "the composite identity cannot be derived"});
+  const std::string definition_text = mod::serialize_set_definition(definition);
+  const fs::path root = library / "cache" / "variants";
+  const fs::path entry = root / v.key;
+  const fs::path index = root / "index" / "sets" / (name + "-" + composition.original_sha256.substr(0, 16) + ".txt");
+  std::error_code ec;
+  // A hit needs the exact record AND every stored member package and compiled output to verify again (a modified entry is a miss and is rebuilt, never reused).
+  bool hit = mod::parse_components(slurp(entry / "variant.txt")) == v.components && slurp(entry / "set.modset") == definition_text;
+  for (std::size_t i = 0; hit && i < packages.size(); ++i) {
+    std::vector<std::uint8_t> stored;
+    hit = read_all(entry / "members" / (packages[i].identity + ".segapatch"), mod::kMaxArchiveBytes, stored) && stored == raw[i];
+    if (hit && !luau_builds[i].compiled.empty()) {
+      const std::string compiled = slurp(entry / ("luau-" + packages[i].identity + ".bin"));
+      hit = luau::verify_compiled(packages[i], {reinterpret_cast<const std::uint8_t *>(compiled.data()), compiled.size()}, luau_builds[i].compiled.digest()).ok;
+    }
+  }
+  std::vector<std::string> reasons;
+  if (!hit) {
+    const std::vector<mod::VariantComponent> previous = mod::parse_components(slurp(index));
+    reasons = previous.empty() ? std::vector<std::string>{"no_previous_build"} : mod::changed_components(previous, v.components);
+    for (const mod::Package &p : packages) {
+      if (mod::trust_class(p.manifest) != "native") continue;
+      if (cc.empty() || sdk.empty()) return refuse({"E_COMPILE_FAILED", "a package with native-c11 sources needs --cc and --sdk-dir"});
+      std::string klass, detail;
+      if (compile_natives(p, cc, sdk, klass, detail) != 0) return refuse({klass, "the mod \"" + p.manifest.id + "\": " + detail});
+    }
+    const fs::path partial = root / (".partial-" + v.key);
+    fs::remove_all(partial, ec);
+    fs::create_directories(partial / "members", ec);
+    bool written = write_text(partial / "variant.txt", mod::serialize_components(v.components)) && write_text(partial / "set.modset", definition_text);
+    for (std::size_t i = 0; written && i < packages.size(); ++i) {
+      written = write_atomic(partial / "members" / (packages[i].identity + ".segapatch"), raw[i]) &&
+                (luau_builds[i].compiled.empty() || write_atomic(partial / ("luau-" + packages[i].identity + ".bin"), luau_builds[i].compiled.serialize()));
+    }
+    if (written) {
+      fs::remove_all(entry, ec);
+      fs::rename(partial, entry, ec);
+      written = !ec;
+    }
+    if (!written) { fs::remove_all(partial, ec); return refuse({"E_ARCHIVE_ENTRY", "the variant cannot be published"}); }
+  }
+  fs::create_directories(index.parent_path(), ec);
+  if (!write_text(index, mod::serialize_components(v.components))) return refuse({"E_ARCHIVE_ENTRY", "the variant index cannot be written"});
+  std::cout << "{\"ok\":true,\"set\":\"" << name << "\",\"cache\":\"" << (hit ? "hit" : "miss") << "\",\"reasons\":" << json_list(reasons) << ",\"variant_key\":\"" << v.key << "\",\"members\":" << members_json(packages) << ",\"components\":{";
+  for (std::size_t i = 0; i < v.components.size(); ++i) std::cout << (i ? ",\"" : "\"") << v.components[i].name << "\":\"" << v.components[i].value << "\"";
+  std::cout << "}}\n";
+  return 0;
+}
+
+int set_usage() {
+  std::cerr << "usage: segarecomp mod set check <dir|package.segapatch>... [--rom <original-image>]   (members in set order)\n"
+               "       segarecomp mod set apply <dir|package.segapatch>... --rom <original-image> --out <composed-image>\n"
+               "       segarecomp mod set save --library <dir> --name <set-name> --identity <package-identity>...   (installed packages, in set order)\n"
+               "       segarecomp mod set show --library <dir> --name <set-name>\n"
+               "       segarecomp mod set variant --library <dir> --name <set-name> --rom <original-image> [--cc <compiler> --sdk-dir <platforms-dir>]\n";
+  return 2;
+}
+
+int set_command(int argc, char **argv) {
+  const std::string_view verb = argc >= 4 ? argv[3] : "";
+  std::vector<fs::path> targets, roms;
+  std::vector<std::string> identities;
+  std::string name, cc, library, out, sdk;
+  for (int i = 4; i < argc; ++i) {
+    const std::string_view a = argv[i];
+    std::string *once = a == "--name" ? &name : a == "--cc" ? &cc : a == "--library" ? &library : a == "--out" ? &out : a == "--sdk-dir" ? &sdk : nullptr;
+    if (once != nullptr) {
+      if (i + 1 >= argc || !once->empty()) return set_usage();
+      *once = argv[++i];
+    } else if (a == "--rom" || a == "--identity") {
+      if (i + 1 >= argc) return set_usage();
+      if (a == "--rom") roms.emplace_back(argv[++i]);
+      else identities.emplace_back(argv[++i]);
+    } else if (a.substr(0, 2) == "--") {
+      return set_usage();
+    } else {
+      targets.emplace_back(std::string(a));
+    }
+  }
+  const fs::path rom = roms.size() == 1 ? roms.front() : fs::path();
+  if (roms.size() > 1) return set_usage();
+  const bool stored = verb == "save" || verb == "show" || verb == "variant";
+  if (stored) {
+    if (library.empty() || name.empty() || !targets.empty() || !out.empty() || (verb != "save" && !identities.empty())) return set_usage();
+    if (!mod::set_name_ok(name)) return refuse({"E_FIELD_VALUE", "a mod set name is lower-case a-z 0-9 with single dashes, at most 64 characters"});
+    if (verb == "save") return rom.empty() && cc.empty() && sdk.empty() ? set_save(library, name, identities) : set_usage();
+    if (verb == "show") return rom.empty() && cc.empty() && sdk.empty() ? set_show(library, name) : set_usage();
+    return rom.empty() ? set_usage() : set_variant(library, name, rom, cc, sdk);
+  }
+  if (targets.empty() || !identities.empty() || !library.empty() || !name.empty() || !cc.empty() || !sdk.empty()) return set_usage();
+  if (verb == "check" && out.empty()) return set_check(targets, rom, {});
+  if (verb == "apply" && !rom.empty() && !out.empty()) return set_check(targets, rom, out);
+  return set_usage();
+}
+
 int usage() {
   std::cerr << "usage: segarecomp mod init <dir> --platform <genesis|master-system|sega-cd> --id <id> [--template <c11-provider|luau|rom-edit>] [--rom-sha256 <hex>]\n"
                "       segarecomp mod check <dir>\n"
@@ -579,6 +836,7 @@ int usage() {
                "       segarecomp mod bps <dir|package.segapatch> --rom <original-image> --out <patch.bps>\n"
                "       segarecomp mod verify-bps <dir|package.segapatch> --rom <original-image> --bps <patch.bps>\n"
                "       segarecomp mod import-hints <dir> --revision <label> --from <hint-file>\n"
+               "       segarecomp mod set <check|apply|save|show|variant> ...   (ordered mod sets; `segarecomp mod set` prints the forms)\n"
                "       segarecomp mod api [--declarations]\n"
                "       segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <last-frame.bmp>]   (DIAGNOSTIC: synthetic picture, not the Genesis machine)\n";
   return 2;
@@ -589,6 +847,7 @@ int usage() {
 int segarecomp_mod_command(int argc, char **argv) {
   segarecomp_cli::set_self_path(argc > 0 ? argv[0] : "");
   const std::string_view sub = argc >= 3 ? argv[2] : "";
+  if (sub == "set") return set_command(argc, argv);   // ADR 0326: its own argument forms (several members in order)
   std::string cc, platform, id, tmpl, rom_sha, approve, identity, revision;
   fs::path hints;
   fs::path out, sdk, rom, library, bps;

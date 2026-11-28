@@ -85,7 +85,7 @@ std::vector<Section> parse_toml(std::string_view text) {
       skip();
       if (i < line.size() && line[i] != '#') fail("E_MANIFEST_SYNTAX", "mod.toml has text after a table header");
       if (!bare_key(name)) fail("E_MANIFEST_SYNTAX", "a mod.toml table name is invalid");
-      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol" || name == "hook" || name == "scene";
+      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol" || name == "hook" || name == "scene" || name == "dependency" || name == "incompatibility";
       if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "build" || name == "geometry" || name == "presentation"))
         fail("E_MANIFEST_SYNTAX", "the table [" + name + "] must be written " + (repeated ? "as [[" + name + "]]" : "as [" + name + "]"));
       if (!array) for (const Section &s : sections) if (s.name == name) fail("E_MANIFEST_SYNTAX", "mod.toml repeats the table [" + name + "]");
@@ -216,6 +216,14 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       Revision r;
       r.label = text_of(s, "label"); r.sha256 = text_of(s, "sha256", true, "E_SOURCE_DIGEST"); r.mapper = text_of(s, "mapper", false);
       m.revisions.push_back(std::move(r));
+    } else if (s.name == "dependency" || s.name == "incompatibility") {   // ADR 0326: [[dependency]] / [[incompatibility]], one other mod each
+      only(s, {"id", "version"});
+      std::vector<ModRelation> &list = s.name == "dependency" ? m.dependencies : m.incompatibilities;
+      if (list.size() >= kMaxRelations) fail("E_RELATION", "a project declares at most 16 dependencies and 16 incompatibilities");
+      ModRelation relation;
+      relation.id = text_of(s, "id"); relation.version = text_of(s, "version", false);
+      if (s.find("version") != nullptr && relation.version.empty()) fail("E_VERSION_RANGE", "a version range is omitted, never empty");
+      list.push_back(std::move(relation));
     } else if (s.name == "build") {   // ADR 0293: the explicit header-repair declaration
       only(s, {"header_repair"});
       m.header_repair = text_of(s, "header_repair");
@@ -348,6 +356,8 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   m.mappings = std::move(mappings);
   std::sort(m.symbols.begin(), m.symbols.end(), [](const Symbol &a, const Symbol &b) { return std::tie(a.name, a.revision) < std::tie(b.name, b.revision); });
   std::sort(m.memory.begin(), m.memory.end(), [](const MemoryRange &a, const MemoryRange &b) { return std::tie(a.revision, a.space, a.offset, a.length, a.access) < std::tie(b.revision, b.space, b.offset, b.length, b.access); });
+  for (std::vector<ModRelation> *list : {&m.dependencies, &m.incompatibilities}) std::stable_sort(list->begin(), list->end(), [](const ModRelation &a, const ModRelation &b) { return a.id < b.id; });   // canonical manifest form
+  if (auto r = check_relations(m)) fail(r->code, r->message);   // ADR 0326: the same declaration check the package reader runs
   std::sort(m.geometry_scenes.begin(), m.geometry_scenes.end(), [](const GeometryScene &a, const GeometryScene &b) { return a.id < b.id; });   // canonical manifest form
   for (GeometryScene &sc : m.geometry_scenes) std::sort(sc.components.begin(), sc.components.end());
   std::sort(m.hooks.begin(), m.hooks.end(), [](const Hook &a, const Hook &b) { return a.id < b.id; });   // canonical manifest form: sorted by id

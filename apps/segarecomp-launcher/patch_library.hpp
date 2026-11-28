@@ -5,6 +5,7 @@
 // game file, never selects the Patched variant and never starts a build.
 
 #include "library_catalog.hpp"
+#include "segarecomp/mod_set.hpp"
 #include "segarecomp/patch.hpp"
 
 #include <filesystem>
@@ -49,6 +50,22 @@ PatchInstall install_patch(LibraryEntry &entry, const std::filesystem::path &pac
 // Removes the record and the installed package file; selects Vanilla if this patch was selected. The original ROM, the Vanilla build, the
 // user's settings and recordings are untouched. Its published build stays in the cache until storage cleanup removes it (it is no longer current).
 bool remove_patch(LibraryEntry &entry, const std::string &identity, const std::filesystem::path &library_root, std::string *error = nullptr);
+
+// SEG-141-T001 (ADR 0326): ordered mod sets of one library game. The definition is the SHARED persisted format of segarecomp/mod_set.hpp (the one `segarecomp mod set` reads and writes), stored as
+// `<library_root>/mod-sets/<game sha256>/<name>.modset`; every check is the shared engine. A set is stored only when each member is an installed schema 3 mod of this game whose stored package still
+// verifies, and the whole set composes on the exact original image. The launcher does not yet SELECT, build or show a set (SEG-141-T006 and callback dispatch, SEG-141-T003).
+struct ModSet {
+  bool ok = false;
+  std::string error;                                   // plain-language refusal naming EVERY violated rule
+  segarecomp::mod::SetDefinition definition;           // set order
+  std::vector<segarecomp::mod::SetViolation> violations;
+  std::string effective_sha256;                        // the composed image
+};
+// Replaces an existing definition of the same name; a refusal writes nothing.
+[[nodiscard]] ModSet store_mod_set(const LibraryEntry &entry, const std::string &name, const std::vector<std::string> &identities, const std::filesystem::path &original_rom,
+                                   const std::filesystem::path &library_root);
+// Reads the stored definition and verifies it again from scratch (a removed or changed member is a refusal, never a smaller set).
+[[nodiscard]] ModSet load_mod_set(const LibraryEntry &entry, const std::string &name, const std::filesystem::path &original_rom, const std::filesystem::path &library_root);
 
 // "<name> <version>" label of an installed patch.
 [[nodiscard]] std::string patch_label(const InstalledPatch &patch);

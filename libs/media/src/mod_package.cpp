@@ -5,6 +5,7 @@
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <set>
@@ -280,7 +281,7 @@ Mapping parse_mapping(const Value &v) {
 Manifest parse_manifest(const Value &root) {
   object(root, "the manifest");
   only(root, {"format", "schema_version", "id", "version", "name", "platform", "author", "license", "purpose", "source", "bios", "capabilities", "capabilities_optional", "abi", "state_schema",
-              "hooks", "memory", "mappings", "symbols", "header_repair", "limits", "geometry", "presentation_defaults", "payloads"}, "the manifest");
+              "hooks", "memory", "mappings", "symbols", "header_repair", "limits", "geometry", "presentation_defaults", "dependencies", "incompatibilities", "payloads"}, "the manifest");
   if (need(root, "format").kind != Value::Kind::string || str(root, "format") != "segarecomp-patch") fail("E_FIELD_VALUE", "the manifest is not a segarecomp patch manifest");
   if (need(root, "schema_version").kind != Value::Kind::number) fail("E_FIELD_VALUE", "schema_version must be an integer");
   if (num(root, "schema_version") != 3) fail("E_SCHEMA_VERSION", "the manifest is not schema 3");
@@ -513,6 +514,25 @@ Manifest parse_manifest(const Value &root) {
     if (m.header_repair == "sms-checksum" && m.platform != "master-system") fail("E_HEADER_UNSUPPORTED", "sms-checksum exists only for the Master System header");
   }
 
+  for (const char *list : {"dependencies", "incompatibilities"}) {   // ADR 0326: declared relations to other mods, present only when non-empty
+    const Value *rv = root.find(list);
+    if (rv == nullptr) continue;
+    array(*rv, list);
+    if (rv->items.empty() || rv->items.size() > kMaxRelations) fail("E_RELATION", std::string(list) + " holds 1 to 16 entries");
+    std::vector<ModRelation> &into = std::string_view(list) == "dependencies" ? m.dependencies : m.incompatibilities;
+    for (const Value &e : rv->items) {
+      object(e, "a mod relation");
+      only(e, {"id", "version"}, "a mod relation");
+      ModRelation relation;
+      relation.id = str(e, "id");
+      if (e.find("version") != nullptr) {
+        relation.version = str(e, "version");
+        if (relation.version.empty()) fail("E_VERSION_RANGE", "a version range is omitted, never empty");
+      }
+      into.push_back(std::move(relation));
+    }
+  }
+  if (auto r = check_relations(m)) fail(r->code, r->message);
   if (auto r = check_memory(m)) fail(r->code, r->message);   // ADR 0300: space, bounds, revision, capability backing and canonical order
   if (auto r = check_hooks(m)) fail(r->code, r->message);   // ADR 0298: platform/CPU, contract, verified symbols and overlap, for every declared revision
 
@@ -621,7 +641,71 @@ Package rejected(std::string code, std::string message) {
   return p;
 }
 
+// MAJOR.MINOR.PATCH of an already validated version.
+std::array<std::uint64_t, 3> version_parts(std::string_view v) {
+  std::array<std::uint64_t, 3> out{};
+  std::size_t part = 0;
+  for (const char c : v) {
+    if (c == '.') ++part;
+    else out[part] = out[part] * 10 + static_cast<std::uint64_t>(c - '0');
+  }
+  return out;
+}
+
+struct Comparator {
+  std::string_view op, version;
+};
+// Empty result = not a valid range.
+std::vector<Comparator> comparators(std::string_view range) {
+  std::vector<Comparator> out;
+  std::size_t start = 0;
+  for (;;) {
+    const std::size_t space = range.find(' ', start);
+    const std::string_view token = range.substr(start, space == std::string_view::npos ? std::string_view::npos : space - start);
+    std::size_t op = 0;
+    for (const std::string_view candidate : {">=", "<=", ">", "<", "="})
+      if (token.starts_with(candidate)) { op = candidate.size(); break; }
+    if (op == 0 || !semver_ok(std::string(token.substr(op))) || out.size() >= kMaxComparators) return {};
+    out.push_back({token.substr(0, op), token.substr(op)});
+    if (space == std::string_view::npos) return out;
+    start = space + 1;
+  }
+}
+
 }  // namespace
+
+bool version_range_ok(std::string_view range) { return !comparators(range).empty(); }
+
+bool version_satisfies(std::string_view version, std::string_view range) {
+  if (!semver_ok(std::string(version))) return false;
+  if (range.empty()) return true;
+  const std::vector<Comparator> all = comparators(range);
+  if (all.empty()) return false;
+  const auto have = version_parts(version);
+  for (const Comparator &c : all) {
+    const auto want = version_parts(c.version);
+    const bool holds = c.op == "=" ? have == want : c.op == ">=" ? have >= want : c.op == ">" ? have > want : c.op == "<=" ? have <= want : have < want;
+    if (!holds) return false;
+  }
+  return true;
+}
+
+std::optional<Rejection> check_relations(const Manifest &m) {
+  for (const std::vector<ModRelation> *list : {&m.dependencies, &m.incompatibilities}) {
+    if (list->size() > kMaxRelations) return Rejection{"E_RELATION", "a package declares at most 16 dependencies and 16 incompatibilities"};
+    for (std::size_t i = 0; i < list->size(); ++i) {
+      const ModRelation &r = (*list)[i];
+      if (!id_ok(r.id)) return Rejection{"E_RELATION", "a mod relation names an invalid mod id"};
+      if (r.id == m.id) return Rejection{"E_RELATION", "a mod cannot depend on or exclude itself"};
+      if (!r.version.empty() && !version_range_ok(r.version)) return Rejection{"E_VERSION_RANGE", "the version range of \"" + r.id + "\" is not 1 to 4 comparators (=, >=, >, <=, < followed by MAJOR.MINOR.PATCH) separated by one space"};
+      if (i > 0 && !((*list)[i - 1].id < r.id)) return Rejection{"E_RELATION", "dependencies and incompatibilities are sorted by id and name each mod once"};
+    }
+  }
+  for (const ModRelation &d : m.dependencies)
+    for (const ModRelation &x : m.incompatibilities)
+      if (d.id == x.id) return Rejection{"E_RELATION", "the mod \"" + d.id + "\" is both required and incompatible"};
+  return std::nullopt;
+}
 
 std::string trust_class(const Manifest &m) {
   if (has_kind(m, "native-c11")) return "native";
@@ -724,6 +808,18 @@ std::string serialize_manifest(const Manifest &m) {
     if (!m.default_widescreen.empty()) kv(o, "widescreen", m.default_widescreen, true);
     if (!m.default_side_style.empty()) kv(o, "side_style", m.default_side_style, m.default_widescreen.empty());
     o += '}';
+  }
+  for (const bool required : {true, false}) {   // ADR 0326: omitted when empty, so every earlier manifest keeps its canonical bytes
+    const std::vector<ModRelation> &list = required ? m.dependencies : m.incompatibilities;
+    if (list.empty()) continue;
+    o += ','; key(o, required ? "dependencies" : "incompatibilities"); o += '[';
+    for (std::size_t i = 0; i < list.size(); ++i) {
+      if (i) o += ',';
+      o += '{'; kv(o, "id", list[i].id, true);
+      if (!list[i].version.empty()) kv(o, "version", list[i].version);
+      o += '}';
+    }
+    o += ']';
   }
   o += ','; key(o, "payloads"); o += '[';
   for (std::size_t i = 0; i < m.payloads.size(); ++i) { if (i) o += ','; emit_payload(o, m.payloads[i]); }

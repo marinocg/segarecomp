@@ -38,6 +38,7 @@ inline constexpr std::size_t kMaxAssets = 128, kMaxAssetBytes = 8U << 20U;
 inline constexpr std::size_t kMaxCapabilities = 32, kMaxRevisions = 16, kMaxMappings = 64;
 inline constexpr std::size_t kMaxSymbols = 255;   // manifest `symbols` entries (ADR 0290)
 inline constexpr std::size_t kMaxHooks = 64;      // manifest `hooks` entries (ADR 0298)
+inline constexpr std::size_t kMaxRelations = 16, kMaxComparators = 4;   // manifest `dependencies` / `incompatibilities` entries and comparators of one version range (ADR 0326)
 inline constexpr std::uint32_t kMaxAudioSeconds = 600;
 inline constexpr std::uint64_t kLuauMemoryPolicyMax = 4194304, kLuauBudgetPolicyMax = 100000;
 inline constexpr unsigned kNativeAbiMajor = 2;
@@ -153,6 +154,19 @@ struct GeometryScene {
 inline constexpr std::string_view kGeometryComponents[] = {"actors", "hud", "scenery"};
 inline constexpr std::size_t kMaxGeometryScenes = 32;
 
+// A declared relation to another mod (SEG-141-T004, ADR 0326): the other package `id` and an optional version range ("" = every version). A range is 1..4 comparators separated by one space, all of which
+// must hold: `=`, `>=`, `>`, `<=` or `<` directly followed by MAJOR.MINOR.PATCH. There is no `||`, wildcard, caret or tilde form, and nothing resolves or downloads a mod.
+struct ModRelation {
+  std::string id, version;
+  bool operator==(const ModRelation &) const = default;
+};
+[[nodiscard]] bool version_range_ok(std::string_view range);
+// `version` must be a valid MAJOR.MINOR.PATCH and `range` empty or valid; anything else never satisfies.
+[[nodiscard]] bool version_satisfies(std::string_view version, std::string_view range);
+// Declaration check run by the reader and `mod check`: ids, ranges, strict id order (canonical), no relation to itself, no id in both lists. Classes: E_RELATION, E_VERSION_RANGE.
+struct Manifest;
+[[nodiscard]] std::optional<Rejection> check_relations(const Manifest &manifest);
+
 struct Manifest {
   std::string id, version, name, platform, author, license, purpose;
   std::string source_kind;                       // cartridge-image | disc-image (reserved)
@@ -173,6 +187,7 @@ struct Manifest {
   std::vector<Symbol> symbols;                   // sorted by (name, revision) in a canonical manifest
   std::vector<Hook> hooks;                       // sorted by id in a canonical manifest (ADR 0298)
   std::vector<MemoryRange> memory;               // sorted by (revision, space, offset, length, access) in a canonical manifest (ADR 0300)
+  std::vector<ModRelation> dependencies, incompatibilities;   // each sorted by id in a canonical manifest (ADR 0326); serialized only when non-empty
   std::string header_repair;                     // "" (default), "genesis-checksum" or "none" (ADR 0293)
   bool operator==(const Manifest &) const = default;
 };
@@ -367,11 +382,29 @@ struct TargetImage {
   std::vector<std::uint8_t> image;
   unsigned edits_applied = 0, blocks_injected = 0;
   std::size_t injected_bytes = 0;
+  std::vector<Range> written;          // every image range the mod's edits and injected blocks write (never the repaired header fields): the conflict claims of mod-set composition (ADR 0326)
   bool header_repaired = false;
   std::vector<std::string> warnings;   // stable warning classes, e.g. W_CHECKSUM_NOT_REPAIRED
 };
 [[nodiscard]] TargetImage build_target_image(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original, GuestAdmitter admit = nullptr);
 [[nodiscard]] bool has_target_edits(const Manifest &manifest);   // a rom-edit-set or guest-asm payload exists
+
+// The header repair of ADR 0293 / ADR 0324 applied to `image`, built from `original` by writing the `authored` ranges, under the declared `policy` ("" | "genesis-checksum" | "sms-checksum" | "none").
+// Used by build_target_image for one mod and by mod-set composition for the composed image (ADR 0326). Classes: E_HEADER_UNSUPPORTED, E_HEADER_FIELD_COLLISION, E_MAPPER_UNSUPPORTED.
+struct HeaderRepair {
+  bool ok = false;
+  Rejection rejection;
+  bool repaired = false;
+  std::vector<std::string> warnings;
+};
+[[nodiscard]] HeaderRepair repair_header(std::string_view platform, std::string_view policy, std::span<const std::uint8_t> original, std::vector<std::uint8_t> &image, std::span<const Range> authored);
+// The assembled blocks and free ranges of one declared revision's `guest-asm` payload (assembled and statically validated, not admitted).
+struct GuestListingResult {
+  bool ok = false;
+  Rejection rejection;
+  GuestListing listing;
+};
+[[nodiscard]] GuestListingResult guest_listing(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, std::string_view revision);
 
 // Deterministic BPS of `original` -> that target, verified by applying it back (SEG-136-T006).
 struct TargetBps {
