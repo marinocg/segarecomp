@@ -77,6 +77,16 @@ SetDefinitionResult parse_set_definition(std::string_view text) {
   return out;
 }
 
+VerifiedPackage verify_package_bytes(std::vector<std::uint8_t> bytes, std::string_view identity) {
+  VerifiedPackage out;
+  out.package = read_package(bytes);
+  if (!out.package.ok) out.rejection = out.package.rejection;
+  else if (out.package.identity != identity) out.rejection = {"E_PACKAGE_CHANGED", "the installed package no longer has the identity " + std::string(identity)};
+  else { out.ok = true; out.bytes = std::move(bytes); return out; }
+  out.package = Package{};
+  return out;
+}
+
 std::vector<SetViolation> check_set_relations(std::span<const Manifest *const> members) {
   std::vector<SetViolation> out;
   if (members.empty() || members.size() > kMaxSetMembers) {

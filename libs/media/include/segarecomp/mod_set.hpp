@@ -38,6 +38,17 @@ struct SetDefinitionResult {
 [[nodiscard]] SetDefinitionResult parse_set_definition(std::string_view text);
 [[nodiscard]] bool set_name_ok(std::string_view name);   // the name of a stored definition: [a-z0-9]+(-[a-z0-9]+)*, at most 64
 
+// ---- installed packages ----
+// The verification boundary of a stored package: the archive `bytes` are parsed and must be the package of exactly `identity` (E_PACKAGE_CHANGED otherwise, or the reader's own class). The bytes that
+// come back are the bytes that were verified; a caller compiles and publishes THESE and never reads the file again, so nothing else can be recorded under the identity. A refusal returns no bytes.
+struct VerifiedPackage {
+  bool ok = false;
+  Rejection rejection;
+  Package package;
+  std::vector<std::uint8_t> bytes;
+};
+[[nodiscard]] VerifiedPackage verify_package_bytes(std::vector<std::uint8_t> bytes, std::string_view identity);
+
 // ---- direct compatibility check (SEG-141-T004) ----
 // One violated rule. `mods` names the package ids concerned (the declaring or offending mod first); `message` is readable, `code` is stable.
 struct SetViolation {

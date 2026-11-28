@@ -300,16 +300,51 @@ int install(const fs::path &package_path, const fs::path &rom, const fs::path &l
   return 0;
 }
 
-// Fail-closed guard shared by every command that writes an output next to input images: the output must not be the same file as any input (same path, equivalent path, symlink or hard link).
+// Is the directory entry `path`, or what it resolves to, inside the directory `project`? Directories are compared as filesystem objects (links, `..` and case-insensitive volumes included), never as
+// strings. A path that cannot be resolved counts as inside.
+bool lies_inside(const fs::path &path, const fs::path &project) {
+  std::error_code ec;
+  const fs::path absolute = fs::absolute(path, ec);
+  if (ec) return true;
+  const fs::path parent = fs::weakly_canonical(absolute.parent_path(), ec);   // where the entry itself is created, removed or renamed over
+  if (ec) return true;
+  const fs::path resolved = fs::weakly_canonical(absolute, ec);               // where a final link points
+  if (ec) return true;
+  for (const fs::path &entry : {parent / absolute.filename(), resolved})
+    for (fs::path at = entry.parent_path(); !at.empty(); at = at.parent_path()) {
+      std::error_code same;
+      if (fs::equivalent(at, project, same) && !same) return true;
+      if (at == at.parent_path()) break;
+    }
+  return false;
+}
+
+// Is the existing file `path` a hard link of a file somewhere in `project`? Only a file with another name can be one; a project that cannot be listed counts as holding it.
+bool linked_into(const fs::path &path, const fs::path &project) {
+  std::error_code ec;
+  if (!fs::is_regular_file(path, ec)) return false;
+  const std::uintmax_t names = fs::hard_link_count(path, ec);
+  if (!ec && names < 2) return false;
+  for (fs::recursive_directory_iterator it(project, ec), end; !ec && it != end; it.increment(ec)) {
+    std::error_code same;
+    if (fs::equivalent(path, it->path(), same) && !same) return true;
+  }
+  return static_cast<bool>(ec);
+}
+
+// Fail-closed guard shared by every command that writes an output next to its inputs: the output must not be the same file as any input (same path, equivalent path, symlink or hard link), and when an
+// input is a PROJECT FOLDER neither the output nor its staging file may be inside it or name one of its files (the manifest and every source are inputs: author the output elsewhere).
 // Checked before anything is written; an unrelated existing output is still replaced as before.
 std::optional<mod::Rejection> output_clobbers_input(const fs::path &out, const std::vector<fs::path> &inputs) {
   fs::path staging = out;
   staging += ".partial";   // write_atomic() deletes and recreates this path first, so it is protected like the output itself
   for (const fs::path &in : inputs) {
-    std::error_code e1, e2, e3;
+    std::error_code e1, e2, e3, e4;
     if (!fs::exists(in, e1)) continue;
     if ((fs::exists(out, e2) && fs::equivalent(out, in, e2) && !e2) || (fs::exists(staging, e3) && fs::equivalent(staging, in, e3) && !e3))
       return mod::Rejection{"E_OUTPUT_IS_INPUT", "--out (or its .partial staging file) is the same file as an input; refusing to overwrite it"};
+    if (fs::is_directory(in, e4) && (lies_inside(out, in) || lies_inside(staging, in) || linked_into(out, in) || linked_into(staging, in)))
+      return mod::Rejection{"E_OUTPUT_IS_INPUT", "--out (or its .partial staging file) is inside a project folder that is an input, or is one of its files; write the output outside the project"};
   }
   return std::nullopt;
 }
@@ -412,16 +447,28 @@ int import_hints(const fs::path &dir, const std::string &revision, const fs::pat
   return 0;
 }
 
+// The installed package of an exact identity. The file is read ONCE; `bytes` are the verified archive, and every later use (compilation, cache comparison, publication) takes them (ADR 0326).
+std::optional<mod::Rejection> load_installed(const fs::path &library, const std::string &identity, mod::Package &p, std::vector<std::uint8_t> &bytes) {
+  const fs::path installed = library / "mods" / (identity + ".segapatch");
+  std::error_code ec;
+  if (!fs::is_regular_file(installed, ec)) return mod::Rejection{"E_NOT_INSTALLED", "no package with the identity " + identity + " is installed"};
+  std::vector<std::uint8_t> raw;
+  if (!read_all(installed, mod::kMaxArchiveBytes, raw)) return mod::Rejection{"E_ARCHIVE_ENTRY", "the installed package cannot be read"};
+  mod::VerifiedPackage verified = mod::verify_package_bytes(std::move(raw), identity);
+  if (!verified.ok) return verified.rejection;
+  p = std::move(verified.package);
+  bytes = std::move(verified.bytes);
+  return std::nullopt;
+}
+
 // `mod variant`: key the single-mod variant by its full identity; reuse an identical build, otherwise (re)build and publish it atomically. Only <library>/cache/variants is ever written, so
 // the original image, Vanilla builds, saves and earlier variants are untouched, and a failed build publishes nothing.
 int variant(const fs::path &library, const std::string &identity, const fs::path &rom, const std::string &cc, const fs::path &sdk) {
   if (!hex64(identity)) return refuse({"E_FIELD_VALUE", "--identity must be a 64 digit package identity"});
-  const fs::path installed = library / "mods" / (identity + ".segapatch");
   std::error_code ec;
-  if (!fs::is_regular_file(installed, ec)) return refuse({"E_NOT_INSTALLED", "no package with this identity is installed"});
-  const mod::Package p = mod::read_package_file(installed);
-  if (!p.ok) return refuse(p.rejection);
-  if (p.identity != identity) return refuse({"E_PACKAGE_CHANGED", "the installed package no longer has the identity that was installed"});
+  mod::Package p;
+  std::vector<std::uint8_t> package_bytes;
+  if (const auto r = load_installed(library, identity, p, package_bytes)) return refuse(*r);
   if (const auto r = mod::check_standalone(p.manifest)) return refuse(*r);   // ADR 0326: a mod used alone is a one-member set; a declared requirement is never silently ignored
   const bool native = mod::trust_class(p.manifest) == "native";
   if (native && slurp(library / "mods" / (identity + ".approved")) != identity + "\n") return refuse({"E_NOT_APPROVED", "a package with native code needs the approval of its exact identity"});
@@ -429,9 +476,7 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
   const mod::EffectiveImage e = mod::effective_image(p, image, kAdmit);
   if (!e.ok) return refuse(e.rejection);
-  std::vector<std::uint8_t> installed_bytes;
-  if (!read_all(installed, mod::kMaxArchiveBytes, installed_bytes)) return refuse({"E_ARCHIVE_ENTRY", "the installed package cannot be read"});
-  const LuauBuild lb = build_luau(p, installed_bytes);   // the trusted compile step: its digest is part of the variant identity
+  const LuauBuild lb = build_luau(p, package_bytes);   // the trusted compile step: its digest is part of the variant identity
   if (!lb.ok) return refuse(lb.rejection);
   const mod::VariantIdentity v = mod::variant_identity(p, e.original_sha256, e.effective_sha256, lb.compiled.empty() ? std::string_view{} : std::string_view(lb.compiled.digest()));
   const fs::path root = library / "cache" / "variants";
@@ -458,8 +503,7 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
     const fs::path partial = root / (".partial-" + v.key);
     fs::remove_all(partial, ec);
     fs::create_directories(partial, ec);
-    std::vector<std::uint8_t> raw;
-    if (!read_all(installed, mod::kMaxArchiveBytes, raw) || !write_atomic(partial / "package.segapatch", raw) || !write_text(partial / "variant.txt", mod::serialize_components(v.components)) ||
+    if (!write_atomic(partial / "package.segapatch", package_bytes) || !write_text(partial / "variant.txt", mod::serialize_components(v.components)) ||
         (!lb.compiled.empty() && !write_atomic(partial / "luau.bin", lb.compiled.serialize()))) {
       fs::remove_all(partial, ec);
       return refuse({"E_ARCHIVE_ENTRY", "the variant cannot be published"});
@@ -642,17 +686,6 @@ int set_check(const std::vector<fs::path> &targets, const fs::path &rom, const f
 
 fs::path set_path(const fs::path &library, const std::string &name) { return library / "mod-sets" / (name + ".modset"); }
 
-// The installed package of an exact identity, re-verified: what a stored definition refers to.
-std::optional<mod::Rejection> load_installed(const fs::path &library, const std::string &identity, mod::Package &p) {
-  const fs::path installed = library / "mods" / (identity + ".segapatch");
-  std::error_code ec;
-  if (!fs::is_regular_file(installed, ec)) return mod::Rejection{"E_NOT_INSTALLED", "no package with the identity " + identity + " is installed"};
-  p = mod::read_package_file(installed);
-  if (!p.ok) return p.rejection;
-  if (p.identity != identity) return mod::Rejection{"E_PACKAGE_CHANGED", "the installed package no longer has the identity " + identity};
-  return std::nullopt;
-}
-
 std::optional<mod::Rejection> load_definition(const fs::path &library, const std::string &name, mod::SetDefinition &definition) {
   std::vector<std::uint8_t> raw;
   if (!read_all(set_path(library, name), mod::kMaxSetDefinitionBytes, raw)) return mod::Rejection{"E_SET_UNKNOWN", "no mod set of this name is stored (or it is larger than allowed)"};
@@ -662,10 +695,11 @@ std::optional<mod::Rejection> load_definition(const fs::path &library, const std
   return std::nullopt;
 }
 
-std::optional<mod::Rejection> load_members(const fs::path &library, const mod::SetDefinition &definition, std::vector<mod::Package> &packages) {
+std::optional<mod::Rejection> load_members(const fs::path &library, const mod::SetDefinition &definition, std::vector<mod::Package> &packages, std::vector<std::vector<std::uint8_t>> &archives) {
   packages.assign(definition.members.size(), {});
+  archives.assign(definition.members.size(), {});
   for (std::size_t i = 0; i < definition.members.size(); ++i) {
-    if (const auto r = load_installed(library, definition.members[i], packages[i])) return r;
+    if (const auto r = load_installed(library, definition.members[i], packages[i], archives[i])) return r;
     if (packages[i].manifest.platform != definition.platform) return mod::Rejection{"E_SET_PLATFORM", "the mod \"" + packages[i].manifest.id + "\" is not for the platform of the set (" + definition.platform + ")"};
   }
   return std::nullopt;
@@ -678,7 +712,8 @@ int set_save(const fs::path &library, const std::string &name, const std::vector
   for (std::size_t i = 0; i < identities.size(); ++i) {
     if (!hex64(identities[i])) return refuse({"E_FIELD_VALUE", "--identity must be a 64 digit package identity"});
     if (std::find(identities.begin(), identities.begin() + static_cast<std::ptrdiff_t>(i), identities[i]) != identities.begin() + static_cast<std::ptrdiff_t>(i)) return refuse({"E_SET_DUPLICATE_MOD", "a mod set names a package twice"});
-    if (const auto r = load_installed(library, identities[i], packages[i])) return refuse(*r);
+    std::vector<std::uint8_t> archive;
+    if (const auto r = load_installed(library, identities[i], packages[i], archive)) return refuse(*r);
   }
   if (const std::vector<mod::SetViolation> violations = relations_of(packages); !violations.empty()) return refuse_set(violations);
   const mod::SetDefinition definition{packages.front().manifest.platform, identities};
@@ -693,7 +728,8 @@ int set_show(const fs::path &library, const std::string &name) {
   mod::SetDefinition definition;
   if (const auto r = load_definition(library, name, definition)) return refuse(*r);
   std::vector<mod::Package> packages;
-  if (const auto r = load_members(library, definition, packages)) return refuse(*r);
+  std::vector<std::vector<std::uint8_t>> archives;
+  if (const auto r = load_members(library, definition, packages, archives)) return refuse(*r);
   if (const std::vector<mod::SetViolation> violations = relations_of(packages); !violations.empty()) return refuse_set(violations);
   std::cout << "{\"ok\":true,\"set\":\"" << name << "\",\"format\":" << mod::kSetDefinitionFormat << ",\"platform\":\"" << definition.platform << "\",\"members\":" << members_json(packages) << "}\n";
   return 0;
@@ -705,7 +741,8 @@ int set_variant(const fs::path &library, const std::string &name, const fs::path
   mod::SetDefinition definition;
   if (const auto r = load_definition(library, name, definition)) return refuse(*r);
   std::vector<mod::Package> packages;
-  if (const auto r = load_members(library, definition, packages)) return refuse(*r);
+  std::vector<std::vector<std::uint8_t>> raw;   // the verified archive of each member: the only bytes compiled, compared and published below
+  if (const auto r = load_members(library, definition, packages, raw)) return refuse(*r);
   if (packages.size() == 1) return variant(library, definition.members.front(), rom, cc, sdk);
   for (const mod::Package &p : packages)
     if (mod::trust_class(p.manifest) == "native" && slurp(library / "mods" / (p.identity + ".approved")) != p.identity + "\n")
@@ -716,11 +753,9 @@ int set_variant(const fs::path &library, const std::string &name, const fs::path
   const mod::SetComposition composition = mod::compose_set(members, image, kAdmit);
   if (!composition.ok) return refuse_set(composition.violations);
 
-  std::vector<std::vector<std::uint8_t>> raw(packages.size());
   std::vector<LuauBuild> luau_builds;
   std::vector<mod::VariantIdentity> alone;
   for (std::size_t i = 0; i < packages.size(); ++i) {
-    if (!read_all(library / "mods" / (packages[i].identity + ".segapatch"), mod::kMaxArchiveBytes, raw[i])) return refuse({"E_ARCHIVE_ENTRY", "an installed package cannot be read"});
     luau_builds.push_back(build_luau(packages[i], raw[i]));
     const LuauBuild &lb = luau_builds.back();
     if (!lb.ok) return refuse(lb.rejection);

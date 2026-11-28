@@ -6,6 +6,7 @@ computed here independently of the C++ code. Synthetic images and mods only.
 usage: mod_set_test.py <segarecomp-cli> <platforms-dir> <C compiler> <tools/segapatch.py>"""
 import importlib.util
 import json
+import os
 import struct
 import sys
 import zipfile
@@ -337,6 +338,10 @@ def single_variant(identity):
     return ok("single variant", "mod", "variant", "--library", LIB, "--identity", identity, "--rom", ROM_PATH)
 
 
+def archive_identity(path):
+    return sha(zipfile.ZipFile(path).read("manifest.json"))
+
+
 # one member: EXACTLY the single mod's identity and cache entry
 alone = single_variant(I_LUAU)
 save("solo", I_LUAU)
@@ -374,6 +379,13 @@ cli.check(fewer.get("cache") == "miss" and fewer.get("variant_key") not in (firs
 save("trio", I_EDIT, I_CODE, I_LUAU)
 back = variant("trio")
 cli.check(back.get("cache") == "hit" and back.get("variant_key") == first.get("variant_key"), f"going back reuses the earlier build: {back}")
+
+# what a record holds IS the identity it is filed under: each cached archive, composite or single, hashes to its member identity and equals the installed bytes
+for ident in (I_EDIT, I_CODE, I_LUAU):
+    cached = LIB / "cache" / "variants" / first["variant_key"] / "members" / f"{ident}.segapatch"
+    cli.check(archive_identity(cached) == ident and cached.read_bytes() == (LIB / "mods" / f"{ident}.segapatch").read_bytes(), f"the cached member is the verified package: {ident}")
+cached = LIB / "cache" / "variants" / alone["variant_key"] / "package.segapatch"
+cli.check(archive_identity(cached) == I_LUAU and cached.read_bytes() == (LIB / "mods" / f"{I_LUAU}.segapatch").read_bytes(), "the single-mod record holds the verified package too")
 
 # a tampered entry is a miss and is rebuilt, never reused
 entry = LIB / "cache" / "variants" / first["variant_key"]
@@ -422,9 +434,87 @@ for what, body, code in [("a newer format", f"segarecomp-modset=2\nplatform=gene
                          ("an unknown platform", f"segarecomp-modset=1\nplatform=saturn\nmember={I_EDIT}\n", "E_PLATFORM_UNKNOWN"), ("another platform than its members", f"segarecomp-modset=1\nplatform=master-system\nmember={I_EDIT}\n", "E_SET_PLATFORM")]:
     write(LIB / "mod-sets" / "hand.modset", body)
     refused("a stored definition: " + what, code, "mod", "set", "show", "--library", LIB, "--name", "hand")
+records = sorted(str(p.relative_to(LIB)) for p in (LIB / "cache").rglob("*"))
 (LIB / "mods" / f"{I_CODE}.segapatch").write_bytes((LIB / "mods" / f"{I_EDIT}.segapatch").read_bytes())
 refused("a replaced installed package", "E_PACKAGE_CHANGED", "mod", "set", "variant", "--library", LIB, "--name", "trio", "--rom", ROM_PATH)
+refused("a replaced installed package, single route", "E_PACKAGE_CHANGED", "mod", "variant", "--library", LIB, "--identity", I_CODE, "--rom", ROM_PATH)
+cli.check(sorted(str(p.relative_to(LIB)) for p in (LIB / "cache").rglob("*")) == records, "a replaced package publishes nothing")
 cli.check(cli.run("mod", "set")[0] == 2 and cli.run("mod", "set", "check")[0] == 2 and cli.run("mod", "set", "apply", edit_a, "--rom", ROM_PATH)[0] == 2, "usage errors exit 2")
 refused("the output may not be an input", "E_OUTPUT_IS_INPUT", "mod", "set", "apply", edit_a, "--rom", ROM_PATH, "--out", ROM_PATH)
+
+# ------------------------------------------------------------------ outputs never touch an input: a member PROJECT FOLDER protects its manifest and every source
+OUT = tmp / "guard"
+OUT.mkdir()
+ga = project("guard-a", edits=f"rev-a u8 0x00000400 0x{ROM[0x400]:02x} 0x01\n")
+(ga / "edits" / "keep.partial").write_text("an author's file with the staging suffix\n")
+gb = project("guard-b", asm="free * 0x1000 0x100 0xff\norg * 0x1000\n  rts\n")
+(gb / "scripts").mkdir()
+(gb / "scripts" / "notes.luau").write_text("-- not declared, still the author's\n")
+gp = OUT / "guard-pkg.segapatch"
+ok("pack a package member", "mod", "pack", edit_b, "--out", gp)
+
+
+def snapshot():
+    files = [p for d in (ga, gb) for p in sorted(d.rglob("*"))] + [ROM_PATH, gp]
+    return {str(p): (p.read_bytes() if p.is_file() else None) for p in files}
+
+
+before = snapshot()
+
+
+def guarded(what, out_path, cwd=None):
+    for route in (("mod", "set", "apply", ga, gb, gp), ("mod", "apply", ga), ("mod", "bps", ga)):
+        if os.path.normpath(str(out_path)).startswith(str(gb) + os.sep) and route[1] != "set":
+            continue   # guard-b is an input of the set route only
+        rc, doc, p = cli.run(*route, "--rom", ROM_PATH, "--out", out_path, cwd=cwd)
+        cli.check(rc == 1 and doc and doc.get("class") == "E_OUTPUT_IS_INPUT", f"{what} ({route[1]}): expected E_OUTPUT_IS_INPUT, got rc={rc} {doc} {p.stderr[-200:]}")
+        cli.check(snapshot() == before, f"{what} ({route[1]}): every input is byte-identical and nothing was added")
+
+
+guarded("a member manifest", ga / "mod.toml")
+guarded("the second member's manifest", gb / "mod.toml")
+guarded("a declared edit source", ga / "edits" / "main.edits")
+guarded("a declared assembly source", gb / "asm" / "main.asm")
+guarded("an undeclared project file", gb / "scripts" / "notes.luau")
+guarded("a new file inside a member", ga / "composed.bin")
+guarded("a new file in a new subfolder of a member", ga / "build" / "composed.bin")
+guarded("the staging path would remove a project file", ga / "edits" / "keep")
+guarded("through ..", gb / ".." / ga.name / "mod.toml")
+guarded("relative from inside the project", "mod.toml", cwd=ga)
+guarded("the original ROM", ROM_PATH)
+rc, doc, _ = cli.run("mod", "set", "apply", ga, gp, "--rom", ROM_PATH, "--out", gp)
+cli.check(rc == 1 and doc.get("class") == "E_OUTPUT_IS_INPUT" and snapshot() == before, f"a package-file member: {doc}")
+# the staging file `<out>.partial` is the member folder itself
+staged = project("guard-stage", edits=f"rev-a u8 0x00000401 0x{ROM[0x401]:02x} 0x01\n")
+staged = staged.rename(tmp / "stage-target.partial")
+rc, doc, _ = cli.run("mod", "set", "apply", staged, "--rom", ROM_PATH, "--out", tmp / "stage-target")
+cli.check(rc == 1 and doc.get("class") == "E_OUTPUT_IS_INPUT" and (staged / "mod.toml").is_file(), f"the staging path is a member folder: {doc}")
+# links from outside the project (a host without them skips only that case)
+for what, make, name in [("a symlinked folder", lambda at: at.symlink_to(ga, target_is_directory=True), "alias-dir"),
+                         ("a symlink to a source", lambda at: at.symlink_to(ga / "mod.toml"), "alias-file"),
+                         ("a hard link to a source", lambda at: os.link(ga / "mod.toml", at), "hard-file"),
+                         ("a symlinked staging path", lambda at: at.symlink_to(ga / "mod.toml"), "viastage.partial"),
+                         ("a hard-linked staging path", lambda at: os.link(ga / "mod.toml", at), "viahard.partial")]:
+    link = OUT / name
+    try:
+        make(link)
+    except OSError:
+        print(f"mod_set_test: {what} is not available on this host")
+        continue
+    target = link / "mod.toml" if name == "alias-dir" else OUT / name[:-len(".partial")] if name.endswith(".partial") else link
+    guarded(what, target)
+    link.unlink()
+# an unrelated output still works, including a sibling that shares the member's name as a prefix, and an existing unrelated hard-linked file is replaced
+for good in [OUT / "composed.bin", ga.parent / (ga.name + "-composed.bin")]:
+    ok(f"an unrelated output {good.name}", "mod", "set", "apply", ga, gb, gp, "--rom", ROM_PATH, "--out", good)
+    cli.check(good.is_file() and good.stat().st_size == len(ROM), "the composed image is written")
+(OUT / "other").write_bytes(b"x")
+try:
+    os.link(OUT / "other", OUT / "other-link")
+    ok("an unrelated hard-linked output", "mod", "set", "apply", ga, gb, "--rom", ROM_PATH, "--out", OUT / "other-link")
+    cli.check((OUT / "other").read_bytes() == b"x", "the other name keeps its bytes")
+except OSError:
+    pass
+cli.check(snapshot() == before, "the successful runs changed no input")
 
 cli.done("mod_set_test")

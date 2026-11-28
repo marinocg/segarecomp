@@ -1,6 +1,7 @@
 // SEG-141 (ADR 0326): the pure rules of the one mod-set engine that no readable package can exercise from the CLI: version ranges, the persisted definition, conflict claims in disc address spaces,
 // the disc source identity and the per-platform adapter capability digest, plus the one-member identity rule. Synthetic data only.
 #include "segarecomp/mod_set.hpp"
+#include "segarecomp/sha256.hpp"
 
 #include <iostream>
 #include <string>
@@ -28,6 +29,31 @@ int main() {
   expect(back.ok && back.definition == definition, "the definition round-trips with its order");
   expect(!parse_set_definition(serialize_set_definition(definition) + "\n").ok && !parse_set_definition("").ok && parse_set_definition(std::string(kMaxSetDefinitionBytes + 1, 'x')).rejection.code == "E_SET_SYNTAX", "trailing and oversized text is refused");
   expect(set_name_ok("my-set-2") && !set_name_ok("") && !set_name_ok("-a") && !set_name_ok("a--b") && !set_name_ok("A") && !set_name_ok("a/b") && !set_name_ok(std::string(65, 'a')), "set names are path-safe tokens");
+
+  // the verification boundary of an installed package: the bytes that come back are exactly the verified ones, and nothing comes back for another package's bytes
+  {
+    const auto archive = [](const std::string &id) {
+      const std::string source = "-- " + id + "\n";
+      const std::vector<std::uint8_t> bytes(source.begin(), source.end());
+      Manifest m;
+      m.id = id; m.version = "1.0.0"; m.name = id; m.platform = "genesis"; m.source_kind = "cartridge-image";
+      m.revisions = {{"rev-a", std::string(64, '5'), ""}};
+      Payload p;
+      p.kind = "luau-source"; p.path = "scripts/main.luau"; p.role = "script"; p.size = bytes.size(); p.sha256 = segarecomp::sha256_hex(bytes);
+      m.payloads = {p};
+      return pack_package(m, {{p.path, bytes}});
+    };
+    const std::vector<std::uint8_t> mine = archive("mine"), theirs = archive("theirs");
+    const std::string identity = read_package(mine).identity;
+    const VerifiedPackage good = verify_package_bytes(mine, identity);
+    expect(good.ok && good.bytes == mine && good.package.identity == identity && good.package.manifest.id == "mine", "matching bytes are returned unchanged with their package");
+    const VerifiedPackage swapped_bytes = verify_package_bytes(theirs, identity);
+    expect(!swapped_bytes.ok && swapped_bytes.rejection.code == "E_PACKAGE_CHANGED" && swapped_bytes.bytes.empty() && !swapped_bytes.package.ok, "another valid package under a verified identity yields no bytes to publish");
+    std::vector<std::uint8_t> damaged = mine;
+    damaged.resize(damaged.size() - 1);
+    const VerifiedPackage broken = verify_package_bytes(damaged, identity);
+    expect(!broken.ok && broken.bytes.empty() && !broken.rejection.code.empty(), "damaged bytes are refused with the reader's class");
+  }
 
   // conflicts are per address space: equal offsets in different disc files, or in a disc file and a cartridge, do not collide
   const std::vector<SetClaim> claims = {

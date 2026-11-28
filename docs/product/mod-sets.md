@@ -10,6 +10,8 @@ segarecomp mod set show --library <dir> --name <set-name>
 segarecomp mod set variant --library <dir> --name <set-name> --rom <original> [--cc <compiler> --sdk-dir <platforms-dir>]
 ```
 
+**Outputs stay outside the inputs.** `mod set apply --out` (like `mod apply` and `mod bps`) refuses with `E_OUTPUT_IS_INPUT` an output, or its `<out>.partial` staging file, that is the original image or a package file, lies inside a member's project folder, or links to a file there. Nothing is written.
+
 A refusal prints `class` and `error` (the first violation) and, for set rules, `violations`: every violated rule with its class, the mod ids concerned and a message.
 
 ## Declaring requirements

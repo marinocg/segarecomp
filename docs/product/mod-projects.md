@@ -108,6 +108,7 @@ The emitted bytes are validated before an image exists: privileged/system instru
 ```sh
 segarecomp mod apply <dir|package> --rom <original> --out <target>        # edits + injected code + header repair for that revision
 segarecomp mod bps <dir|package> --rom <original> --out <patch.bps>       # deterministic BPS, proved by applying it back
+                                                                          # --out must lie outside the project folder (E_OUTPUT_IS_INPUT)
 segarecomp mod verify-bps <dir|package> --rom <original> --bps <patch.bps>  # refuses a corrupted or stale BPS
 segarecomp mod pack <dir> --out <package> --rom <image-a> --rom <image-b> # round-trip verifies every named image first
 ```
