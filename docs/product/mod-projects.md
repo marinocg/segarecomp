@@ -11,6 +11,7 @@ segarecomp mod pack <dir> --out <package.segapatch>                             
 segarecomp mod build <dir> --out <package.segapatch> [--cc <compiler> --sdk-dir <platforms-dir>]   the same package, after compiling the native units
 segarecomp mod install <package.segapatch> --rom <original> --library <dir> [--approve <package-identity>]
 segarecomp mod variant --library <dir> --identity <package-identity> --rom <original> [--cc <compiler> --sdk-dir <platforms-dir>]
+segarecomp mod set <check|apply|save|show|variant> ...                             ordered mod sets: see [mod sets](mod-sets.md)
 segarecomp mod inspect [--json] [<dir|package.segapatch>]                          without an argument: every platform adapter and its capability support
 segarecomp mod convert-audio <file.wav> --out <file.u8>                            the deterministic reference PCM conversion (u8-mono)
 segarecomp mod api [--declarations]                                                the Luau API list (JSON) or its generated `.d.luau` declarations
@@ -54,6 +55,7 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | `[build]` | `header_repair` = `genesis-checksum` (Genesis) \| `sms-checksum` (Master System) \| `none` (ADR 0293, 0324; absent = repair only a verifying original that the build changed) |
 | `[geometry]`, `[[scene]]` | `aspect_max` (and optional `aspect_min`, default `"4:3"`): the aspect range the package claims, `N:M` inside 4:3 to 32:9; one `[[scene]]` per named scene with `id` (token) and `components` (`actors`, `hud`, `scenery`). A scene needs `aspect_max`. A claim the viewer checks per frame, never a grant; part of the package identity (ADR 0302). `scenes = []` alone stays accepted and claims nothing |
 | `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`, `guest-asm`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
+| `[[dependency]]`, `[[incompatibility]]` | `id` (another mod), `version` (optional range such as `">=1.2.0 <2.0.0"`); checked against the chosen set, never resolved ([mod sets](mod-sets.md), ADR 0326) |
 | `[[memory]]` | `revision` (a declared label; absent = every revision), `space` (`m68k.work_ram`; Master System: `z80.work_ram`, or read-only `z80.cart_ram` on a `sega`-mapper revision, [guide](master-system-mods.md)), `offset`, `length` (decimal), `access` (`read`, `write` or `read-write`, backed by the matching `memory.*` capability). The ONLY guest memory a scheduled mod may touch; part of the package identity ([gameplay example](gameplay-example.md), ADR 0300) |
 | `[[symbol]]` | `name` (token), `revision` (a declared label), `address` (string `"0x..."`, below `0x01000000`), `provenance` (`manual`, `verified`, `imported-hint`); one per (name, revision). Only `verified` entries may be an edit site |
 | `[[audio.mapping]]`, `[[audio.mapping.value]]` | declared audio mappings: [audio architecture](../architecture/modding-audio-architecture.md) sections 5, 9 and 10 (the Genesis audio API and sound-mod workflow: [Genesis sound mods](genesis-sound-mods.md)) |
@@ -106,6 +108,7 @@ The emitted bytes are validated before an image exists: privileged/system instru
 ```sh
 segarecomp mod apply <dir|package> --rom <original> --out <target>        # edits + injected code + header repair for that revision
 segarecomp mod bps <dir|package> --rom <original> --out <patch.bps>       # deterministic BPS, proved by applying it back
+                                                                          # --out must lie outside the project folder (E_OUTPUT_IS_INPUT)
 segarecomp mod verify-bps <dir|package> --rom <original> --bps <patch.bps>  # refuses a corrupted or stale BPS
 segarecomp mod pack <dir> --out <package> --rom <image-a> --rom <image-b> # round-trip verifies every named image first
 ```

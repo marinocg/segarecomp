@@ -12,6 +12,7 @@
 #include "sound_gate.hpp"
 #include "segarecomp/machine/master_system/z80_guest_admission.hpp"
 #include "segarecomp/mod.hpp"
+#include "segarecomp/mod_set.hpp"
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
@@ -403,7 +404,7 @@ struct Target {
   fs::path project_dir;
 };
 
-std::optional<Refusal> load_target(const std::string &target, Target &t) {
+std::optional<Refusal> read_target(const std::string &target, Target &t) {
   std::error_code ec;
   if (fs::is_directory(target, ec)) {
     const mod::Checked c = mod::check_project(target);
@@ -416,6 +417,13 @@ std::optional<Refusal> load_target(const std::string &target, Target &t) {
   if (!read_file(target, t.package_bytes, mod::kMaxArchiveBytes)) return Refusal{"E_ARCHIVE_ENTRY", "the package cannot be read"};
   t.package = mod::read_package(t.package_bytes);
   if (!t.package.ok) return Refusal{t.package.rejection.code, t.package.rejection.message};
+  return std::nullopt;
+}
+
+// ADR 0326: `diff-run` and `test` run the mod ALONE, i.e. as a one-member set. The check is made here because a data-only mod is built from its effective image by a plain `segarecomp build`, which never sees the package.
+std::optional<Refusal> load_target(const std::string &target, Target &t) {
+  if (const auto r = read_target(target, t)) return r;
+  if (const auto r = mod::check_standalone(t.package.manifest)) return Refusal{r->code, "the mod cannot be run alone: " + r->message};
   return std::nullopt;
 }
 

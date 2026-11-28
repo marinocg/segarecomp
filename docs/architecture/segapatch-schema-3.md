@@ -60,6 +60,7 @@ Field order below is the canonical order.
 | `limits` | object | optional | requested resource limits; keys `luau_memory_bytes`, `luau_budget_units` (integers); each MUST be <= the policy default of [luau-trust-policy.md](luau-trust-policy.md) section 4 (a package may request less, never more: `E_LIMIT_EXCEEDS_POLICY`); other keys `E_FIELD_UNKNOWN` |
 | `geometry` | object | optional | geometry declaration (SEG-139-T004, ADR [0302](../decisions/0302-honest-geometry-declarations-and-per-scene-coverage.md)): `{"aspect_min"?, "aspect_max"?, "scenes"?}`. `aspect_max` (and optional `aspect_min`, default 4:3) are canonical `N:M` ratios (no leading zeros, terms 1 to 4096) inside 4:3 to 32:9 with min <= max; `scenes` is at most 32 `{id, components}` entries strictly sorted by `id` (a token `[a-z0-9_-]`, at most 32), `components` a non-empty strictly sorted subset of `actors`, `hud`, `scenery`. Scenes or `aspect_min` without `aspect_max` are refused (a coverage claim without a range claims nothing checkable). `{"scenes":[]}` stays legal and claims nothing. The declaration is a **claim** the host checks against what a frame delivers; it grants nothing. It is in the package identity and **not** in the content digest. Stable classes: `E_GEOMETRY_ASPECT`, `E_GEOMETRY_SCENE` (+ `E_FIELD_UNKNOWN`, `E_FIELD_VALUE`) |
 | `presentation_defaults` | object | optional | as schema 1/2 (`widescreen`, `side_style`) |
+| `dependencies`, `incompatibilities` | arrays of objects | optional | declared relations to other mods (ADR [0326](../decisions/0326-ordered-mod-sets-verified-composition-and-relations.md)): `{"id", "version"?}`, strictly sorted by `id`, 1 to 16 entries, each array present only when non-empty; `id` is a package id other than this package's, in at most one of the two arrays; `version` is 1 to 4 comparators (`=`, `>=`, `>`, `<=`, `<` followed by `MAJOR.MINOR.PATCH`) separated by one space (`E_RELATION`, `E_VERSION_RANGE`). In the package identity, **not** in the content digest. A product that does not know the keys refuses them (`E_FIELD_UNKNOWN`) |
 | `payloads` | array of objects | yes | section 4; 1 to 255 entries (the archive limit of 256 entries includes `manifest.json`) |
 
 ## 4. Payload envelope and kinds
@@ -136,7 +137,7 @@ Schema 3 fixes only the envelope: `kind`, `kind_version`, `path`, `size`, `sha25
 * **Relation to the Vanilla/Patched build identity** (ADR 0266 decision 5): the library game identity, the effective compiled image digest (`SEGARECOMP_ROM_SHA256`) and the selected variant (package identity)
   keep their meanings. For schema 3 the Patched cache key appends: package identity, content digest, the selected revision digest, the effective image digest and the native ABI major (`abi.native`, or `0`);
   a Vanilla key is unchanged. A change of any of them cannot share a cache entry.
-* **Mod identity in a set** (SEG-141) is the ordered list of package identities; defined there.
+* **Mod identity in a set** (SEG-141) is the ordered list of package identities. The composite variant identity, the persisted set definition and composition are ADR [0326](../decisions/0326-ordered-mod-sets-verified-composition-and-relations.md); a one-member set has the single-mod identity unchanged.
 
 ## 9. Rejection table (stable diagnostic classes)
 
@@ -159,6 +160,8 @@ Schema 3 fixes only the envelope: `kind`, `kind_version`, `path`, `size`, `sha25
 | `E_BPS_BUILD`, `E_BPS_INVALID`, `E_BPS_STALE`, `E_HEADER_FIELD_COLLISION`, `E_OUTPUT_IS_INPUT` | `mod bps`, `mod verify-bps` (ADR 0293) |
 | `E_LUAU_SYNTAX`, `E_LUAU_COMPILE_LIMIT`, `E_LUAU_COMPILED_MISMATCH` | NOT reader classes: raised by the host's trusted Luau compile step (`mod build`, `mod variant`; ADR 0294): a compile error as `<path>:<line>: <message>`, a compile bound, stored compiled output that is not what the build produced |
 | `E_LUAU_API`, `E_LUAU_CAPABILITY`, `E_LUAU_TYPE`, `E_TRUST_CLASS`, `E_SESSION` | NOT reader classes: raised by the host's static check of Luau sources against the API list (`mod check`/`pack`/`build`; an unknown `sega.*` name, a name whose capability is not declared, an argument error visible statically; ADR 0295) and by `mod session` (a package that is not Luau-only; a refused frame count) |
+| `E_RELATION`, `E_VERSION_RANGE` | the `dependencies` / `incompatibilities` keys (ADR 0326) |
+| `E_SET_SIZE`, `E_SET_DUPLICATE_MOD`, `E_SET_PLATFORM`, `E_SET_SOURCE`, `E_SET_MISSING_DEPENDENCY`, `E_SET_VERSION_MISMATCH`, `E_SET_INCOMPATIBLE`, `E_SET_EDIT_OVERLAP`, `E_SET_BPS_CONFLICT`, `E_SET_HOOK_SITE`, `E_SET_GUEST_ADMISSION`, `E_SET_HEADER_POLICY`, `E_SET_SYNTAX`, `E_SET_VERSION`, `E_SET_UNKNOWN` | NOT reader classes: mod sets (`mod set ...`, ADR 0326); `mod variant` and `segarecomp build` also report the first unmet relation of a mod used alone |
 | `E_TRUST_UNDECLARED` | a `native-c11` payload without `author`/`abi` |
 | `E_LIMIT_EXCEEDS_POLICY`, `E_LUAU_BYTECODE` | requested limit above policy; a `luau-source` payload that is not Luau text (section 4, Luau policy section 2) |
 

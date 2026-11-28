@@ -89,6 +89,16 @@ if(BUILD_TESTING)
   set_property(TEST launcher_policy_test APPEND PROPERTY LABELS full fast)
 endif()
 
+# SEG-141-T001 (ADR 0326): the launcher library's persisted mod sets over the shared engine (no build, no window).
+add_executable(launcher_mod_set_test launcher_mod_set_test.cpp)
+target_link_libraries(launcher_mod_set_test PRIVATE segarecomp_launcher_core)
+target_compile_features(launcher_mod_set_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(launcher_mod_set_test)
+if(BUILD_TESTING)
+  add_test(NAME launcher_mod_set_test COMMAND launcher_mod_set_test ${CMAKE_CURRENT_BINARY_DIR}/launcher_mod_set_work)
+  set_property(TEST launcher_mod_set_test APPEND PROPERTY LABELS full fast)
+endif()
+
 # SEG-057-T002 (ADR 0119): the Master System Optimized contract of the launcher: product-stated availability, cache separation, the typed
 # unadmitted_pc restart decision and the end-to-end headless flow (build, run, one-shot Compatibility restart) against product/program doubles.
 add_executable(launcher_sms_policy_test launcher_sms_policy_test.cpp)

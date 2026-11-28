@@ -71,6 +71,7 @@ World make_world(const std::string &name) {
   spit(L / "covers" / "a.png", std::string(300, 'c'));
   spit(L / "roms" / "extracted.md", "MANAGED ROM COPY");
   spit(L / "patches" / "pkg.segapatch", "PATCH PACKAGE BYTES");
+  spit(L / "mod-sets" / sha64('a') / "pair.modset", "segarecomp-modset=1\n");
   spit(L / "saves" / "genesis" / sha64('a') / "save.srm", std::string(64, 's'));
   spit(L / "saves" / "master-system" / sha64('b') / "slot0.state", std::string(80, 't'));
   spit(L / "sessions" / "genesis" / scd_id / "run.session", "frame 1\n");
@@ -185,9 +186,9 @@ void test_upgrade_noop_and_plan() {
   for (const auto &i : plan.items) { const auto g = i.rel.generic_u8string(); area_of[std::string(g.begin(), g.end())] = i.area; }
   expect(area_of["library/library.json"] == "catalog" && area_of["library/launcher-settings.json"] == "settings" && area_of["library/viewer-settings.cfg"] == "settings", "catalog and settings are durable");
   expect(area_of["library/sega-cd-bios.json"] == "bios_profiles" && area_of["library/covers/a.png"] == "covers" && area_of["library/roms/extracted.md"] == "managed_roms", "BIOS profile store, covers and managed ROM copies are durable");
-  expect(area_of["library/patches/pkg.segapatch"] == "mods" && area_of["library/saves/genesis/" + sha64('a') + "/save.srm"] == "saves" && area_of["library/sessions/genesis/" + scd_id + "/run.session"] == "recordings", "mods, saves and recordings are durable");
+  expect(area_of["library/patches/pkg.segapatch"] == "mods" && area_of["library/mod-sets/" + sha64('a') + "/pair.modset"] == "mods" && area_of["library/saves/genesis/" + sha64('a') + "/save.srm"] == "saves" && area_of["library/sessions/genesis/" + scd_id + "/run.session"] == "recordings", "mods, saves and recordings are durable");
   expect(area_of["library/sega-cd/" + scd_id + "/backup.ram"] == "sega_cd_data" && area_of["library/sega-cd/" + scd_id + "/input.rec"] == "sega_cd_data", "Sega CD backup RAM and recordings are durable");
-  expect(area_of.size() == 12, "exactly the durable files are planned (" + std::to_string(area_of.size()) + ")");
+  expect(area_of.size() == 13, "exactly the durable files are planned (" + std::to_string(area_of.size()) + ")");
   expect(area_of.count("library/sega-cd/" + scd_id + "/build/prog") == 0 && area_of.count("library/library.json.bak") == 0, "builds and the catalog backup are not planned");
   bool games = false, zig = false, scd_objects = false, downloads = false;
   for (const auto &a : plan.areas) if (a.cls == ItemClass::regenerable) { games |= a.area == "builds"; zig |= a.area == "compiler_cache"; downloads |= a.area == "downloads"; scd_objects |= a.area == "catalog_backup"; }
@@ -224,7 +225,7 @@ void test_success_restart_and_cleanup() {
   BusyGuard busy;
   std::vector<std::string> phases;
   const MigrationResult r = run_migration(options_for(w), busy, nullptr, [&](const MigrationProgress &p) { if (phases.empty() || phases.back() != p.phase) phases.push_back(p.phase); });
-  expect(r.ok() && r.files == 12, "migration completes (" + r.reason + " " + r.detail + ")");
+  expect(r.ok() && r.files == 13, "migration completes (" + r.reason + " " + r.detail + ")");
   expect(phases == std::vector<std::string>({"plan", "copy", "rebase", "verify", "commit", "done"}), "progress reports every phase in order");
   expect(snapshot(w.S) == old_before, "the old root is byte-for-byte unchanged");
   expect(snapshot(w.ext) == ext_before, "external ROM/BIOS files are untouched");

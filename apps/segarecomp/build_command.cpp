@@ -2,6 +2,7 @@
 #include "luau_build.hpp"
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/mod.hpp"
+#include "segarecomp/mod_set.hpp"
 #include "build_profile.hpp"
 #include "process_run.hpp"
 
@@ -1875,6 +1876,7 @@ struct SmsModRefusal {
 std::optional<SmsModRefusal> prepare_sms_mod(Options &options, Log &log, const segarecomp::mod::Package &package, const std::vector<std::uint8_t> &original, const std::string &original_sha, bool native) {
   const std::string prefix = native ? "NATIVE" : "LUAU";
   if (!options.platform.empty() && options.platform != "master-system") return SmsModRefusal{"The mod package targets another platform than --platform names.", prefix + "_PLATFORM_MISMATCH"};
+  if (const auto refusal = segarecomp::mod::check_standalone(package.manifest)) return SmsModRefusal{"The mod cannot be built alone: " + refusal->message, refusal->code};   // ADR 0326: a single mod is a one-member set; a declared requirement is never silently ignored
   if (const auto refusal = segarecomp::luau::sms_scheduled_support(package, native)) return SmsModRefusal{refusal->message, refusal->code};
   const auto effective = segarecomp::mod::effective_image(package, original, &sms::admit_z80_guest);
   if (!effective.ok) {
@@ -2030,6 +2032,7 @@ int run_build(Options options) {
       if (!package.ok)   // SEG-138-T012: a declaration-level hook rejection keeps its stable E_HOOK_* class
         return fail(options, log, original_sha, "analyze", 1, "The native package is not valid: " + package.rejection.message, package.rejection.code.rfind("E_HOOK_", 0) == 0 ? package.rejection.code : "NATIVE_PACKAGE_INVALID");
       if (package.identity != options.native_identity) return fail(options, log, original_sha, "analyze", 1, "The native package is not the one that was approved.", "NATIVE_IDENTITY_CHANGED");
+      if (const auto refusal = segarecomp::mod::check_standalone(package.manifest)) return fail(options, log, original_sha, "analyze", 1, "The mod cannot be built alone: " + refusal->message, refusal->code);   // ADR 0326: a single mod is a one-member set; a declared requirement is never silently ignored
       if (const auto refusal = segarecomp::luau::native_scheduled_support(package)) return fail(options, log, original_sha, "analyze", 1, refusal->message, refusal->code);
       const auto effective = segarecomp::mod::effective_image(package, original);
       if (!effective.ok) {
@@ -2131,6 +2134,7 @@ int run_build(Options options) {
       const auto package = segarecomp::mod::read_package_file(options.data_package);
       if (!package.ok) return fail(options, log, original_sha, "analyze", 1, "The mod package is not valid: " + package.rejection.message, "DATA_PACKAGE_INVALID");
       if (package.identity != options.data_identity) return fail(options, log, original_sha, "analyze", 1, "The mod package changed after it was selected.", "DATA_IDENTITY_CHANGED");
+      if (const auto refusal = segarecomp::mod::check_standalone(package.manifest)) return fail(options, log, original_sha, "analyze", 1, "The mod cannot be built alone: " + refusal->message, refusal->code);   // ADR 0326: a single mod is a one-member set; a declared requirement is never silently ignored
       const bool sms_data = package.manifest.platform == "master-system";
       if (segarecomp::mod::trust_class(package.manifest) != "data" || (package.manifest.platform != "genesis" && !sms_data))
         return fail(options, log, original_sha, "analyze", 1, "Only a Genesis or Master System data-only package builds through this route.", "DATA_TRUST");
@@ -2167,6 +2171,7 @@ int run_build(Options options) {
       const auto package = segarecomp::mod::read_package_file(options.luau_package);
       if (!package.ok) return fail(options, log, original_sha, "analyze", 1, "The Luau package is not valid: " + package.rejection.message, "LUAU_PACKAGE_INVALID");
       if (package.identity != options.luau_identity) return fail(options, log, original_sha, "analyze", 1, "The Luau package changed after it was selected.", "LUAU_IDENTITY_CHANGED");
+      if (const auto refusal = segarecomp::mod::check_standalone(package.manifest)) return fail(options, log, original_sha, "analyze", 1, "The mod cannot be built alone: " + refusal->message, refusal->code);   // ADR 0326: a single mod is a one-member set; a declared requirement is never silently ignored
       // ADR 0300/0305: the headless build runs the scheduler's phases; a viewer build keeps the HUD-only ABI 1 seam for a package that stays inside it and runs the SAME scheduler (one scheduler, no second Luau runner)
       // for a package that needs more (phases, bounded work-RAM, input, mod state).
       options.luau_scheduled = !options.sdl3_include.has_value() || segarecomp::luau::live_support(package).has_value();

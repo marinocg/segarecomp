@@ -111,7 +111,84 @@ PatchPreview verify(const LibraryEntry &entry, const fs::path &package, const fs
   return out;
 }
 
+ModSet refused_set(std::string error) {
+  ModSet out;
+  out.error = std::move(error);
+  return out;
+}
+
+// The one verification of a launcher mod set: installed members, unchanged stored packages, the exact original, then the shared composition.
+ModSet verify_mod_set(const LibraryEntry &entry, const segarecomp::mod::SetDefinition &definition, const fs::path &original_rom, const fs::path &library_root) {
+  if (const std::string unavailable = mods_unavailable_reason(entry.platform_id); !unavailable.empty()) return refused_set(unavailable);
+  if (definition.platform != entry.platform_id) return refused_set("This mod set is for a different platform than this game.");
+  std::vector<segarecomp::mod::Package> packages;
+  for (const std::string &identity : definition.members) {
+    const InstalledPatch *record = entry.find_patch(identity);
+    if (record == nullptr) return refused_set("A mod of this set is not installed for this game (" + identity.substr(0, 12) + ").");
+    if (!record->schema3) return refused_set(patch_label(*record) + " is a patch package of an older format and cannot be part of a mod set.");
+    std::vector<std::uint8_t> bytes;
+    std::string error;
+    if (!read_bounded(library_root / "patches" / (identity + ".segapatch"), segarecomp::mod::kMaxArchiveBytes, bytes, error)) return refused_set("The installed package of " + patch_label(*record) + " cannot be read: " + error + ".");
+    packages.push_back(segarecomp::mod::read_package(bytes));
+    if (!packages.back().ok || packages.back().identity != identity) return refused_set("The installed package of " + patch_label(*record) + " changed after it was installed.");
+  }
+  std::vector<std::uint8_t> rom;
+  std::string error;
+  if (original_rom.empty() || !read_bounded(original_rom, segarecomp::patch::kMaxImageBytes, rom, error) || segarecomp::sha256_hex(rom) != entry.sha256)
+    return refused_set("The original game file is needed to verify the mod set, and the recorded file cannot be read or is no longer the original game.");
+  std::vector<const segarecomp::mod::Package *> members;
+  for (const segarecomp::mod::Package &p : packages) members.push_back(&p);
+  const segarecomp::mod::SetComposition composition = segarecomp::mod::compose_set(members, rom);
+  ModSet out;
+  out.definition = definition;
+  out.violations = composition.violations;
+  out.ok = composition.ok;
+  out.effective_sha256 = composition.effective_sha256;
+  if (!out.ok) {
+    out.error = "These mods cannot be used together:";
+    for (const segarecomp::mod::SetViolation &v : composition.violations) out.error += "\n" + v.message + ".";
+  }
+  return out;
+}
+
+fs::path mod_set_file(const LibraryEntry &entry, const std::string &name, const fs::path &library_root) { return library_root / "mod-sets" / entry.sha256 / (name + ".modset"); }
+
 }  // namespace
+
+ModSet store_mod_set(const LibraryEntry &entry, const std::string &name, const std::vector<std::string> &identities, const fs::path &original_rom, const fs::path &library_root) {
+  if (!segarecomp::mod::set_name_ok(name) || !is_hex_digest(entry.sha256, 64)) return refused_set("A mod set name uses lower-case letters, digits and single dashes (at most 64).");
+  // The shared parser is the one rule for what a definition may hold (member count, repeats, form).
+  const segarecomp::mod::SetDefinitionResult parsed = segarecomp::mod::parse_set_definition(segarecomp::mod::serialize_set_definition({entry.platform_id, identities}));
+  if (!parsed.ok) return refused_set("This mod set cannot be stored: " + parsed.rejection.message + ".");
+  ModSet out = verify_mod_set(entry, parsed.definition, original_rom, library_root);
+  if (!out.ok) return out;
+  const fs::path file = mod_set_file(entry, name, library_root);
+  fs::path temp = file;
+  temp += ".partial";
+  std::error_code ec;
+  fs::create_directories(file.parent_path(), ec);
+  fs::remove(temp, ec);
+  {
+    std::ofstream stream(temp, std::ios::binary | std::ios::trunc);
+    const std::string text = segarecomp::mod::serialize_set_definition(parsed.definition);
+    stream.write(text.data(), static_cast<std::streamsize>(text.size()));
+    stream.flush();
+    if (!stream) { stream.close(); fs::remove(temp, ec); return refused_set("The mod set cannot be stored in the library."); }
+  }
+  fs::rename(temp, file, ec);
+  if (ec) { fs::remove(temp, ec); return refused_set("The mod set cannot be stored in the library."); }
+  return out;
+}
+
+ModSet load_mod_set(const LibraryEntry &entry, const std::string &name, const fs::path &original_rom, const fs::path &library_root) {
+  if (!segarecomp::mod::set_name_ok(name) || !is_hex_digest(entry.sha256, 64)) return refused_set("That is not a mod set name.");
+  std::vector<std::uint8_t> bytes;
+  std::string error;
+  if (!read_bounded(mod_set_file(entry, name, library_root), segarecomp::mod::kMaxSetDefinitionBytes, bytes, error)) return refused_set("The mod set cannot be read: " + error + ".");
+  const segarecomp::mod::SetDefinitionResult parsed = segarecomp::mod::parse_set_definition(std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
+  if (!parsed.ok) return refused_set("The stored mod set is not readable: " + parsed.rejection.message + ".");
+  return verify_mod_set(entry, parsed.definition, original_rom, library_root);
+}
 
 std::string patch_label(const InstalledPatch &patch) { return patch.name + (patch.version.empty() ? std::string() : " " + patch.version); }
 
