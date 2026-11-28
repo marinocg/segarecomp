@@ -93,7 +93,7 @@ The callback must produce the declared results; the declared cost keeps timing d
 
 ### 5.4 Callback ordering
 
-Hooks at one site run in mod order (declared order today; SEG-141-T003 owns multi-mod ownership rules, including exclusive hooks). Within a boundary: hook sites in guest execution order; `hook-exit` callbacks in reverse of `hook-entry` order for nested functions.
+Hooks at one site run in mod order (set order; ADR 0327 defines the multi-mod rules, including exclusive replacement ownership). Within a boundary: hook sites in guest execution order; `hook-exit` callbacks in reverse of `hook-entry` order for nested functions.
 
 ## 6. Transactional failure and mod state
 
@@ -144,6 +144,6 @@ Equivalent spikes gate SEG-147-T003 (Z80) and SEG-148-T004 (Sega CD); no functio
 
 Scheduler implementation, hook plumbing beyond the generated-native M68K path, a universal CPU interception API, multi-mod ordering and ownership (SEG-141), audio events and commands (the Genesis audio API follows these phases: [modding-audio-architecture.md](modding-audio-architecture.md) sections 5 and 10).
 
-## Several mods (Genesis runtime only)
+## Several mods
 
-[ADR 0327](../decisions/0327-genesis-mod-set-dispatch-and-exclusive-hook-ownership.md) defines callback order, the input chain, failure isolation, exclusive replace-hook ownership and the combined state for several schedulers on one runtime. No built program links more than one mod yet.
+[ADR 0327](../decisions/0327-mod-set-programs-dispatch-hook-ownership-and-save-namespaces.md) defines callback order, the input chain, failure isolation, exclusive replace-hook ownership and the combined state when one program runs a mod set (Genesis and Master System).

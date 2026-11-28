@@ -202,20 +202,21 @@ jobs:
         run: |
           # SDL3 runtime libraries from vcpkg must be findable by the test binary on Windows (a plain test step, never POST_BUILD).
           for d in "$VCPKG_INSTALLATION_ROOT"/installed/*/bin; do [ -d "$d" ] && export PATH="$d:$PATH"; done
-          selection='^(launcher_(sms_)?policy_test|cartridge_recognition_test|launcher_lock_on_[a-z]*_test|launcher_sega_cd(_flow|_gui)?_test|sega_cd_viewer_sdl_test|mod_luau_executable_test|launcher_mod_variant_test|launcher_mod_set_test|packaging_no_game_content_test|launcher_build_cancel(_gui)?_test|launcher_default_mode_test|older_build_test|file_picker_test|launcher_gamepad_journey_[a-z_]*_narrow_test|launcher_parity_gui_[a-z_]*_narrow_test|library_catalog_test|storage_test|launcher_ui_support_test|sv_host_test|sv_vsprite_admission_test|sv_state_test|sv_state_service_test|sms_viewer_states_test|sms_viewer_mod_test|sega_cd_viewer_states_test|sv_viewer_core_test|sv_input_diag_test|launcher_gui_navigation_test|launcher_audio_gui_test|launcher_input_diagnostics_test|viewer_foundation_layout_test|ci_shard_guard_test)$'
+          selection='^(launcher_(sms_)?policy_test|cartridge_recognition_test|launcher_lock_on_[a-z]*_test|launcher_sega_cd(_flow|_gui)?_test|sega_cd_viewer_sdl_test|mod_luau_executable_test|launcher_mod_variant_test|launcher_mod_set_test|packaging_no_game_content_test|launcher_build_cancel(_gui)?_test|launcher_default_mode_test|older_build_test|file_picker_test|launcher_gamepad_journey_[a-z_]*_narrow_test|launcher_parity_gui_[a-z_]*_narrow_test|library_catalog_test|storage_test|launcher_ui_support_test|sv_host_test|sv_vsprite_admission_test|sv_state_test|sv_state_service_test|sms_viewer_states_test|sms_viewer_mod_test|mod_set_sms_test|sega_cd_viewer_states_test|sv_viewer_core_test|sv_input_diag_test|launcher_gui_navigation_test|launcher_audio_gui_test|launcher_input_diagnostics_test|viewer_foundation_layout_test|ci_shard_guard_test)$'
           heavy='^(launcher_sega_cd_gui_test|launcher_parity_gui_journey_narrow_test|launcher_parity_gui_persist_narrow_test|launcher_gui_navigation_test)$'
           case "${{ matrix.part || 'all' }}" in
             all)  ctest --test-dir build/sdl3 -j 4 -R "$selection" --no-tests=error --output-on-failure --timeout 1500 ;;
             gui)  ctest --test-dir build/sdl3 -j 4 -R "$heavy" --no-tests=error --output-on-failure --timeout 1500 ;;
             rest) ctest --test-dir build/sdl3 -j 4 -R "$selection" -E "$heavy" --no-tests=error --output-on-failure --timeout 1500 ;;
             f28)
-              # F28 acceptance (SEG-138-T010/T011, SEG-140-T008/T009/T010): the generated-native SDL3 viewer suites (dummy video/audio, explicit instruction budgets). All eight (the six F28 suites, SEG-138-T012's hook suite and F16's optional-audio suite) MUST exist and run on Linux:
+              # F28 acceptance (SEG-138-T010/T011, SEG-140-T008/T009/T010): the generated-native SDL3 viewer suites (dummy video/audio, explicit instruction budgets). All nine (the six F28 suites, SEG-138-T012's hook suite, F16's optional-audio suite and F20's Genesis mod-set suite) MUST exist and run on Linux:
               # a missing registration or a test that reports itself skipped fails the job, never passes silently.
-              f28='^(mod_viewer_gameplay_test|mod_native_viewer_test|mod_vsprite_viewer_test|mod_vsprite_wide_test|mod_vsprite_abi2_test|mod_f28_integration_test|mod_hooks_build_test|mod_audio_optional_test)$'
+              f28='^(mod_viewer_gameplay_test|mod_native_viewer_test|mod_vsprite_viewer_test|mod_vsprite_wide_test|mod_vsprite_abi2_test|mod_f28_integration_test|mod_hooks_build_test|mod_audio_optional_test|mod_set_build_test)$'
               count=$(ctest --test-dir build/sdl3 -N -R "$f28" | sed -n 's/^Total Tests: //p')
-              [ "$count" = "8" ] || { echo "expected 8 F28/T012/F16 acceptance tests, found $count"; exit 1; }
+              [ "$count" = "9" ] || { echo "expected 9 F28/T012/F16/F20 acceptance tests, found $count"; exit 1; }
               ctest --test-dir build/sdl3 -j 2 -R "$f28" --no-tests=error --output-on-failure --timeout 1500 -V | tee f28.log
-              grep -q 'tests passed, 0 tests failed out of 8' f28.log || { echo "the eight F28/T012/F16 tests did not all pass"; exit 1; }
+              grep -q 'tests passed, 0 tests failed out of 9' f28.log || { echo "the nine F28/T012/F16/F20 tests did not all pass"; exit 1; }
+              grep -q 'mod_set_build_test: SDL3 viewer section ran' f28.log || { echo "the SDL3 section of mod_set_build_test did not run"; exit 1; }
               grep -q 'mod_audio_optional_test: SDL3 viewer section ran' f28.log || { echo "the SDL3 optional-audio section of mod_audio_optional_test did not run"; exit 1; }
               grep -q 'mod_hooks_build_test: SDL3 viewer section ran' f28.log || { echo "the SDL3 hook-execution section of mod_hooks_build_test did not run"; exit 1; }
               if grep -Eiq '(mod_[a-z0-9_]+_test): skipped' f28.log; then echo "an F28 test skipped itself"; exit 1; fi ;;

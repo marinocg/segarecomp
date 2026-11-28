@@ -7,6 +7,7 @@ usage: mod_set_test.py <segarecomp-cli> <platforms-dir> <C compiler> <tools/sega
 import importlib.util
 import json
 import os
+import re
 import struct
 import sys
 import zipfile
@@ -82,6 +83,16 @@ def excl(mod_id, version=None):
     return dep(mod_id, version, "incompatibility")
 
 
+# SEG-141-T006: the exact text of every composition and set-build diagnostic (class, message, every violation) is pinned in tests/data/mod_set_diagnostics.json. A deliberate wording change is made with
+# SEGARECOMP_UPDATE_GOLDEN=1 and reviewed as a diff. Temporary paths and package digests are normalised.
+GOLDEN = {}
+GOLDEN_PATH = Path(__file__).resolve().parent / "data" / "mod_set_diagnostics.json"
+
+
+def normalised(value):
+    return json.loads(re.sub(r"[0-9a-f]{64}", "<digest>", json.dumps(value).replace(str(tmp), "<tmp>")))
+
+
 def ok(what, *args):
     rc, doc, p = cli.run(*args)
     cli.check(rc == 0 and doc and doc.get("ok") is True, f"{what}: expected ok, got rc={rc} {doc} {p.stderr[-300:]}")
@@ -92,6 +103,8 @@ def refused(what, code, *args, says=(), mods=None):
     rc, doc, p = cli.run(*args)
     cli.check(rc == 1 and doc and doc.get("ok") is False and doc.get("class") == code, f"{what}: expected {code}, got rc={rc} {doc and (doc.get('class'), doc.get('error'))} {p.stderr[-300:]}")
     doc = doc or {}
+    if code.startswith(("E_SET_", "E_HEADER_FIELD", "E_EDIT_EXPECTED", "E_NOT_APPROVED")):
+        GOLDEN.setdefault(code, []).append(normalised({"case": what, "class": doc.get("class"), "error": doc.get("error"), "violations": doc.get("violations", [])}))
     for word in says:
         cli.check(word in doc.get("error", ""), f"{what}: the diagnostic says {word!r}: {doc.get('error')}")
     if mods is not None:
@@ -551,5 +564,46 @@ try:
 except OSError:
     pass
 cli.check(snapshot() == before, "the successful runs changed no input")
+
+# ------------------------------------------------------------------ SEG-141-T006: `mod set build` refusals that happen before any compiler runs, and the saved-definition classes through it
+def build_refused(what, code, members, *approvals, rom=ROM_PATH, **kw):
+    out = tmp / ("setbuild-" + str(len(GOLDEN.get(code, []))) + code)
+    args = ["mod", "set", "build", *members, "--rom", rom, "--out", out, "--cc", CC, "--sdk-dir", PLATFORMS]
+    for a in approvals:
+        args += ["--approve", a]
+    refused(what, code, *args, **kw)
+    cli.check(not (out / "game").exists() and not (out / "game.exe").exists(), f"{what}: no executable")
+
+
+def identity_of(d):
+    return ok("check " + d.name, "mod", "check", d)["package_identity"]
+
+
+def drawing(mod_id):
+    d = project(mod_id, luau=True)
+    toml = d / "mod.toml"
+    write(toml, toml.read_text().replace('required = ["host.log"]', 'required = ["host.log", "overlay.rgba"]').encode())
+    return d
+
+
+native_one = project("needs-approval", native=True)
+build_refused("a native member without approval", "E_NOT_APPROVED", [edit_a, native_one])
+build_refused("two drawing mods", "E_SET_PRESENTATION_CONFLICT", [drawing("draw-one"), drawing("draw-two")])
+sound = project("sound-mod", luau=True, extra='\n[[audio.mapping]]\nid = "now"\nkind = "event"\nspace = "m68k.work_ram"\noffset = 112\nwidth = 1\n\n[[audio.mapping.value]]\nname = "idle"\nvalue = 0\n')
+write(sound / "mod.toml", (sound / "mod.toml").read_text().replace('required = ["host.log"]', 'required = ["audio.event.read", "host.log"]').encode())
+build_refused("the audio API in a set", "E_SET_AUDIO_UNSUPPORTED", [edit_a, sound])
+plain_hook = project("hook-plain", native=True, hooks=HOOK, symbols=(("fn", "0x00000600"),))
+anchored = project("hook-anchored", native=True, hooks=HOOK + 'anchor = "other"\n', symbols=(("fn", "0x00000600"), ("other", "0x00000700")))
+build_refused("hooked functions declared with different anchors", "E_SET_HOOK_ANCHOR", [plain_hook, anchored], identity_of(plain_hook), identity_of(anchored))
+build_refused("a composition refusal reads the same from build", "E_SET_BPS_CONFLICT", [bps_a, edit_a])
+
+if os.environ.get("SEGARECOMP_UPDATE_GOLDEN") == "1":
+    write(GOLDEN_PATH, (json.dumps(GOLDEN, indent=1, sort_keys=True) + "\n").encode())
+golden = json.loads(GOLDEN_PATH.read_text()) if GOLDEN_PATH.is_file() else {}
+cli.check(sorted(golden) == sorted(GOLDEN), f"every diagnostic class has a golden record: golden only {sorted(set(golden) - set(GOLDEN))}, new {sorted(set(GOLDEN) - set(golden))}")
+for code in sorted(set(golden) & set(GOLDEN)):
+    for want, got in zip(golden[code], GOLDEN[code]):
+        cli.check(want == got, f"golden diagnostic {code} / {want.get('case')}: {got} != {want}")
+    cli.check(len(golden[code]) == len(GOLDEN[code]), f"golden case count of {code}")
 
 cli.done("mod_set_test")

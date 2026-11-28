@@ -56,7 +56,7 @@ struct SetViolation {
   std::vector<std::string> mods;
   std::string message;
 };
-// Every violated rule of an ordered set, in a deterministic order: E_SET_SIZE, then in member order E_SET_DUPLICATE_MOD and E_SET_PLATFORM, then per member (declaration order) E_SET_MISSING_DEPENDENCY,
+// Every violated rule of an ordered set, in a deterministic order: E_SET_SIZE, then in member order E_SET_DUPLICATE_MOD and E_SET_PLATFORM, then E_SET_PLATFORM_UNSUPPORTED (a platform without composition), then per member (declaration order) E_SET_MISSING_DEPENDENCY,
 // E_SET_VERSION_MISMATCH and E_SET_INCOMPATIBLE. A dependency is satisfied by any member of that id in the range, wherever it stands: the set order never installs or reorders anything.
 [[nodiscard]] std::vector<SetViolation> check_set_relations(std::span<const Manifest *const> members);
 // A mod used ALONE is a one-member set: the first violated rule (a single-mod build never silently ignores a declared requirement), or nothing.

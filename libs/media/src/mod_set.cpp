@@ -103,6 +103,9 @@ std::vector<SetViolation> check_set_relations(std::span<const Manifest *const> m
     if (m.platform != members.front()->platform)
       out.push_back({"E_SET_PLATFORM", {m.id, members.front()->id}, "the mod " + named(m.id) + " is for " + m.platform + " but " + named(members.front()->id) + " is for " + members.front()->platform});
   }
+  // Sega CD has no composition support yet (SEG-141-T008, post-beta): more than one mod is refused here, so every route (check, apply, save, variant, build, launcher) says the same.
+  if (members.size() > 1 && members.front()->platform == "sega-cd")
+    out.push_back({"E_SET_PLATFORM_UNSUPPORTED", {}, "mod sets of more than one mod are not supported for sega-cd; use one mod at a time"});
   const auto range_text = [](const ModRelation &r) { return r.version.empty() ? std::string("any version") : r.version; };
   for (const Manifest *member : members) {
     const Manifest &m = *member;

@@ -16,7 +16,21 @@ void expect(bool ok, const std::string &what) {
 }
 }  // namespace
 
+// SEG-141-T006: a platform without composition support refuses more than one mod with one stable class; one mod alone is not refused.
+void unsupported_platform() {
+  Manifest a, b;
+  a.id = "disc-a"; a.version = "1.0.0"; a.platform = "sega-cd";
+  b = a; b.id = "disc-b";
+  const Manifest *two[] = {&a, &b};
+  const auto violations = check_set_relations(two);
+  expect(violations.size() == 1 && violations[0].code == "E_SET_PLATFORM_UNSUPPORTED" && violations[0].message == "mod sets of more than one mod are not supported for sega-cd; use one mod at a time",
+         "two Sega CD mods are refused with the documented class and message");
+  const Manifest *one[] = {&a};
+  expect(check_set_relations(one).empty(), "one Sega CD mod is not a composition");
+}
+
 int main() {
+  unsupported_platform();
   // version ranges: numeric (not lexicographic) comparison, every comparator must hold
   expect(version_satisfies("1.10.0", ">=1.9.0") && !version_satisfies("1.9.0", ">=1.10.0"), "versions compare numerically");
   expect(version_satisfies("1.2.0", ">=1.2.0 <2.0.0") && !version_satisfies("2.0.0", ">=1.2.0 <2.0.0") && !version_satisfies("1.1.999999999", ">=1.2.0"), "a half-open range");

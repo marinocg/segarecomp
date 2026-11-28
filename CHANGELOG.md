@@ -7,9 +7,11 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
-### Mod sets: Genesis callback dispatch and hook ownership groundwork (ADR 0327)
+### Mod sets that run: several mods in one Genesis or Master System game (ADR 0327)
 
-* Two mods that hook one function, where either replaces it, are now refused by `mod set check` / `mod set apply` (`E_SET_HOOK_OWNER`); observing hooks may share a function. The Genesis runtime can dispatch several mods in set order with per-mod failure isolation and one combined saved state. No built game runs more than one mod yet, so multiple-mod composition stays unsupported.
+* Developer preview: `segarecomp mod set build` builds an ordered set (typed edits, injected code, Luau scripts and native C11 mods) into one program. Mods run in set order with a chained controller input; a faulting mod is disabled alone; the whole set is saved, rewound and replayed together, and a state loads only into the same set. The played program keeps each set's saves in its own folder.
+* A replaced function now has exactly one owner (`E_SET_HOOK_OWNER`); `before`/`after` hooks of several mods share a function.
+* Limits, all refused with a stable class: one drawing mod per set, no audio API in sets, no Sega CD sets, no two native mods with the same external symbol. The launcher cannot select or play a set yet. Synthetic evidence only.
 
 ### Master System mods: gameplay scripting, saved state, presentation and PSG sound mods (ADR 0325)
 

@@ -53,7 +53,7 @@ bool remove_patch(LibraryEntry &entry, const std::string &identity, const std::f
 
 // SEG-141-T001 (ADR 0326): ordered mod sets of one library game. The definition is the SHARED persisted format of segarecomp/mod_set.hpp (the one `segarecomp mod set` reads and writes), stored as
 // `<library_root>/mod-sets/<game sha256>/<name>.modset`; every check is the shared engine. A set is stored only when each member is an installed schema 3 mod of this game whose stored package still
-// verifies, and the whole set composes on the exact original image. The launcher does not yet SELECT, build or show a set (SEG-141-T006 and callback dispatch, SEG-141-T003).
+// verifies, and the whole set composes on the exact original image. The launcher does not SELECT, build or show a set (`segarecomp mod set build` builds one).
 struct ModSet {
   bool ok = false;
   std::string error;                                   // plain-language refusal naming EVERY violated rule
@@ -66,6 +66,11 @@ struct ModSet {
                                    const std::filesystem::path &library_root);
 // Reads the stored definition and verifies it again from scratch (a removed or changed member is a refusal, never a smaller set).
 [[nodiscard]] ModSet load_mod_set(const LibraryEntry &entry, const std::string &name, const std::filesystem::path &original_rom, const std::filesystem::path &library_root);
+
+// SEG-141-T006: the launcher's plain-language words for one composition failure class: what went wrong and what the player can do. Every class the engine and the set build can report has its own
+// text; an unknown class gets the generic one. The launcher has no mod-set screen: these texts are what ModSet::error carries.
+struct ModSetClassText { std::string title, next; };
+[[nodiscard]] ModSetClassText mod_set_class_text(const std::string &code);
 
 // "<name> <version>" label of an installed patch.
 [[nodiscard]] std::string patch_label(const InstalledPatch &patch);

@@ -1,7 +1,7 @@
 {
  "schema": "segarecomp-mod-support-matrix",
  "schema_version": 1,
- "as_of": "2026-11-27",
+ "as_of": "2026-11-28",
  "note": "Mod platform support levels, kept alongside the compatibility ledger and checked by tools/check_product_truth.py. A reporting document: it never changes capability detection or build admission. Rules: docs/product/mod-support-matrix.md.",
  "levels": [
   "supported-and-tested",
@@ -591,23 +591,32 @@
   {
    "platform": "genesis",
    "capability": "mod-composition",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
-    "docs/architecture/mod-execution-phases.md"
+    "ADR 0327",
+    "docs/product/mod-sets.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_set_build_test.py",
+    "tests/genesis_mod_set_test.cpp",
+    "tests/mod_set_test.py"
+   ],
    "planned_owner": "SEG-141-T006"
   },
   {
    "platform": "master_system",
    "capability": "mod-composition",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-with-limitations",
    "evidence": [
-    "docs/architecture/mod-execution-phases.md"
+    "ADR 0327",
+    "docs/product/mod-sets.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_set_sms_test.py",
+    "tests/mod_set_test.py"
+   ],
    "planned_owner": "SEG-141-T007"
   },
   {

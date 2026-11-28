@@ -213,7 +213,8 @@ not_built("one mod twice", "E_SET_DUPLICATE_MOD", [watcher, watcher])
 not_built("the audio API in a set", "E_SET_AUDIO_UNSUPPORTED", [watcher, audio])
 clash = native_mod("clash", ASSIST.replace('"assist"', '"clash"') + "\nint set_clash_symbol(void) { return 1; }\n", ["input.intercept", "input.read", "memory.write.m68k.work_ram", "state.mod"], "\n[state]\nschema = 1\n" + memory(0x42, 2))
 clash_two = native_mod("clash-two", ASSIST + "\nint set_clash_symbol(void) { return 2; }\n", ["input.intercept", "input.read", "memory.write.m68k.work_ram", "state.mod"], "\n[state]\nschema = 1\n" + memory(0x44, 2))
-not_built("colliding native symbols", "E_SET_NATIVE_LINK", [clash, clash_two], approve=(identity(clash), identity(clash_two)))
+collision = not_built("colliding native symbols", "E_SET_NATIVE_LINK", [clash, clash_two], approve=(identity(clash), identity(clash_two)))
+cli.check(collision.get("error") == "The mod set program could not be linked: two native mods may define the same external symbol (see build.log).", f"the pinned link diagnostic: {collision.get('error')}")
 
 # ---------------------------------------------------------------- the composite program: Luau HUD + native + typed edit + Luau gameplay
 order = [hud, assist, watcher, edit]
