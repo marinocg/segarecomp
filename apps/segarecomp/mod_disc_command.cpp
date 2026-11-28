@@ -239,14 +239,28 @@ int run_build(const Options &o, const fs::path &cue, const fs::path &output, con
   return run_process(argv, log);
 }
 
-int disc_build(const Options &o) {
+int disc_build(Options o) {
   if (o.cue.empty() || o.bios.empty() || o.out.empty() || o.runtime_dir.empty() || o.cc.empty() || o.budget.empty()) return usage();
   Opened opened;
   if (const auto r = open_and_plan(o.target, o.cue, opened)) return refuse(*r);
   std::string bios_sha;
   if (const auto r = check_bios(opened.package.manifest, o.bios, opened.original, bios_sha)) return refuse(*r);
   std::error_code ec;
-  const fs::path out = fs::absolute(o.out, ec);
+  // Judged and USED in one resolved form: `new/..` collapses when the check resolves a path that does not exist yet, but creating the unresolved spelling would still create `new`.
+  const auto resolved = [](const fs::path &path) {
+    std::error_code failed;
+    const fs::path absolute = fs::absolute(path, failed);
+    const fs::path full = fs::weakly_canonical(absolute, failed);
+    return failed ? fs::path() : full;
+  };
+  const fs::path out = resolved(o.out);
+  if (out.empty()) return refuse({"E_DISC_OUTPUT", "the build folder path cannot be resolved"});
+  for (auto &e : o.build)
+    if (e.first == "--cache-dir") {
+      const fs::path cache_dir = resolved(e.second);
+      if (cache_dir.empty()) return refuse({"E_DISC_OUTPUT", "the cache folder path cannot be resolved"});
+      e.second = cache_dir.string();
+    }
   const fs::path source = fs::absolute(o.cue, ec).parent_path();
   // Every folder this command writes is judged BEFORE anything is created: nothing may appear in the original disc's folder.
   if (inside_folder(out, source)) return refuse({"E_DISC_OUTPUT", "the build folder is the original disc's folder or lies inside it; originals are never written"});

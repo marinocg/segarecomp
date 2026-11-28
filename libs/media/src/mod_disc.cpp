@@ -224,6 +224,7 @@ std::vector<Metadata> disc_metadata(const DiscImage &disc) {
       return v;
     };
     const std::uint32_t table_bytes = word(132, false);
+    if (table_bytes != word(136, true)) fail("E_DISC_METADATA", "the two halves of the ISO9660 path table size disagree, so the tables cannot be bounded");
     if (table_bytes > kIso9660MaxDirectoryBytes) fail("E_DISC_METADATA", "an ISO9660 path table is larger than supported");
     for (const std::size_t o : {std::size_t{140}, std::size_t{144}, std::size_t{148}, std::size_t{152}})
       if (const std::uint32_t location = word(o, o >= 148); location != 0) blocks(location, table_bytes, "an ISO9660 path table");

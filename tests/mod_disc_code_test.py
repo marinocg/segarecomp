@@ -217,6 +217,12 @@ def main():
         refused(cli("disc-build", good, "--out", tmp / "o-cache", "--cue", fx / "disc" / "disc.cue", "--bios", fx / "bios.bin", "--runtime-dir", ROOT, "--cc", CC, "--budget", BUDGET,
                     "--cache-dir", fx / "disc" / "cachehere"), "E_DISC_OUTPUT", "an object cache inside the original disc's folder")
         check(sorted(p.name for p in (fx / "disc").iterdir()) == listing and not (tmp / "o-cache").exists(), "neither refusal creates anything")
+        # A spelling that passes THROUGH the originals' folder (`<originals>/new/../../x`) resolves outside it: the build uses the resolved form, so `new` is never created.
+        through = str(fx / "disc") + "/new/../../through-out"
+        code, doc, err = cli("disc-build", good, "--out", through, "--cue", fx / "disc" / "disc.cue", "--bios", fx / "bios.bin", "--runtime-dir", ROOT, "--cc", CC, "--budget", BUDGET, "--jobs", "4",
+                             "--cache-dir", str(fx / "disc") + "/new2/../../../objects")
+        check(code == 0 and (fx / "through-out" / "disc-mod.json").exists() and sorted(p.name for p in (fx / "disc").iterdir()) == listing,
+              "a path through the originals' folder builds at its resolved place and creates nothing in that folder: %s %s" % (doc, err[-300:]))
 
         # No option that turns a proof source off, and no test-only control, is forwarded to the build.
         for option in ("--static-boot", "--static-discovery", "--boot-fixture-profiles", "--pass-set", "--viewer-host-source"):
