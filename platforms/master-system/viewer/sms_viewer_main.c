@@ -147,6 +147,13 @@ static void state_setup(SmsSdl3Viewer *viewer, const SmsViewerOptions *options) 
   const char *variant = getenv("SEGARECOMP_SAVE_VARIANT");
   const char *off = getenv("SEGARECOMP_REWIND");
   const char *slots_reason = NULL;
+#ifdef SEGARECOMP_SET_IDENTITY
+  char set_save_dir[1100];   /* SEG-141-T005 (ADR 0327): a mod-set program keeps its state slots in its own namespace */
+  if (save_dir != NULL && *save_dir != '\0') {
+    const int n = snprintf(set_save_dir, sizeof set_save_dir, "%s/sets/%s", save_dir, SEGARECOMP_SET_IDENTITY);
+    save_dir = n > 0 && (size_t)n < sizeof set_save_dir ? set_save_dir : NULL;
+  }
+#endif
   memset(&cfg, 0, sizeof cfg);
   cfg.rig = &rig;
   cfg.rewind_budget_bytes = SV_STATE_REWIND_BUDGET_BYTES;

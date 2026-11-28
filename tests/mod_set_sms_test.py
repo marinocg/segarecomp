@@ -220,7 +220,7 @@ import genesis_startup_bridge as bridge  # noqa: E402
 if sys.platform == "linux" and bridge.find_sdl3() is not None:
     include, lib = bridge.find_sdl3()[0][1], bridge.find_sdl3()[1][1]
     args, played = build_args([turbo, runner, edit], "played", (ids["turbo"],))
-    ok("the played set builds", *args, "--sdl3-include", include, "--sdl3-lib", lib)
+    doc_play = ok("the played set builds", *args, "--sdl3-include", include, "--sdl3-lib", lib)
     work = tmp / "viewer-work"
     work.mkdir()
 
@@ -258,6 +258,7 @@ if sys.platform == "linux" and bridge.find_sdl3() is not None:
     save = tmp / "viewer-save"
     _, saved_report, events, _ = session(120, "20 2\n60 2K\n61 2\n", save)
     cli.check(saved_report == plain and bool(events) and events[0]["status"] == "ok", f"saving the played set does not perturb it: {events}")
+    cli.check((save / "sets" / doc_play["set_identity"] / "states" / "quick.sgstate").is_file() and not (save / "states").exists(), "the played set saves inside its own namespace")
     _, loaded_report, events, loaded_tags = session(70, "10 2M\n11 2\n", save)
     cli.check(bool(events) and events[0]["event"] == "load" and events[0]["status"] == "ok" and loaded_report is not None and plain is not None and loaded_report["canonical_sha256"] == plain["canonical_sha256"],
               f"a separate process loads the set state and reaches the same canonical state: {events} {loaded_report} {plain}")

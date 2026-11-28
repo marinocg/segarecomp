@@ -304,7 +304,16 @@ static int session_stop(void *ctx, char *message, size_t cap) {
 static const char *persist_dir(void) {
   const char *dir = getenv("SEGARECOMP_SAVE_DIR");
   if (g_session_on_requested()) return NULL;   /* SEG-146-T006: a recording/replay starts from power-on and never reads or writes cartridge saves */
-  return dir != NULL && *dir != '\0' ? dir : NULL;
+  if (dir == NULL || *dir == '\0') return NULL;
+#ifdef SEGARECOMP_SET_IDENTITY
+  {   /* SEG-141-T005 (ADR 0327): a mod-set program keeps its battery memory and state slots in its own namespace, so two sets (or a set and any other variant) pointed at one folder never share a file */
+    static char namespaced[1100];
+    const int n = snprintf(namespaced, sizeof namespaced, "%s/sets/%s", dir, SEGARECOMP_SET_IDENTITY);
+    return n > 0 && (size_t)n < sizeof namespaced ? namespaced : NULL;
+  }
+#else
+  return dir;
+#endif
 }
 
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
@@ -463,7 +472,11 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     } else if (!parse_hex32(getenv("SEGARECOMP_ROM_SHA256"), state_config.identity.source_sha256)) {
       reason = "This game has no verified identity, so its states cannot be tied to it.";
     } else {
+#ifdef SEGARECOMP_SET_IDENTITY
+      const char *variant = SEGARECOMP_SET_IDENTITY;   /* SEG-141-T005: the program's own composite identity is authoritative; the environment cannot name another variant */
+#else
       const char *variant = getenv("SEGARECOMP_SAVE_VARIANT");   /* a patch package identity (64 hex), or absent / "vanilla" */
+#endif
       if (variant != NULL && *variant != '\0' && strcmp(variant, "vanilla") != 0 && !parse_hex32(variant, state_config.identity.variant_sha256))
         reason = "The version of this game has no valid identity, so its states cannot be tied to it.";
       else if (snprintf(state_dir, sizeof state_dir, "%s/states", persist_dir()) <= 0 || strlen(persist_dir()) + 8U >= sizeof state_dir)

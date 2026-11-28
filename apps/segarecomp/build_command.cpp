@@ -165,6 +165,7 @@ struct Options {
   std::vector<SetUnit> set_units;    // every native member's staged .c units
   fs::path set_artifact;             // the generated member table
   std::string set_status;            // its status.json member
+  std::string set_save_identity;     // the composite identity of ANY set build (with or without a provider): the played program's save namespace (SEG-141-T005)
   bool native_mod = false;           // SEG-138-T011: the scheduled mod is a native ABI 2 provider (no Luau VM)
   bool native_frame_state = false;   // W04 gap B: the provider was granted frame.work_ram (the producer then verifies the frame's state epoch and may admit game-art virtual sprites)
   bool native_frame_vdp = false;     // SEG-152-T003 (ADR 0320): the provider REQUIRED frame.vdp: its render callback runs at the producer seam with an immutable frame view
@@ -1312,6 +1313,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (build.play)
     build.c_base.insert(build.c_base.end(), {"-I", build.viewer.string(), "-I", (build.root / "libs" / "viewer" / "include").string(), "-I",
                                              (build.root / "libs" / "viewer" / "src").string(), "-I", options.sdl3_include->string()});
+  if (build.play && !options.set_save_identity.empty()) build.c_base.push_back("-DSEGARECOMP_SET_IDENTITY=\"" + options.set_save_identity + "\"");
   if (!options.native_source.empty()) {
     build.c_isolated = {options.cc};
     build.c_isolated.insert(build.c_isolated.end(), options.cc_args.begin(), options.cc_args.end());
@@ -2064,6 +2066,7 @@ std::optional<SmsModRefusal> prepare_set_route(Options &options, Log &log, const
   options.rom = input / "effective.rom";
   if (sms_set) { options.platform = "master-system"; options.mapper = set.mapper; }
   options.set_status = segarecomp_cli::set_status_json(set);
+  options.set_save_identity = set.identity;
   log.line("mod set: identity=" + set.identity + " original_sha256=" + original_sha + " effective_sha256=" + set.effective_sha256 + " members=" + std::to_string(set.packages.size()) + " running=" + std::to_string(set.runtime.size()));
   if (set.runtime.empty()) return std::nullopt;
   for (const auto &r : set.runtime)
@@ -2617,6 +2620,7 @@ int run_build(Options options) {
         const fs::path viewer_lib = root / "libs" / "viewer";
         base.insert(base.end(), {"-I", viewer.string(), "-I", (viewer_lib / "include").string(), "-I", (viewer_lib / "src").string(), "-I",
                                  options.sdl3_include->string()});
+        if (!options.set_save_identity.empty()) base.push_back("-DSEGARECOMP_SET_IDENTITY=\"" + options.set_save_identity + "\"");
         for (const char *name : {"sms_viewer.c", "sms_snapshot.c", "sms_viewer_state.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, {}});
         // SEG-058 (ADR 0120): the shared SDL3 viewer foundation, compiled with the game exactly like the console adapter above.
         for (const char *name : kViewerFoundationSources) compile.push_back({viewer_lib / "src" / name, {}});

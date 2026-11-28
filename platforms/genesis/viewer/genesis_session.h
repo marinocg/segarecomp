@@ -209,7 +209,11 @@ static inline void genesis_session_install(GenesisSession *s, GenesisRuntime *rt
 
 static inline int genesis_session_identity(SvSessionIdentity *id, const char *profile, char *error, size_t cap) {
   const char *image = getenv("SEGARECOMP_ROM_SHA256");
+#ifdef SEGARECOMP_SET_IDENTITY
+  const char *variant = SEGARECOMP_SET_IDENTITY;   /* SEG-141-T005: a mod-set program records under its own composite identity */
+#else
   const char *variant = getenv("SEGARECOMP_SAVE_VARIANT");
+#endif
   memset(id, 0, sizeof *id);
   snprintf(id->platform, sizeof id->platform, "genesis");
   snprintf(id->digest_profile, sizeof id->digest_profile, "%s", profile);

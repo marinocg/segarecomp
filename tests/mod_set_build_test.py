@@ -120,6 +120,9 @@ function save() return { seen = seen } end
 function load(s) seen = s.seen end
 """
 watcher = luau_mod("watcher", WATCHER, ["input.read", "memory.write.m68k.work_ram", "state.mod"], "\n[state]\nschema = 1\n" + memory(0x50, 2))
+# a second script with the SAME saved-state key (`seen`): each mod's saved values are its own
+TWIN = WATCHER.replace("seen = seen + 1", "seen = seen + 3").replace("0x50", "0x52")
+twin = luau_mod("watcher-twin", TWIN, ["input.read", "memory.write.m68k.work_ram", "state.mod"], "\n[state]\nschema = 1\n" + memory(0x52, 2))
 hud = tmp / "gameplay-example"
 shutil.copytree(EXAMPLE, hud, ignore=shutil.ignore_patterns("fixture_rom.py", "README.md", "__pycache__"))
 EDIT_AT = len(ROM) - 2
@@ -268,6 +271,15 @@ cli.check(loaded["loaded_state_sha256"] != "" and {n: m["write_digest"] for n, m
 rc, lines, log = run(out_rev, PAD, {"SEGARECOMP_MOD_LOAD": str(state_file)})
 cli.check(rc == 5 and lines.get("MOD_REFUSED", {}).get("class") == "E_STATE_RESTORE", f"a state of the other order is refused: rc={rc} {lines.get('MOD_REFUSED')} {log[-300:]}")
 
+doc_t, out_t = built("two mods with one state key", [assist, watcher, twin], approve=(ids["assist"],), name="same-key")
+base_t, base_frames = observation(out_t, PAD)
+twin_state = tmp / "twin.state"
+observation(out_t, PAD, {"SEGARECOMP_MOD_CHECKPOINT": "12", "SEGARECOMP_MOD_SAVE": str(twin_state)})
+resumed_t, resumed_frames = observation(out_t, PAD, {"SEGARECOMP_MOD_LOAD": str(twin_state), "SEGARECOMP_CAPTURE_FIRST": "20", "SEGARECOMP_CAPTURE_COUNT": "10"})
+by_t = members_of(base_t)
+cli.check(by_t["watcher"]["write_digest"] != by_t["watcher-twin"]["write_digest"] and {n: m["write_digest"] for n, m in members_of(resumed_t).items()} == {n: m["write_digest"] for n, m in by_t.items()},
+          f"two mods with the same saved key keep separate values across save and load: {by_t}")
+
 # ---------------------------------------------------------------- failure isolation in the built program
 FAULTY = """local n = 0
 function frame_end(frame: number)
@@ -341,6 +353,34 @@ if sdl is not None and (sdl / "include").is_dir():
     summary = tagged.get("MOD_SET_SUMMARY", {"members": []})
     cli.check(len(summary["members"]) == 3 and not any(m["faulted"] for m in summary["members"]) and members_of(summary)["gameplay-example"]["overlay_ops"] > 0, f"the played set ran without faults and the drawing mod rendered: {summary}")
     cli.check(frame.is_file() and vanilla_pixels != b"" and frame.read_bytes() != vanilla_pixels, "the drawing mod's HUD is in the presented frame")
+    # ---- saves and states are namespaced by the set (SEG-141-T005): two sets sharing one save folder never touch each other's files
+    shared = tmp / "shared-saves"
+    args, out_w = build("the played reordered set", [watcher, assist, hud, edit], name="viewer-reordered", approve=(ids["assist"],))
+    reordered_doc = ok("the played reordered set builds", *args, "--sdl3-include", sdl / "include", "--sdl3-lib", sdl / "lib", "--test-frame-seam", "1")
+    set_a = json.loads((out_v / "status.json").read_text())["mod_set"]["identity"]
+    set_b = reordered_doc.get("set_identity", "")
+    rom_sha = json.loads((out_v / "status.json").read_text())["mod_set"]["effective_sha256"]
+
+    def played(program, tag, pad, folder):
+        p, lines, _, _ = h.play(program, tag, pad=pad, save=folder, identity="f" * 64, rom_sha=rom_sha, budget=60_000_000)   # a foreign SEGARECOMP_SAVE_VARIANT is ignored by a set program
+        events = [json.loads(x.split(" ", 1)[1]) for x in p.stderr.splitlines() if x.startswith("VIEWER_STATE ")]
+        return p, events
+
+    p, events = played(out_v, "save-a", "30 K\n31 -\n90 Q\n", shared)
+    slot_a = shared / "sets" / set_a / "states" / "quick.sgstate"
+    cli.check(bool(events) and events[0]["event"] == "save" and events[0]["status"] == "ok" and slot_a.is_file() and not (shared / "states").exists(), f"the first set saves inside its own namespace: {events} {p.stderr[-600:]}")
+    kept = slot_a.read_bytes() if slot_a.is_file() else b""
+    cli.check(kept[64:96] == bytes.fromhex(set_a), "the state records the set's composite identity, not the environment's variant")
+    p, events = played(out_w, "load-b", "10 M\n60 Q\n", shared)
+    cli.check(bool(events) and events[0]["event"] == "load" and events[0]["status"] != "ok", f"another set does not see the first set's slot: {events}")
+    p, events = played(out_w, "save-b", "30 K\n31 -\n90 Q\n", shared)
+    slot_b = shared / "sets" / set_b / "states" / "quick.sgstate"
+    cli.check(set_a != set_b and slot_b.is_file() and slot_a.read_bytes() == kept, "saving in another set leaves the first set's save untouched")
+    slot_b.write_bytes(kept)   # even a file copied across namespaces is refused by its identity
+    p, events = played(out_w, "forged-b", "10 M\n60 Q\n", shared)
+    cli.check(bool(events) and events[0]["status"] == "failed", f"a state from another set is rejected: {events}")
+    p, events = played(out_v, "reload-a", "10 M\n60 Q\n", shared)
+    cli.check(bool(events) and events[0]["event"] == "load" and events[0]["status"] == "ok", f"the first set still loads its own save: {events}")
     print("mod_set_build_test: SDL3 viewer section ran")
 
 shutil.rmtree(tmp, ignore_errors=True)
