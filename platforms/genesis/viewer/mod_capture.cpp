@@ -435,6 +435,8 @@ void wrapped_phase(void *state, const SegaModHost *host) {
 
 extern "C" {
 
+}  // extern "C"
+
 namespace {
 
 bool refuse_begin(const std::string &cls) {
@@ -585,6 +587,8 @@ bool draws(const SegarecompModMemberRow &row) {
 }
 
 }  // namespace
+
+extern "C" {
 
 // 0 = the mods are attached; nonzero = refused (the program must not run a half-configured mod: the caller exits).
 int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
