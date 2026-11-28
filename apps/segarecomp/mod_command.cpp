@@ -530,6 +530,7 @@ int run_api(bool declarations_only) {
 int run_session(const fs::path &target, const fs::path &rom, std::uint64_t frames, const fs::path &bmp) {
   mod::Package p;
   if (const auto r = load_package(target, p)) return refuse(*r);
+  if (const auto r = mod::check_standalone(p.manifest)) return refuse(*r);   // ADR 0326: the session runs this mod alone
   std::vector<std::uint8_t> image;
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the image cannot be read"});
   const mod::EffectiveImage e = mod::effective_image(p, image, kAdmit);
@@ -633,7 +634,7 @@ int set_check(const std::vector<fs::path> &targets, const fs::path &rom, const f
     if (!c.ok) return refuse_set(c.violations);
     if (!out.empty() && !write_atomic(out, c.image)) return refuse({"E_ARCHIVE_ENTRY", "the composed image cannot be written"});
     composed = ",\"composed\":true,\"original_sha256\":\"" + c.original_sha256 + "\",\"effective_sha256\":\"" + c.effective_sha256 + "\",\"write_ranges\":" +
-               std::to_string(std::count_if(c.claims.begin(), c.claims.end(), [](const mod::SetClaim &x) { return x.kind == "write"; })) + ",\"header_repaired\":" + (c.header_repaired ? "true" : "false") + ",\"warnings\":" + warnings_json(c.warnings);
+               std::to_string(std::count_if(c.claims.begin(), c.claims.end(), [](const mod::SetClaim &x) { return x.kind == "write" && x.space == "cartridge-image"; })) + ",\"header_repaired\":" + (c.header_repaired ? "true" : "false") + ",\"warnings\":" + warnings_json(c.warnings);
   }
   std::cout << "{\"ok\":true,\"platform\":\"" << packages.front().manifest.platform << "\",\"members\":" << members_json(packages) << composed << "}\n";
   return 0;

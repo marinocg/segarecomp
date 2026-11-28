@@ -4,13 +4,21 @@
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
+#include <map>
 #include <tuple>
+#include <utility>
 
 namespace segarecomp::mod {
 
 namespace {
 
 std::string digest_of(std::string_view text) { return sha256_hex({reinterpret_cast<const std::uint8_t *>(text.data()), text.size()}); }
+
+std::string hex_text(std::uint64_t v) {
+  std::string out;
+  do { out.insert(out.begin(), "0123456789abcdef"[v & 15U]); v >>= 4U; } while (v != 0);
+  return out;
+}
 
 std::string named(const std::string &id) { return "\"" + id + "\""; }
 
@@ -126,18 +134,29 @@ std::string adapter_capability_digest(const Adapter &adapter) {
   return digest_of(text);
 }
 
-std::vector<SetOverlap> find_overlaps(std::span<const SetClaim> claims, std::size_t limit) {
-  std::vector<SetOverlap> out;
-  for (const SetClaim &a : claims)
-    for (const SetClaim &b : claims) {
-      if (a.member >= b.member || a.space != b.space || (a.kind != "write" && b.kind != "write")) continue;
-      const std::uint64_t start = std::max(a.start, b.start), end = std::min(a.end, b.end);
-      if (start < end) out.push_back({a, b, start, end});
+std::vector<SetOverlap> find_overlaps(std::span<const SetClaim> claims) {
+  std::vector<const SetClaim *> sorted;
+  for (const SetClaim &c : claims) if (c.start < c.end) sorted.push_back(&c);
+  std::sort(sorted.begin(), sorted.end(), [](const SetClaim *x, const SetClaim *y) { return std::tie(x->space, x->start, x->end, x->member, x->kind) < std::tie(y->space, y->start, y->end, y->member, y->kind); });
+  // key: (first member, second member, space, first writes, second writes). A sweep over the sorted claims, so the work follows the claims that actually touch.
+  std::map<std::tuple<std::size_t, std::size_t, std::string, bool, bool>, SetOverlap> found;
+  for (std::size_t i = 0; i < sorted.size(); ++i)
+    for (std::size_t j = i + 1; j < sorted.size() && sorted[j]->space == sorted[i]->space && sorted[j]->start < sorted[i]->end; ++j) {
+      const SetClaim *a = sorted[i], *b = sorted[j];
+      if (a->member == b->member || (a->kind != "write" && b->kind != "write")) continue;
+      if (b->member < a->member) std::swap(a, b);
+      const std::uint64_t start = std::max(a->start, b->start), end = std::min(a->end, b->end);
+      const auto key = std::make_tuple(a->member, b->member, a->space, a->kind == "write", b->kind == "write");
+      const auto it = found.find(key);
+      if (it == found.end()) { found.emplace(key, SetOverlap{*a, *b, start, end, 1}); continue; }
+      ++it->second.ranges;
+      if (std::tie(start, end) < std::tie(it->second.start, it->second.end)) { it->second.first = *a; it->second.second = *b; it->second.start = start; it->second.end = end; }
     }
+  std::vector<SetOverlap> out;
+  for (auto &entry : found) out.push_back(std::move(entry.second));
   std::stable_sort(out.begin(), out.end(), [](const SetOverlap &x, const SetOverlap &y) {
     return std::tie(x.first.member, x.second.member, x.first.space, x.start, x.end) < std::tie(y.first.member, y.second.member, y.first.space, y.start, y.end);
   });
-  if (out.size() > limit) out.resize(limit);
   return out;
 }
 
@@ -207,6 +226,11 @@ SetComposition compose_set(std::span<const Package *const> members, std::span<co
       }
       for (const ResolvedHook &h : resolved.hooks) { out.claims.push_back({i, "cartridge-image", h.cpu, "hook-site", h.entry, static_cast<std::uint64_t>(h.entry) + 2U}); hooks[i] = true; }
     }
+    if (platform == "genesis" && cpu == "z80") {   // the sound CPU runs these blocks from its RAM: another member's code at the same address is a conflict even when the cartridge bytes are disjoint
+      const GuestListingResult l = guest_listing(m, members[i]->files, revision_for(m, out.original_sha256)->label);
+      if (!l.ok) { out.violations.push_back({l.rejection.code, {m.id}, "the mod " + named(m.id) + ": " + l.rejection.message}); return out; }
+      for (const GuestBlock &b : l.listing.blocks) out.claims.push_back({i, "z80.sound_ram", cpu, "write", b.address, static_cast<std::uint64_t>(b.address) + b.bytes.size()});
+    }
   }
 
   // a bps-image declares no write ranges and was made from the original: it cannot share the image with another change, and no hook site can be shown to survive it
@@ -223,7 +247,8 @@ SetComposition compose_set(std::span<const Package *const> members, std::span<co
   const std::vector<SetOverlap> overlaps = find_overlaps(out.claims);
   for (const SetOverlap &o : overlaps) {
     const std::string &a = manifests[o.first.member]->id, &b = manifests[o.second.member]->id;
-    const std::string where = image_location(platform, o.start) + ", " + std::to_string(o.end - o.start) + " byte(s)";
+    const std::string where = (o.first.space == "cartridge-image" ? image_location(platform, o.start) : o.first.space + " address 0x" + hex_text(o.start)) + ", " + std::to_string(o.end - o.start) + " byte(s)" +
+                              (o.ranges > 1 ? " (the first of " + std::to_string(o.ranges) + " overlapping ranges)" : "");
     if (o.first.kind == "write" && o.second.kind == "write") {
       out.violations.push_back({"E_SET_EDIT_OVERLAP", {a, b}, "the mods " + named(a) + " and " + named(b) + " both write " + where + "; overlapping changes are rejected, never merged"});
     } else {
@@ -286,7 +311,7 @@ SetComposition compose_set(std::span<const Package *const> members, std::span<co
     for (std::size_t i = 0; i < members.size(); ++i) {   // name the member whose write the combined repair would discard
       std::vector<std::uint8_t> probe = image;
       const HeaderRepair one = repair_header(platform, policy, original, probe, targets[i].written);
-      if (!one.ok) {
+      if (!one.ok && one.rejection.code == "E_HEADER_FIELD_COLLISION") {   // any other refusal concerns the image or the policy, not this member's writes
         std::vector<std::string> mods = {manifests[i]->id};
         if (explicit_repair && repairing != manifests[i]->id) mods.push_back(repairing);
         out.violations.push_back({one.rejection.code, mods, "the mod " + named(manifests[i]->id) + ": " + one.rejection.message});
@@ -294,7 +319,10 @@ SetComposition compose_set(std::span<const Package *const> members, std::span<co
       }
     }
     const HeaderRepair header = repair_header(platform, policy, original, image, authored);
-    if (!header.ok) { out.violations.push_back({header.rejection.code, {}, header.rejection.message}); return out; }
+    if (!header.ok) {
+      out.violations.push_back({header.rejection.code, repairing.empty() ? std::vector<std::string>{} : std::vector<std::string>{repairing}, header.rejection.message});
+      return out;
+    }
     out.header_repaired = header.repaired;
     out.warnings = header.warnings;
   }

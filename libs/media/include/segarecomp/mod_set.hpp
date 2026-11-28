@@ -64,24 +64,27 @@ struct SetSource {
 [[nodiscard]] std::string adapter_capability_digest(const Adapter &adapter);
 
 // ---- conflict claims (SEG-141-T002) ----
-// A range one member owns in one address space. Spaces never overlap each other: `cartridge-image` (offsets of the cartridge image, bank-qualified on Master System by image_location) is the only
-// space a readable package can claim today; disc platforms claim one space per file/extent (`disc-file:<path>`) when their payload kinds exist. `cpu` and `kind` are diagnostic.
+// A range one member owns in one address space. Different spaces never overlap each other: `cartridge-image` (offsets of the cartridge image, bank-qualified on Master System by image_location),
+// `z80.sound_ram` (the Genesis sound-CPU addresses injected Z80 code is assembled for) and, once disc payload kinds exist, one space per file/extent (`disc-file:<path>`). `cpu` and `kind` are diagnostic
+// and rule selection.
 struct SetClaim {
   std::size_t member = 0;
   std::string space, cpu, kind;   // kind: "write" (edit or injected block) | "hook-site"
   std::uint64_t start = 0, end = 0;
 };
 struct SetOverlap {
-  SetClaim first, second;         // first.member < second.member
+  SetClaim first, second;         // first.member < second.member: the claims of the lowest overlapping range of this pair
   std::uint64_t start = 0, end = 0;
+  std::size_t ranges = 1;         // how many overlapping claim pairs this entry stands for
 };
-// Every overlap between claims of DIFFERENT members in the same space where at least one side writes, ordered by (members, space, start). At most `limit` are returned.
-[[nodiscard]] std::vector<SetOverlap> find_overlaps(std::span<const SetClaim> claims, std::size_t limit = 32);
+// Every overlap between claims of DIFFERENT members in the same space where at least one side writes: exactly one entry per (pair of members, space, which side writes), so no colliding pair is ever
+// left out and the report stays bounded by the member count. Ordered by (members, space, start).
+[[nodiscard]] std::vector<SetOverlap> find_overlaps(std::span<const SetClaim> claims);
 
 // ---- composition ----
 struct SetComposition {
   bool ok = false;
-  std::vector<SetViolation> violations;            // every violation found; empty iff ok
+  std::vector<SetViolation> violations;            // every violation found (byte overlaps: one per colliding pair of members and space); empty iff ok
   SetSource source;
   std::vector<std::string> member_effective;       // each member's own effective image digest against the original (set order)
   std::string original_sha256, effective_sha256;

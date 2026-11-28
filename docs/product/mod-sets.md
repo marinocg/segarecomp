@@ -23,14 +23,16 @@ version = ">=1.2.0 <2.0.0"      # optional: every version when absent
 id = "old-hud"
 ```
 
-A range is 1 to 4 comparators (`=`, `>=`, `>`, `<=`, `<`) separated by one space; all must hold. Nothing is resolved or downloaded: you choose the set, and it is checked. A required mod may stand anywhere in the set. A package with an unmet requirement cannot be built alone either.
+A range is 1 to 4 comparators (`=`, `>=`, `>`, `<=`, `<`) separated by one space; all must hold. Nothing is resolved or downloaded: you choose the set, and it is checked. A required mod may stand anywhere in the set. A package with an unmet requirement cannot be built or run alone either (`mod variant`, `segarecomp build`, `mod diff-run`, `mod test`, `mod session`). `mod apply` and `mod bps` still export that one mod's image or patch.
 
 ## What composes
 
 | Combination | Result |
 | --- | --- |
 | Typed edits and injected code writing different bytes (adjacent is fine) | composed; one header repair over the result |
-| Any two mods writing the same byte, even the same value | `E_SET_EDIT_OVERLAP` |
+| Any two mods writing the same byte, even the same value | `E_SET_EDIT_OVERLAP` (one entry per pair of mods, with the number of overlapping ranges) |
+| Genesis injected Z80 code of two mods assembled for the same sound-RAM address | `E_SET_EDIT_OVERLAP` |
+| Disjoint blocks in a shared free range, or an edit in unused bytes of another mod's free range | composed |
 | A mod whose expected value is what another mod writes | `E_EDIT_EXPECTED_MISMATCH` (assertions always use the unmodified original) |
 | A `bps-image` mod with any other image-changing or hooking mod | `E_SET_BPS_CONFLICT` |
 | A `bps-image` mod with mods that change no bytes and declare no hook | composed (the BPS target) |

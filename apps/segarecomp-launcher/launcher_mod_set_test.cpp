@@ -1,6 +1,7 @@
 // SEG-141-T001 (ADR 0326): the launcher library's persisted mod sets: the SHARED definition format and composition engine over really installed packages of one library game. No build, no window.
 // Fabricated image and packages only.   launcher_mod_set_test <work-directory>
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>

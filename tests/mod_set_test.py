@@ -152,6 +152,24 @@ composed("two mods share a free range with disjoint blocks", [code_c, beside])
 doc = rejected_composition("every overlapping pair is listed", "E_SET_EDIT_OVERLAP", [edit_a, over, same])
 cli.check([sorted(v["mods"]) for v in doc.get("violations", [])] == [["edit-a", "edit-over"], ["edit-a", "edit-same"], ["edit-over", "edit-same"]], f"all pairs: {doc.get('violations')}")
 
+# no colliding pair is hidden behind another pair's many ranges
+lines = [f"rev-a u8 0x{0x800 + 2 * k:08x} 0x{ROM[0x800 + 2 * k]:02x} 0x00" for k in range(40)]
+last = f"rev-a u8 0x00000a00 0x{ROM[0xA00]:02x} 0x00"
+many_a = project("many-a", edits="\n".join(lines + [last]) + "\n")
+many_b = project("many-b", edits="\n".join(lines) + "\n")
+many_c = project("many-c", edits=last + "\n")
+doc = rejected_composition("many ranges", "E_SET_EDIT_OVERLAP", [many_a, many_b, many_c], says=("first of 40",))
+cli.check([sorted(v["mods"]) for v in doc.get("violations", [])] == [["many-a", "many-b"], ["many-a", "many-c"]], f"both colliding pairs are listed: {doc.get('violations')}")
+
+# Genesis sound-CPU code: disjoint cartridge bytes assembled for the same sound-RAM address collide; separate addresses compose
+def z80_mod(mod_id, offset, address):
+    return project(mod_id, cpu="z80", asm=f"free * 0x1000 0x100 0xff\norg * 0x{offset:x} at 0x{address:x}\n  ret\n")
+
+
+rejected_composition("the same sound-RAM address", "E_SET_EDIT_OVERLAP", [z80_mod("snd-a", 0x1000, 0x1000), z80_mod("snd-b", 0x1020, 0x1000)], says=("z80.sound_ram address 0x1000", '"snd-a"', '"snd-b"'), mods=["snd-a", "snd-b"])
+doc, _ = composed("separate sound-RAM addresses", [z80_mod("snd-a", 0x1000, 0x1000), z80_mod("snd-c", 0x1020, 0x1100)])
+cli.check(doc.get("write_ranges") == 2, f"only image writes are counted: {doc}")
+
 # expected values are asserted against the PRE-composition original: a mod relying on another's bytes is rejected, in either order
 relies = project("relies-on-a", edits="rev-a u16 0x00000400 0x1111 0x3333\n")
 for order in ([edit_a, relies], [relies, edit_a]):
@@ -386,6 +404,14 @@ built = tmp / "build-out"
 run = cli.run("build", "--rom", ROM_PATH, "--output", built, "--cc", CC, "--runtime-dir", Path(PLATFORMS) / "genesis", "--luau-package", tmp / (needs.name + ".segapatch"), "--luau-identity", I_NEEDS)
 status = (built / "status.json").read_text() if (built / "status.json").exists() else ""
 cli.check(run[0] != 0 and "E_SET_MISSING_DEPENDENCY" in status, f"`segarecomp build` refuses a mod whose requirement it cannot honour: rc={run[0]} {status[-300:]}")
+# every route that RUNS a mod alone refuses an unmet requirement, including the data-only one (built from its effective image by a plain build) and the Luau fixture session
+data_needs = project("needs-data", edits=f"rev-a u8 0x00000700 0x{ROM[0x700]:02x} 0x00\n", extra=dep("base-lib"))
+(data_needs / "tests.toml").write_text('[[scenario]]\nname = "one"\nframes = 1\nbudget = 1000\ntimeout = 30\n')
+run_args = ["--rom", ROM_PATH, "--cc", CC, "--sdk-dir", PLATFORMS]
+for what, target in [("data-only", data_needs), ("Luau", needs)]:
+    refused(f"diff-run of a {what} mod with a requirement", "E_SET_MISSING_DEPENDENCY", "mod", "diff-run", target, *run_args, "--frames", "1", "--budget", "1000", "--timeout", "30")
+refused("mod test of a data-only mod with a requirement", "E_SET_MISSING_DEPENDENCY", "mod", "test", data_needs, *run_args)
+refused("a fixture session of a mod with a requirement", "E_SET_MISSING_DEPENDENCY", "mod", "session", needs, "--rom", ROM_PATH, "--frames", "1")
 refused("an unknown identity", "E_NOT_INSTALLED", "mod", "set", "save", "--library", LIB, "--name", "x", "--identity", "0" * 64)
 refused("a package twice", "E_SET_DUPLICATE_MOD", "mod", "set", "save", "--library", LIB, "--name", "x", "--identity", I_EDIT, "--identity", I_EDIT)
 refused("a name with a path", "E_FIELD_VALUE", "mod", "set", "save", "--library", LIB, "--name", "../x", "--identity", I_EDIT)

@@ -273,7 +273,7 @@ const char *durable_file_area(const std::string &name) {
 const char *durable_dir_area(const std::string &name) {
   if (name == "covers") return "covers";
   if (name == "roms") return "managed_roms";
-  if (name == "patches") return "mods";
+  if (name == "patches" || name == "mod-sets") return "mods";   // ADR 0326: stored mod set definitions
   if (name == "saves") return "saves";
   if (name == "sessions") return "recordings";
   return nullptr;

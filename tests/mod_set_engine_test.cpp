@@ -37,7 +37,15 @@ int main() {
   expect(overlaps.size() == 1 && overlaps[0].first.member == 0 && overlaps[0].second.member == 2 && overlaps[0].start == 0x1ff && overlaps[0].end == 0x200, "only the shared bytes of one space overlap, whatever the CPU");
   const std::vector<SetClaim> hooks = {{0, "cartridge-image", "m68k", "hook-site", 0, 2}, {1, "cartridge-image", "m68k", "hook-site", 0, 2}, {1, "cartridge-image", "m68k", "write", 4, 8}, {1, "cartridge-image", "m68k", "write", 5, 6}};
   expect(find_overlaps(hooks).empty(), "two hook sites are not judged here (hook ownership is SEG-141-T003), and a member never conflicts with itself");
-  expect(find_overlaps(std::vector<SetClaim>{{0, "s", "", "write", 0, 9}, {1, "s", "", "write", 0, 9}, {2, "s", "", "write", 0, 9}}, 2).size() == 2, "the report is bounded");
+  std::vector<SetClaim> crowded;   // many colliding ranges of one pair must never hide another pair
+  for (std::uint64_t k = 0; k < 4096; ++k) { crowded.push_back({0, "s", "", "write", k * 4, k * 4 + 2}); crowded.push_back({1, "s", "", "write", k * 4, k * 4 + 2}); }
+  crowded.push_back({0, "s", "", "write", 100000, 100002});
+  crowded.push_back({2, "s", "", "write", 100001, 100003});
+  const std::vector<SetOverlap> grouped = find_overlaps(crowded);
+  expect(grouped.size() == 2 && grouped[0].second.member == 1 && grouped[0].ranges == 4096 && grouped[0].start == 0 && grouped[1].second.member == 2 && grouped[1].start == 100001 && grouped[1].ranges == 1,
+         "one entry per colliding pair, with the number of ranges and the lowest one");
+  const std::vector<SetOverlap> nested = find_overlaps(std::vector<SetClaim>{{1, "s", "", "write", 0, 50}, {0, "s", "", "write", 10, 12}, {0, "s", "", "write", 40, 60}});
+  expect(nested.size() == 1 && nested[0].first.member == 0 && nested[0].start == 10 && nested[0].end == 12 && nested[0].ranges == 2, "a containing range collides with every range inside it, and the lower member is first");
 
   // source identity: cartridge image + mapper configuration, or disc identity + BIOS requirement
   const SetSource plain{"cartridge-image", std::string(64, '1'), "", "", ""}, mapped{"cartridge-image", std::string(64, '1'), "sega", "", ""};
