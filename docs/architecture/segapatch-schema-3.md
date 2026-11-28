@@ -76,13 +76,13 @@ A package MAY contain any set of payloads that is legal for its platform, subjec
 | `native-c11` (1) | genesis (ABI 2), master-system and sega-cd (typed feature tables, SEG-146-T003) | portable C11 source files compiled by the product into the Patched program | **native** | `role` (`provider`) | <= 64 files, each <= 256 KiB, total <= 2 MiB |
 | `luau-source` (1) | genesis, master-system, sega-cd | Luau source; bytecode is produced only by the pinned trusted compiler at build (Luau policy) | luau | `role` (`script`) | <= 64 files, each <= 128 KiB, total <= 1 MiB |
 | `asset` (1) | all | declared binary asset | data | `asset_class` and class fields (below) | <= 128 assets, each <= 8 MiB |
-| `disc-extent-edit` (reserved) | sega-cd | layout-preserving file/extent edit | data | defined by SEG-148-T001 | independent disc cap (section 7) |
+| `disc-extent-edit` (1) | sega-cd | layout-preserving file/extent edit, optionally declared as a main-CPU code patch (ADR [0328](../decisions/0328-sega-cd-disc-extent-edits-and-main-m68k-patching.md)) | data | `target`, `track?`, `iso_file?`, `start`, `length`, `original_sha256`, `replacement`, `code_cpu?` + `load_address?` | 128 MiB each, 512 MiB total |
 | `disc-track-replace` (reserved) | sega-cd | track-content replacement | data | defined by SEG-145-T005 within SEG-148-T001 | independent disc cap |
 | `guest-asm` (1) | genesis, master-system | guest assembly source text, assembled at build time by the in-tree bounded assembler (ADR 0292); at most one per package | data | `cpu` (`m68k` \| `z80`) | <= 1 MiB total with `guest-code` |
 
 A reserved kind is **parseable** (its envelope is validated) and **rejected** with `E_PAYLOAD_KIND_RESERVED` until its adapter exists. A kind that is not in this table is `E_PAYLOAD_KIND_UNKNOWN`. A known kind with an unlisted
 `kind_version` is `E_PAYLOAD_VERSION_UNKNOWN`. Platform-scoped means: a kind used on a platform not listed for it is `E_PAYLOAD_PLATFORM`. Examples: `guest-code` with `cpu` `z80` is legal on `genesis` and `master-system` only
-for the CPUs those machines have; `m68k` guest code on `master-system` is `E_PAYLOAD_PLATFORM`. Per-CPU Sega CD payloads are reserved kinds (above), never `guest-code`.
+for the CPUs those machines have; `m68k` guest code on `master-system` is `E_PAYLOAD_PLATFORM`. On `sega-cd` the consumed kinds are `disc-extent-edit` and main-CPU (`m68k`) `guest-asm` (ADR 0328); `z80` guest code is `unsupported_code_class:z80`; `bps-image`, `rom-edit-set` and `guest-code` are `E_PAYLOAD_PLATFORM`; the other kinds have no Sega CD consumer yet and are `E_PAYLOAD_KIND_RESERVED`.
 
 **Combination rules.** (a) At most one `bps-image` and at most one `rom-edit-set` (`E_PAYLOAD_COMBINATION`; one edit file carries the edits of every revision, so overlap, assertions and the effective digest are judged over one set, ADR 0290); schema 3 v1 allows one image-producing mechanism per package: `bps-image` cannot coexist with `rom-edit-set`, `guest-code` or `guest-asm` (`E_PAYLOAD_COMBINATION`); at most one `guest-asm` per package; `rom-edit-set` and `guest-asm` may coexist (edits, then injected code, then header repair; ADR 0293). (b) `native-c11` requires `abi` and `author`; `abi` without `native-c11` is `E_FIELD_UNKNOWN`. (c) Duplicate `path` is `E_PAYLOAD_DUPLICATE`. (d) Every `capabilities` entry MUST be consistent with the payloads
 (for example `memory.write.*` requires `native-c11` or `luau-source`); an inconsistent declaration is `E_CAPABILITY_INCONSISTENT`.
@@ -102,8 +102,7 @@ including a mixed package (native + Luau + data). Details: [luau-trust-policy.md
 * `{"kind":"cartridge-image","revisions":[{"label":<token>,"sha256":<hex64>[,"mapper":<token>]}, ...]}` for `genesis` and `master-system`. 1 to 16 revisions; each `sha256` is the digest of one exact
   original image; labels are unique tokens; `mapper` is required for `master-system` (`sega` \| `rom_only`, as declared, never inferred, `master-system-machine-contract.md` section 4.1) and forbidden for `genesis`.
   Exact-digest verification is retained: the build requires the supplied image's SHA-256 to equal exactly one declared revision; a title, region or header is never consulted.
-* `{"kind":"disc-image","disc_identity":<hex64>}` for `sega-cd`: **reserved in schema 3**. The disc identity is the SHA-256 normalized text of `segarecomp.disc.v1` (`sega-cd-machine-contract.md` section 9a). The
-  kind is parsed and rejected with `E_SOURCE_KIND_RESERVED` until the Sega CD adapter exists (SEG-148-T001 resolves it: [sega-cd-mod-sources.md](sega-cd-mod-sources.md)).
+* `{"kind":"disc-image","disc_identity":<hex64>}` for `sega-cd`. The disc identity is the SHA-256 normalized text of `segarecomp.disc.v1` (`sega-cd-machine-contract.md` section 9a); the build requires the supplied disc to have exactly that identity (`E_DISC_IDENTITY`; [sega-cd-mod-sources.md](sega-cd-mod-sources.md)). A disc source has no revisions; its symbols carry `cpu` and `module` instead of `revision` (ADR 0328).
 * `bios` (disc platforms only): `{"requirement":"digest"|"class","sha256s":[...]}` or `{"requirement":"class","class":<token>}`. The BIOS is **declared by digest or class, never packaged**; a package that carries a BIOS
   payload is rejected (`E_PAYLOAD_KIND_UNKNOWN`: no BIOS kind exists).
 
@@ -233,8 +232,8 @@ SHA-256 = `15668889b22e0bcc650c597871b0819dc5a35ac3cabbe063acaf43dc0e03f0ef`. Th
 
 Package identity = `1c2ad1354fe66a47ee00336af9b82375859025b8552c22187e24bcf1e24aec30`. (This vector is a *syntactic* identity vector; as a package it is rejected `E_TRUST_UNDECLARED` because it contains a `native-c11` payload without `author` and `abi`, which is also a required negative vector.)
 
-**Negative vectors (each MUST be rejected with the named class):** a duplicate key; `"schema_version":3` with `requires`; `"platform":"saturn"`; `source.kind` `disc-image` on `genesis`; `source.kind` `disc-image` on `sega-cd` (`E_SOURCE_KIND_RESERVED`);
-payload `kind` `disc-extent-edit` (`E_PAYLOAD_KIND_RESERVED`); payload `kind_version` 2 of `native-c11` (`E_PAYLOAD_VERSION_UNKNOWN`); `bps-image` plus `guest-code` (`E_PAYLOAD_COMBINATION`);
+**Negative vectors (each MUST be rejected with the named class):** a duplicate key; `"schema_version":3` with `requires`; `"platform":"saturn"`; `source.kind` `disc-image` on `genesis`; `source.kind` `disc-image` on `sega-cd` without `bios` (`E_FIELD_MISSING`);
+payload `kind` `disc-track-replace` (`E_PAYLOAD_KIND_RESERVED`); payload `kind` `disc-extent-edit` on `genesis` (`E_PAYLOAD_PLATFORM`); payload `kind_version` 2 of `native-c11` (`E_PAYLOAD_VERSION_UNKNOWN`); `bps-image` plus `guest-code` (`E_PAYLOAD_COMBINATION`);
 a payload path with `..` (`E_ARCHIVE_PATH`); an unsorted `capabilities` array; an archive entry not named in `payloads`; a BIOS payload (`E_PAYLOAD_KIND_UNKNOWN`); `native-c11` with `abi.native` 1.
 
 **Regression vectors for schema 1/2.** Every schema 1/2 fixture in `tests/segapatch_package_test.py` and `tests/segapatch_native_package_test.py` MUST keep passing unchanged after schema 3 lands. A schema-1/2-only reader meets a

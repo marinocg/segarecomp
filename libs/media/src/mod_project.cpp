@@ -86,7 +86,7 @@ std::vector<Section> parse_toml(std::string_view text) {
       if (i < line.size() && line[i] != '#') fail("E_MANIFEST_SYNTAX", "mod.toml has text after a table header");
       if (!bare_key(name)) fail("E_MANIFEST_SYNTAX", "a mod.toml table name is invalid");
       const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol" || name == "hook" || name == "scene" || name == "dependency" || name == "incompatibility";
-      if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "build" || name == "geometry" || name == "presentation"))
+      if (repeated != array && (repeated || name == "mod" || name == "target" || name == "bios" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "build" || name == "geometry" || name == "presentation"))
         fail("E_MANIFEST_SYNTAX", "the table [" + name + "] must be written " + (repeated ? "as [[" + name + "]]" : "as [" + name + "]"));
       if (!array) for (const Section &s : sections) if (s.name == name) fail("E_MANIFEST_SYNTAX", "mod.toml repeats the table [" + name + "]");
       sections.push_back(Section{name, array, {}});
@@ -165,6 +165,7 @@ std::size_t source_limit(const std::string &kind) {
   if (kind == "bps-image") return kMaxImageBytes;
   if (kind == "rom-edit-set") return kMaxRomEditBytes;
   if (kind == "guest-code" || kind == "guest-asm") return kMaxGuestCodeBytes;
+  if (kind == "disc-extent-edit") return kMaxDiscPayloadBytes;
   if (kind == "native-c11") return kMaxNativeFileBytes;
   if (kind == "luau-source") return kMaxLuauFileBytes;
   return kMaxAssetBytes;
@@ -181,6 +182,18 @@ bool project_path_ok(const std::string &p) {   // same rule as a package path: r
     if (slash == std::string::npos) return true;
     start = slash + 1;
   }
+}
+
+bool hex_address(const std::string &text, std::uint32_t &out) {   // "0x" + 1..8 lower-case hex digits
+  if (text.size() < 3 || text.size() > 10 || text.compare(0, 2, "0x") != 0) return false;
+  std::uint64_t value = 0;
+  for (std::size_t i = 2; i < text.size(); ++i) {
+    const char c = text[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    value = value * 16 + static_cast<std::uint64_t>(c <= '9' ? c - '0' : c - 'a' + 10);
+  }
+  out = static_cast<std::uint32_t>(value);
+  return true;
 }
 
 Project build_project(const std::vector<Section> &sections, FileReader read, void *context) {
@@ -211,6 +224,12 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       m.source_kind = s.find("kind") != nullptr ? text_of(s, "kind") : std::string(a->source_kind);
       m.disc_identity = text_of(s, "disc_identity", false);
       have_target = true;
+    } else if (s.name == "bios") {   // ADR 0287: the declared BIOS requirement of a disc target; a BIOS is never packaged
+      only(s, {"requirement", "sha256s", "class"});
+      m.bios_requirement = text_of(s, "requirement");
+      m.bios_class = text_of(s, "class", false);
+      m.bios_sha256s = list_of(s, "sha256s");
+      std::sort(m.bios_sha256s.begin(), m.bios_sha256s.end());
     } else if (s.name == "target.revision") {
       only(s, {"label", "sha256", "mapper"});
       Revision r;
@@ -260,7 +279,10 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       only(s, {"widescreen", "side_style"});
       m.default_widescreen = text_of(s, "widescreen", false); m.default_side_style = text_of(s, "side_style", false);
     } else if (s.name == "source") {
-      only(s, {"kind", "path", "target_sha256", "edits", "cpu", "role", "asset_class", "format", "width", "height", "audio_format", "sample_rate", "channels", "frames", "loop_start", "loop_end"});
+      if (s.find("kind") != nullptr && s.find("kind")->text == "disc-extent-edit")
+        only(s, {"kind", "path", "target", "track", "iso_file", "start", "length", "original_sha256", "replacement", "code_cpu", "load_address"});
+      else
+        only(s, {"kind", "path", "target_sha256", "edits", "cpu", "role", "asset_class", "format", "width", "height", "audio_format", "sample_rate", "channels", "frames", "loop_start", "loop_end"});
       if (++sources > kMaxPayloads) fail("E_PAYLOAD_CAP", "a project declares too many sources");
       Payload p;
       p.kind = text_of(s, "kind"); p.path = text_of(s, "path");
@@ -277,6 +299,20 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       p.width = number_of(s, "width", false); p.height = number_of(s, "height", false); p.audio_format = text_of(s, "audio_format", false);
       p.sample_rate = number_of(s, "sample_rate", false); p.channels = number_of(s, "channels", false); p.frames = number_of(s, "frames", false);
       if (s.find("loop_start") != nullptr || s.find("loop_end") != nullptr) { p.has_loop = true; p.loop_start = number_of(s, "loop_start"); p.loop_end = number_of(s, "loop_end"); }
+      if (p.kind == "disc-extent-edit") {
+        p.disc_target = number_of(s, "target");
+        if (s.find("track") != nullptr) { p.has_disc_track = true; p.disc_track = number_of(s, "track"); }
+        p.iso_file = text_of(s, "iso_file", false);
+        p.disc_start = number_of(s, "start");
+        p.replacement = s.find("replacement") != nullptr ? text_of(s, "replacement") : "inline";
+        // An inline replacement's length is its file size (a stated length must agree); a BPS delta states the length of the range it replaces.
+        p.disc_length = s.find("length") != nullptr || p.replacement == "bps" ? number_of(s, "length") : p.size;
+        p.original_sha256 = text_of(s, "original_sha256");
+        p.code_cpu = text_of(s, "code_cpu", false);
+        const bool has_load = s.find("load_address") != nullptr;
+        if (has_load && !hex_address(text_of(s, "load_address"), p.load_address)) fail("E_FIELD_VALUE", "load_address is a string \"0x\" followed by 1 to 8 lower-case hex digits");
+        if (auto r = check_disc_payload(p, s.find("code_cpu") != nullptr, has_load, s.find("iso_file") != nullptr)) fail(r->code, r->message);
+      }
       project.files[p.path] = *bytes;
       m.payloads.push_back(std::move(p));
     } else if (s.name == "audio.mapping") {
@@ -299,21 +335,15 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       mappings.push_back(std::move(mp));
       last_mapping = &s;
     } else if (s.name == "symbol") {   // ADR 0290: one [[symbol]] per (name, revision); the address is a hex string because mod.toml integers are 31-bit decimal
-      only(s, {"name", "revision", "address", "provenance"});
+      only(s, {"name", "revision", "address", "provenance", "cpu", "module"});
       if (m.symbols.size() >= kMaxSymbols) fail("E_FIELD_VALUE", "a project declares too many symbols");
       Symbol y;
-      y.name = text_of(s, "name"); y.revision = text_of(s, "revision"); y.provenance = text_of(s, "provenance");
-      const std::string address = text_of(s, "address");
-      bool hex = address.size() > 2 && address.size() <= 10 && address.compare(0, 2, "0x") == 0;
-      std::uint64_t value = 0;
-      for (std::size_t i = 2; hex && i < address.size(); ++i) {
-        const char c = address[i];
-        hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-        if (hex) value = value * 16 + static_cast<std::uint64_t>(c <= '9' ? c - '0' : c - 'a' + 10);
-      }
-      if (!hex) fail("E_FIELD_VALUE", "a symbol address is a string \"0x\" followed by 1 to 8 lower-case hex digits");
+      y.name = text_of(s, "name"); y.revision = text_of(s, "revision", false); y.provenance = text_of(s, "provenance");
+      y.cpu = text_of(s, "cpu", false); y.module = text_of(s, "module", false);
+      std::uint32_t value = 0;
+      if (!hex_address(text_of(s, "address"), value)) fail("E_FIELD_VALUE", "a symbol address is a string \"0x\" followed by 1 to 8 lower-case hex digits");
       if (value >= kMaxImageBytes) fail("E_FIELD_VALUE", "a symbol address must lie inside the largest supported image (below 0x01000000)");
-      y.address = static_cast<std::uint32_t>(value);
+      y.address = value;
       if (!symbol_name_ok(y.name)) fail("E_FIELD_VALUE", "a symbol name must be a token of 1 to 64 characters");
       m.symbols.push_back(std::move(y));
     } else if (s.name == "hook") {   // ADR 0298: one [[hook]] per declaration; `writes` and `cost` form the replacement contract of a replace hook
@@ -352,6 +382,22 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   if (!have_target) fail("E_FIELD_MISSING", "mod.toml needs a [target] table");
   if (m.revisions.empty() && m.source_kind == "cartridge-image") fail("E_SOURCE_DIGEST", "a cartridge-image target needs at least one [[target.revision]] with an exact digest");
   if (m.source_kind == "disc-image" && !m.revisions.empty()) fail("E_FIELD_UNKNOWN", "a disc-image target has no revisions");
+  if (m.source_kind != "disc-image" && !m.bios_requirement.empty()) fail("E_FIELD_UNKNOWN", "[bios] exists only for a disc-image target");
+  if (m.source_kind == "disc-image") {   // the same declaration checks the package reader runs (it re-reads the packed manifest too)
+    if (m.bios_requirement.empty()) fail("E_FIELD_MISSING", "a disc-image target needs [bios]");
+    if (m.bios_requirement == "digest" && !m.bios_class.empty()) fail("E_FIELD_UNKNOWN", "a digest bios requirement has no class");
+    if (m.bios_requirement == "class" && !m.bios_sha256s.empty()) fail("E_FIELD_UNKNOWN", "a class bios requirement has no sha256s");
+    if (auto r = check_bios_requirement(m)) fail(r->code, r->message);
+    for (const Symbol &y : m.symbols) {
+      if (!y.revision.empty()) fail("E_SYMBOL_REVISION", "a disc symbol has no revision");
+      if (auto r = check_disc_symbol(y)) fail(r->code, r->message);
+    }
+  } else {
+    for (const Symbol &y : m.symbols) {
+      if (y.revision.empty()) fail("E_FIELD_MISSING", "[symbol] needs \"revision\"");
+      if (!y.cpu.empty() || !y.module.empty()) fail("E_FIELD_UNKNOWN", "cpu and module exist only on disc symbols");
+    }
+  }
   std::sort(m.payloads.begin(), m.payloads.end(), [](const Payload &a, const Payload &b) { return a.path < b.path; });
   m.mappings = std::move(mappings);
   std::sort(m.symbols.begin(), m.symbols.end(), [](const Symbol &a, const Symbol &b) { return std::tie(a.name, a.revision) < std::tie(b.name, b.revision); });

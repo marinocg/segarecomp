@@ -197,6 +197,10 @@ license = "MIT"
 platform = "sega-cd"
 disc_identity = "%s"
 
+[bios]
+requirement = "digest"
+sha256s = ["%s"]
+
 [capabilities]
 required = ["host.log"]
 
@@ -204,11 +208,11 @@ required = ["host.log"]
 id = "h"
 symbol = "fn-a"
 mode = "before"
-''' % ("b" * 64)
+''' % ("b" * 64, "c" * 64)
 d = tmp / "scd"
 write(d / "mod.toml", scd)
 rc, doc, _ = cli.run("mod", "check", d)
-cli.check(rc == 1 and doc and doc.get("class") in ("E_HOOK_OVERLAY_UNRESOLVED", "E_SOURCE_KIND_RESERVED"), f"Sega CD hooks are refused: {doc}")
+cli.check(rc == 1 and doc and doc.get("class") in ("E_HOOK_OVERLAY_UNRESOLVED", "E_SYMBOL_UNKNOWN", "E_CAPABILITY_UNSUPPORTED"), f"Sega CD hooks are refused: {doc}")
 
 # ------------------------------------------------------------------ the register names the manifest accepts equal the runtime masks (function_hooks.h)
 header = open(os.path.join(SDK, "genesis", "runtime", "function_hooks.h")).read()

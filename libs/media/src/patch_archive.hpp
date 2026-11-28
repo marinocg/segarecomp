@@ -23,6 +23,7 @@ struct ZipEntry {
 };
 
 struct ZipPolicy {
+  std::size_t archive_limit = kMaxPackageBytes;     // the whole archive (schema 3 raises it only for a package of disc payloads)
   std::size_t max_entries = kMaxArchiveEntries;
   std::size_t manifest_limit = kMaxManifestBytes;   // per-entry uncompressed limit of manifest.json
   std::size_t entry_limit = kMaxPatchBytes;         // per-entry uncompressed limit of every other entry

@@ -167,7 +167,7 @@ bool read_zip(std::span<const std::uint8_t> z, const ZipPolicy &policy, std::map
   const char *sink = nullptr;
   if (code == nullptr) code = &sink;
   *code = "E_ARCHIVE_ENTRY";
-  if (z.size() < 22 || z.size() > kMaxPackageBytes) { error = "the package is not a valid archive"; return false; }
+  if (z.size() < 22 || z.size() > policy.archive_limit) { error = "the package is not a valid archive"; return false; }
   std::size_t eocd = std::string::npos;
   const std::size_t lowest = z.size() > 22 + 65535 ? z.size() - 22 - 65535 : 0;
   for (std::size_t p = z.size() - 22 + 1; p-- > lowest;) {

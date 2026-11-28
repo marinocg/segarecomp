@@ -3,6 +3,7 @@ add_library(segarecomp_media
   src/iso9660.cpp
   src/mod_adapter.cpp
   src/mod_audio.cpp
+  src/mod_disc.cpp
   src/mod_edits.cpp
   src/mod_guest.cpp
   src/mod_hooks.cpp

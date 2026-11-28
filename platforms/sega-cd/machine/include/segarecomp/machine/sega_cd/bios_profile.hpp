@@ -116,6 +116,7 @@ struct BiosProfileInputs {
   // partitioned emission (a non-zero partition window). `dynamic_policy` names the build-time candidate policy and enters the program identity.
   std::vector<DynamicImageSpec> dynamic_images;
   std::string dynamic_policy;
+  std::string variant_identity;               // SEG-148-T002 (ADR 0328): the variant key of a Patched build ("" = Vanilla); enters the program identity, so states bind to the variant
   std::string aot_policy;                     // SEG-097-T003: the policy identity of an experimental request ("" = Compatibility); enters the program identity
   bool main_z80 = false;                      // SEG-114 (ADR 0258): the generated main registers the main-side Z80 (scd_z80_ops); the build supplies the Z80 units. Not part of the program identity
 };

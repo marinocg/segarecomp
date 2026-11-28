@@ -221,11 +221,17 @@ name = "CD"
 platform = "sega-cd"
 disc_identity = "%s"
 
+[bios]
+requirement = "digest"
+sha256s = ["%s"]
+
 [[source]]
 kind = "luau-source"
 path = "scripts/main.luau"
-''' % ("a" * 64)
-expect("disc-image targets are reserved, parsed and rejected", ("mod", "check", project("cd-reserved", DISC, {"scripts/main.luau": LUAU})), "E_SOURCE_KIND_RESERVED")
+''' % ("a" * 64, "c" * 64)
+expect("a disc-image target refuses a payload it cannot consume yet", ("mod", "check", project("cd-reserved", DISC, {"scripts/main.luau": LUAU})), "E_PAYLOAD_KIND_RESERVED")
+expect("a disc-image target needs its bios requirement", ("mod", "check", project("cd-nobios", DISC.split("[bios]")[0] + '[[source]]\nkind = "luau-source"\npath = "scripts/main.luau"\n', {"scripts/main.luau": LUAU})), "E_FIELD_MISSING")
+expect("a cartridge target has no [bios]", ("mod", "check", project("cart-bios", FULL + '\n[bios]\nrequirement = "class"\nclass = "x"\n')), "E_FIELD_UNKNOWN")
 expect("a sega-cd target cannot use a cartridge-image source", ("mod", "check", project("cd-cart", DISC.split("disc_identity")[0] + 'kind = "cartridge-image"\n\n[[target.revision]]\nlabel = "r"\nsha256 = "%s"\n\n[[source]]\nkind = "luau-source"\npath = "scripts/main.luau"\n' % SRC_SHA, {"scripts/main.luau": LUAU})), "E_SOURCE_PLATFORM")
 expect("unknown platform is never guessed", ("mod", "check", project("unk", FULL.replace('platform = "genesis"', 'platform = "saturn"'))), "E_PLATFORM_UNKNOWN")
 expect("missing platform is never guessed", ("mod", "check", project("noplat", FULL.replace('platform = "genesis"\n', ""))), "E_FIELD_MISSING")
@@ -252,9 +258,9 @@ gen_rev = REV % ""
 for platform, rev, cap in (("master-system", sms_rev, "frame.vdp"), ("master-system", sms_rev, "hook.function"), ("master-system", sms_rev, "audio.command.send"), ("genesis", gen_rev, "present.transform"),
                            ("genesis", gen_rev, "audio.host.play"), ("genesis", gen_rev, "frame.sms_vdp")):
     expect(f"{platform} with {cap}", ("mod", "check", project(f"cap-{platform}-{cap}", LUAU_PROJECT % (platform, rev, cap), {"scripts/main.luau": LUAU})), "E_CAPABILITY_UNSUPPORTED")
-d = '[target]\nplatform = "sega-cd"\ndisc_identity = "%s"\n' % ("b" * 64)
+d = '[target]\nplatform = "sega-cd"\ndisc_identity = "%s"\n\n[bios]\nrequirement = "digest"\nsha256s = ["%s"]\n' % ("b" * 64, "c" * 64)
 expect("sega-cd with an unsupported capability", ("mod", "check", project("cap-scd", LUAU_PROJECT.replace('[target]\nplatform = "%s"\n%s', d).replace("%s", "frame.vdp"), {"scripts/main.luau": LUAU})), "E_CAPABILITY_UNSUPPORTED")
-expect("sega-cd with a supported capability reaches the reserved source rejection", ("mod", "check", project("cap-scd-log", LUAU_PROJECT.replace('[target]\nplatform = "%s"\n%s', d).replace("%s", "host.log"), {"scripts/main.luau": LUAU})), "E_SOURCE_KIND_RESERVED")
+expect("sega-cd with a supported capability still has no runtime payload consumer", ("mod", "check", project("cap-scd-log", LUAU_PROJECT.replace('[target]\nplatform = "%s"\n%s', d).replace("%s", "host.log"), {"scripts/main.luau": LUAU})), "E_PAYLOAD_KIND_RESERVED")
 expect_ok("genesis keeps its ABI 1 capability names", ("mod", "check", project("cap-gen", LUAU_PROJECT % ("genesis", gen_rev, "frame.vdp"), {"scripts/main.luau": LUAU})))
 expect_ok("an optional unsupported capability is simply not granted", ("mod", "check", project("cap-opt", (LUAU_PROJECT % ("master-system", sms_rev, "host.log")) + '\n', {"scripts/main.luau": LUAU})))
 optional = (LUAU_PROJECT % ("master-system", sms_rev, "host.log")).replace('required = ["host.log"]', 'required = ["host.log"]\noptional = ["frame.vdp"]')

@@ -33,10 +33,10 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | --- | --- | --- | --- | --- |
 | Package identity and build | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/segapatch_package_test.py`, `tests/segapatch_native_package_test.py` |
 | Package identity and build | Master System | supported-with-limitations | supported-and-tested | `tests/mod_sms_test.py`, `tests/mod_sms_native_test.py` |
-| Package identity and build | Sega CD | unsupported | experimental | planned: SEG-148-T002 |
+| Package identity and build | Sega CD | experimental | experimental | `tests/mod_disc_edit_test.py`, `tests/mod_disc_code_test.py` |
 | Guest data/code modifications | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/segapatch_package_test.py` |
 | Guest data/code modifications | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_test.py`, `tests/mod_sms_native_test.py` |
-| Guest data/code modifications | Sega CD | unsupported | experimental | planned: SEG-148-T002 |
+| Guest data/code modifications | Sega CD | experimental | experimental | `tests/mod_disc_edit_test.py`, `tests/mod_disc_code_test.py` |
 | Luau lifecycle and gameplay scripting | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/mod_luau_executable_test.py`, `tests/mod_viewer_gameplay_test.py`, `tests/mod_gameplay_example_test.py` |
 | Luau lifecycle and gameplay scripting | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_lifecycle_test.py`, `tests/mod_platform_conformance_test.cpp` |
 | Luau lifecycle and gameplay scripting | Sega CD | unsupported | experimental | planned: SEG-148-T006 |
@@ -54,7 +54,7 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Function hooks | Sega CD | unsupported | spike-gated (SEG-148-T004) | planned: SEG-148-T008 |
 | Asset authoring | Genesis / Mega Drive | experimental | supported-and-tested | `tests/mod_sources_test.py`, `tests/mod_audio_test.py` |
 | Asset authoring | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_assets_test.py` |
-| Asset authoring | Sega CD | unsupported | supported-with-limitations | planned: SEG-148-T002 |
+| Asset authoring | Sega CD | experimental | supported-with-limitations | `tests/mod_disc_edit_test.py` |
 | Graphics and HUD | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/genesis_native_compat_viewer_sdl_test.c`, `tests/mod_vsprite_viewer_test.py`, `tests/mod_vsprite_wide_test.py`, `tests/mod_vsprite_abi2_test.py` |
 | Graphics and HUD | Master System | supported-with-limitations | supported-with-limitations | `tests/mod_sms_lifecycle_test.py`, `tests/sms_mod_scheduler_test.cpp` |
 | Graphics and HUD | Sega CD | unsupported | experimental | planned: SEG-148-T009 |

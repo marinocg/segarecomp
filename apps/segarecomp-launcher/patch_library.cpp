@@ -38,6 +38,7 @@ PatchPreview verify_mod(const LibraryEntry &entry, const segarecomp::mod::Packag
   out.info.id = m.id; out.info.version = m.version; out.info.name = m.name; out.info.platform = m.platform; out.info.author = m.author; out.info.license = m.license; out.info.identity = mp.identity; out.info.purpose = m.purpose; out.info.requires_capabilities = m.capabilities;
   out.mod_trust = segarecomp::mod::trust_class(m);
   if (entry.platform_id != m.platform) { out.error = refusal_for("it is for a different platform than this game"); return out; }
+  if (m.platform == "sega-cd") { out.error = refusal_for("mods are played for Genesis games only"); return out; }   // ADR 0328: a disc package has no cartridge revision
   bool names_revision = false;
   for (const auto &revision : m.revisions) names_revision = names_revision || revision.sha256 == entry.sha256;
   if (!names_revision) {

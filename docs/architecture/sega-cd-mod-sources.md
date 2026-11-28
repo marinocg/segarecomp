@@ -1,6 +1,6 @@
 # Sega CD mod sources: disc identity, BIOS requirement, payload envelope and layout rules
 
-Status: accepted contract (SEG-148-T001, ADR [0287](../decisions/0287-sega-cd-mod-sources.md)). **This document defines the Sega CD source-identity and disc-payload contract only; it does not implement the Sega CD adapter.** Reserved kinds (`disc-extent-edit`, `disc-track-replace`) and the `disc-image` source kind continue to fail closed (`E_PAYLOAD_KIND_RESERVED`, `E_SOURCE_KIND_RESERVED`) until the implementing task lands: verified extent edits are SEG-148-T002 are SEG-148-T002; the CD-DA mechanism is SEG-145-T005. It amends [schema 3](segapatch-schema-3.md) only through the discriminator
+Status: accepted contract (SEG-148-T001, ADR [0287](../decisions/0287-sega-cd-mod-sources.md)). The `disc-image` source and the `disc-extent-edit` kind are implemented (SEG-148-T002/T003, ADR [0328](../decisions/0328-sega-cd-disc-extent-edits-and-main-m68k-patching.md)), which also fixes the remaining fields of that kind; `disc-track-replace` stays reserved and fails closed (`E_PAYLOAD_KIND_RESERVED`) until the CD-DA mechanism (SEG-145-T005) lands. It amends [schema 3](segapatch-schema-3.md) only through the discriminator
 and the reserved payload kinds that schema 3 already defines. Inputs: `docs/architecture/sega-cd-machine-contract.md` sections 9a and 15, ADR 0129, ADR 0130, [adapters](mod-platform-adapters.md), [gap inventory](modding-platform-gap-inventory.md).
 
 **Ownership (explicit).** SEG-148-T001 (this document) owns **disc identity, the layout-preservation rules and the versioned disc payload envelope**. SEG-145-T005 owns the **CD-DA replacement mechanism** and fills the reserved kind `disc-track-replace` within this contract.
@@ -28,14 +28,14 @@ Dependency direction: `SEG-148-T001 -> SEG-145-T005 -> SEG-145-T006`. SEG-148-T0
 
 ## 3. Payload envelope for disc kinds
 
-Every disc payload is a schema 3 envelope: `{"kind","kind_version","path","size","sha256", ...kind fields}` with `kind` in {`disc-extent-edit`, `disc-track-replace`} (both reserved in schema 3; parseable, rejected until their adapter exists, `E_PAYLOAD_KIND_RESERVED`).
+Every disc payload is a schema 3 envelope: `{"kind","kind_version","path","size","sha256", ...kind fields}` with `kind` in {`disc-extent-edit` (implemented), `disc-track-replace` (reserved: parseable, rejected, `E_PAYLOAD_KIND_RESERVED`)}.
 `kind_version` is exact; an unknown kind or version is rejected, never best-effort parsed. A future validated disc-specific payload is added as a **new kind or a new kind_version**; old readers reject it by class, so no breaking schema revision is required.
 
 **Minimum kind fields every disc kind MUST carry** (their remainder is owned by the kind's task):
 
 | Field | Meaning |
 |---|---|
-| `target` | what is edited: a CUE FILE index (and optionally a track number inside it) |
+| `target` | what is edited: a 0-based CUE FILE index (and optionally a track number inside it) |
 | `start`, `length` | byte range inside the target's file, `length` equals the replacement size exactly |
 | `original_sha256` | digest of the original bytes of that range (a digest only; no original content is stored) |
 | `replacement` | how the new bytes are carried: `inline` (the payload entry holds exactly `length` mod-owned bytes) or `bps` (a BPS delta whose source is the original range and whose target size equals `length`) |
